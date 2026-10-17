@@ -3149,6 +3149,9 @@ class _TriageV2Run(_V2Run):
         super().ask_reply(case, c, tick, hail)
         if had or case.case_id not in self.handles:
             return
+        self.enqueue(case, tick)
+
+    def enqueue(self, case: _Case, tick: int) -> None:
         e = self.entry(case, tick)
         self.queue.push(e)
         self.entries[case.case_id] = e
@@ -3156,6 +3159,11 @@ class _TriageV2Run(_V2Run):
         self.log(tick, TriageEvent.ENQUEUED, e, self.queue.rank(case.case_id))
 
     def triage_admit(self, tick: int) -> None:
+        # 0. any handle opened outside ask_reply (WO-094's carry-over path) queues too.
+        for k in sorted(self.handles, key=_case_sort_key):
+            h, case = self.handles[k], self.cases[k]
+            if k not in self.entries and not h.started and case.state is S.INVESTIGATING:
+                self.enqueue(case, tick)
         # 1. re-key every queued case whose contact got new evidence rows.
         for e in self.queue.ordered():
             case = self.cases[e.case_id]

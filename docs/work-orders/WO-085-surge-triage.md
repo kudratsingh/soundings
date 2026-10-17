@@ -142,7 +142,7 @@ ask (INVESTIGATING admission order, eyes-on allowance) and hand to a person (han
 - §3: `config` (no threshold literal; `config/ladder.yaml` untouched).
 
 ## Done
-PR: see branch PR (wo/085-surge-triage) · Merged commit: see STATE.md · Test summary: 2233 passed, 20 skipped, 4 xfailed before the BT-01 opt-in commit (WO-085: test_triage 34, test_triage_runner 17 incl. 1 recorded xfail, test_triage_rules 7) · STATE.md updated: WO-085 row
+PR: see branch PR (wo/085-surge-triage) · Merged commit: see STATE.md · Test summary: 2548 passed, 21 skipped, 1 xfailed (full suite on main after WO-080/088D/094) (WO-085: test_triage 34, test_triage_runner 17 incl. 1 recorded xfail, test_triage_rules 7) · STATE.md updated: WO-085 row
 
 What landed (all opt-in; `triage=None` keeps v2/v3 byte-identical, proven against `tests/fixtures/triage_catalog_pre_wo085.json` captured on main first):
 - `soundings/triage.py` + `config/triage.yaml` as specified (`OfficerArbiter(cfg, tick_s)`; `TriageRecorder` builds the log; `TriageDecision.kind` names the granted interruption).

@@ -12,16 +12,16 @@
     "v2_nested_log_hash": "2fbe5d426013b807de002b5490b2bd36789863bdf6fd9466ce701b5507b01002",
     "v2_transition_log_hash": "092a9eb93cb70d87bb2ffd9ee17dd3eaa4fc4dc7ac49a990d28eb94b32a73ef6",
     "v3_interruptions": 8,
-    "v3_ladder_log_hash": "adb073a962be7e24da0fae3b358f67a06a2c6ed2dcd0e2f32b854e0f17bad644",
+    "v3_ladder_log_hash": "fd6c82ec699974b0da0746f71c5f6a0af1ea78b4404fae9696a12f58c6811684",
     "v3_transition_log_hash": "092a9eb93cb70d87bb2ffd9ee17dd3eaa4fc4dc7ac49a990d28eb94b32a73ef6"
   },
   "S03": {
     "v2_interruptions": 3,
     "v2_nested_log_hash": "47ea47922c53821646a8fd4a6723ef45c445cabaea979df3efcb75d942a6d6fe",
     "v2_transition_log_hash": "0e4664768a730ef9cdb9e1367a0402785c55324df293858e87209a23e8223795",
-    "v3_interruptions": 3,
-    "v3_ladder_log_hash": "05802bfaae8d46992d23f9dcfa285ced298ac00357ef5922c3a9bfb5bc638533",
-    "v3_transition_log_hash": "0e4664768a730ef9cdb9e1367a0402785c55324df293858e87209a23e8223795"
+    "v3_interruptions": 2,
+    "v3_ladder_log_hash": "77e729702b8c644e355b9d677eedf4db522bfdbd7485211b3035ca406764109e",
+    "v3_transition_log_hash": "c60df232bae5d61bdae5d3ec2abfddffb19d0ebacb2ec24a167ef874103c548e"
   },
   "S04": {
     "v2_interruptions": 1,
