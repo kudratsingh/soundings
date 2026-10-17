@@ -161,7 +161,16 @@ watch and ask (the planner may propose only allowlisted probes at or below the c
 - §2.5: the denylist grep.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see the WO-032 part B PR (part A: #17) · Merged commit: squash on merge · Test summary: 1336 passed (85 test_llm_guard, 9 test_llm_roles, 11 test_probe_planner_llm); the zero-fixture run (`SOUNDINGS_FIXTURE_ROOT=$(mktemp -d)`) also 1336 passed · STATE.md updated: yes (WO-032 row)
+
+Part B (2026-10-17 06:25 PDT, `wo/032-llm-planner-guard`). No model was called; every reply is a hand-written fixture, an empty store or a stub.
+- `soundings/llm/planner.py`: `LlmPlanner(client, *, deterministic=None, weights=None, violations_path=DEFAULT_VIOLATIONS_PATH, call_limit=None)` with `.choose(state, tables, *, table=None, report=None, asset_context=None, when=None)`, `.calls_made(cid)`, `.call_limit`, `.last_outcome`; helpers `probe_terms`, `guard_allowlist`, `remaining_budget`, `guard_context(state)`, `planner_report`, `planner_inputs(state, *, table, report, asset_context)`, `default_when`; constants `LLM_ROLES_DEFAULT = False`, `REASON_LLM_PROPOSAL = "llm_proposal_accepted"`, `POST_GUARD_RECHECK`; runner hook `make_planner(llm_roles=False, *, fixture_store=None, violations_path=..., weights=None) -> Planner`.
+- The deterministic choice is computed first. Fallback choices are that choice with `source="fallback"` and `fallback_reason` in {`replay_miss`, `llm_budget_spent`, a `ViolationCode` value, `post_guard_recheck`}. An accepted reply keeps the deterministic `ranked` list and the probe's gain/score from it, with `reason="llm_proposal_accepted"`, and is re-checked against the ledger, rung and ran probes first.
+- `GuardContext.already_run` = every allowlisted probe `PlannerState.already_ran` reports (`ran_probes` plus this bucket's `run_keys`); `remaining` = `BudgetLedger.remaining(cid)`.
+- `HypothesisWriter` now enforces one call per investigation (per `contact_id`; a second `write` returns the template with `llm_budget_spent`).
+- Fixture keys are unchanged: `tests/llm_cases.PlannerCase.state()` builds the WO-031 `PlannerState` whose `planner_inputs` equal the part A inputs (tested).
+- Tests: `violating_fixtures` and `valid_fixture_accepted`, `no_fixtures_falls_back` and `never_loops` also run through `LlmPlanner`; `catalog_fallback` (S05/11, S07/17: watch sweep, then planner loop; both pick `acoustic_hail`, `second_sensor_dwell`); `tests/test_probe_planner_llm.py` (`outside_allowlist_falls_back`, `llm_budget_property`, post-guard re-check, `make_planner`).
+- Not done here: `runner.py` is untouched (WO-033 owns `run(llm_roles=...)` and calls `make_planner`); the eval/demo CLI `--mode record|live` refusal (exit 3) belongs to WO-051/WO-062.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Approved: `FixtureStore` default root reads `SOUNDINGS_FIXTURE_ROOT` (edit to Phase 0 client.py).

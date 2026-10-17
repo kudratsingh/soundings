@@ -1,8 +1,10 @@
-"""WO-032 part A: prompt builders produce canonical, versioned, hashable inputs."""
+"""WO-032: prompt builders produce canonical, versioned, hashable inputs."""
 
 from __future__ import annotations
 
+from soundings.investigation.probes import ALLOWLIST as PROBE_ALLOWLIST
 from soundings.llm.client import fixture_key
+from soundings.llm.planner import guard_allowlist, guard_context, planner_inputs
 from soundings.llm.roles import (
     HYPOTHESIS_WRITER_PROMPT,
     PROBE_PLANNER_PROMPT,
@@ -103,3 +105,43 @@ def test_prompts_are_clean_and_state_the_limits() -> None:
         assert "rung" in prompt and "approval" in prompt and "tool call" in prompt
     assert "only one allowlisted probe" in PROBE_PLANNER_PROMPT
     assert "outside the eight" in HYPOTHESIS_WRITER_PROMPT
+
+
+def test_inputs_allowlist_equals_wo031_allowlist() -> None:
+    """The allowlist the model sees is WO-031 ``ALLOWLIST`` with its costs, in order."""
+    expected = [
+        {
+            "probe_id": pid.value,
+            "rung_required": spec.rung_required.value,
+            "cost_usd": spec.cost_usd,
+            "latency_s": spec.latency_s,
+            "interruption": spec.interruption,
+        }
+        for pid, spec in PROBE_ALLOWLIST.items()
+    ]
+    state = PLANNER_CASES["valid"].state()
+    assert planner_inputs(state)["allowlist"] == expected
+    assert PLANNER_CASES["valid"].inputs()["allowlist"] == expected
+    assert guard_allowlist() == ALLOWLIST  # the hand-copied section 5 table agrees
+
+
+def test_llm_planner_inputs_match_the_fixture_cases() -> None:
+    """``LlmPlanner`` builds exactly the inputs the hand-written fixtures are keyed on."""
+    for name, case in PLANNER_CASES.items():
+        state = case.state()
+        assert guard_context(state) == case.ctx, name
+        inputs = planner_inputs(
+            state, table=make_table(), report=threat_report(), asset_context=case.asset_context
+        )
+        assert inputs == case.inputs(), name
+        assert fixture_key(ROLE_PROBE_PLANNER, inputs) == fixture_key(
+            ROLE_PROBE_PLANNER, case.inputs()
+        )
+        assert inputs["prompt_version"] == PROMPT_VERSION
+
+
+def test_planner_inputs_deterministic_from_state() -> None:
+    a = planner_inputs(PLANNER_CASES["valid"].state(), asset_context=asset(1.0))
+    b = planner_inputs(PLANNER_CASES["valid"].state(), asset_context=asset(1.0))
+    assert fixture_key(ROLE_PROBE_PLANNER, a) == fixture_key(ROLE_PROBE_PLANNER, b)
+    assert a["evidence"] == []  # no table given: the model sees no rows, not invented ones
