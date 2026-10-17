@@ -24,7 +24,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 
@@ -120,18 +120,32 @@ def _scope(inputs: GuardInputs) -> StandingScope | None:
     return inputs.standing_orders_scope.under(inputs.degraded_reasons)
 
 
+# --- WO-083 begin: _slow_scope_problem extraction (the one named edit outside the block) ---
+def _slow_scope_problem(inputs: GuardInputs) -> tuple[str | None, StandingScope | None]:
+    """The standing-orders half of the slow rung, shared by every slow guard.
+
+    Signed orders, ``slow`` in the scope, the degraded-mode narrowing (``_scope``) and the
+    basin in ``scope.slow.basins``. Returns the first problem, or ``None`` and the scope.
+    """
+    scope = _scope(inputs)
+    if scope is None:
+        return UNSIGNED, None
+    if scope.slow is None:
+        return "slow_not_in_standing_scope", scope
+    if inputs.basin is None:
+        return "unknown_input:basin", scope
+    if inputs.basin not in scope.slow.basins:
+        return "basin_out_of_standing_scope", scope
+    return None, scope
+
+
 def _slow_problem(inputs: GuardInputs, criteria: LadderCriteria) -> tuple[str | None, ActionScope]:
     c = criteria.slow
-    scope = _scope(inputs)
     granted = ActionScope(action=c.action)
-    if scope is None:
-        return UNSIGNED, granted
-    if scope.slow is None:
-        return "slow_not_in_standing_scope", granted
-    if inputs.basin is None:
-        return "unknown_input:basin", granted
-    if inputs.basin not in scope.slow.basins:
-        return "basin_out_of_standing_scope", granted
+    scope_problem, scope = _slow_scope_problem(inputs)
+    if scope_problem is not None or scope is None or scope.slow is None:
+        return scope_problem or UNSIGNED, granted
+    # --- WO-083 end ---
     if inputs.threat_mass is None:
         return "unknown_input:threat_mass", granted
     if inputs.time_to_nearest_critical_asset_s is None:
@@ -418,6 +432,111 @@ def boundary_decision(action: str, inputs: GuardInputs, table: BoundaryTable) ->
     )
 
 
+# --- WO-083 begin: separation ---
+
+
+SeparationId = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+"""A vessel id (``ais-01``) or a plan id (``P-BT01-001``): patterned, never free text."""
+
+
+class SeparationFacts(StrictModel):
+    """The geometry one separation slow advisory rests on (SPEC-LADDER sections 3 and 8).
+
+    ``own`` is the surface vessel (from its AIS-style report), ``other`` the in-water filed
+    job (from its fitted track). Positions are local metres (x east, y north) at the same
+    instant, velocities m/s. ``cpa_m``/``tcpa_s`` are ``cpa_tcpa`` of exactly these values;
+    the thresholds come from ``config/advisories.yaml``. No field holds free text, so no
+    model output can reach this guard (CLAUDE.md 2.2).
+    """
+
+    vessel_id: SeparationId
+    plan_id: SeparationId
+    own_x_m: float
+    own_y_m: float
+    own_vx_mps: float
+    own_vy_mps: float
+    other_x_m: float
+    other_y_m: float
+    other_vx_mps: float
+    other_vy_mps: float
+    velocity_source: Literal["window", "kalman"] = "window"
+    cpa_m: Annotated[float, Field(ge=0.0)]
+    tcpa_s: float
+    separation_m: Annotated[float, Field(gt=0.0)]
+    advisory_window_s: Annotated[float, Field(gt=0.0)]
+
+    @field_validator(
+        "own_x_m",
+        "own_y_m",
+        "own_vx_mps",
+        "own_vy_mps",
+        "other_x_m",
+        "other_y_m",
+        "other_vx_mps",
+        "other_vy_mps",
+        "cpa_m",
+        "tcpa_s",
+        "separation_m",
+        "advisory_window_s",
+        mode="after",
+    )
+    @classmethod
+    def _round(cls, v: float) -> float:
+        return round6(v)
+
+
+def separation_inputs_hash(inputs: GuardInputs, facts: SeparationFacts) -> str:
+    """``stable_hash`` over ``{"guard_inputs": inputs, "separation": facts}``.
+
+    The same mapping is the audit row's ``inputs`` (WO-042 ``guard_decision_payload``), so
+    ``stable_hash(row.payload["inputs"]) == decision.inputs_hash``.
+    """
+    return stable_hash({"guard_inputs": inputs, "separation": facts})
+
+
+def separation_slow_permitted(
+    inputs: GuardInputs, criteria: LadderCriteria, facts: SeparationFacts
+) -> GuardDecision:
+    """May the platform propose a separation slow advisory for ``inputs.basin``?
+
+    The slow rung's standing-orders checks (``_slow_scope_problem``: signed and unexpired
+    orders, ``slow`` in scope, degraded-mode narrowing, basin in ``scope.slow.basins``) with
+    CPA/TCPA in place of the threat_mass and time criteria (DECISIONS 2026-10-17 06:37):
+    ``cpa_m < separation_m`` and ``0 < tcpa_s < advisory_window_s``, strict on every edge.
+    The granted scope (one basin, the orders' ``max_minutes``) is then re-checked with
+    ``scope_exceeded``. The decision is ``GuardName.SLOW_PERMITTED``.
+    """
+    g = GuardName.SLOW_PERMITTED
+    h = separation_inputs_hash(inputs, facts)
+
+    def block(reason: str) -> GuardDecision:
+        return GuardDecision(guard=g, verdict=GuardVerdict.BLOCK, reason=reason, inputs_hash=h)
+
+    problem, scope = _slow_scope_problem(inputs)
+    if problem is not None or scope is None or scope.slow is None:
+        return block(problem or UNSIGNED)
+    if not facts.cpa_m < facts.separation_m:
+        return block("cpa_not_below_separation_m")
+    if not 0.0 < facts.tcpa_s < facts.advisory_window_s:
+        return block("tcpa_outside_advisory_window")
+    granted = ActionScope(
+        action=criteria.slow.action, basin=inputs.basin, max_minutes=scope.slow.max_minutes
+    )
+    check = scope_exceeded(inputs.model_copy(update={"requested": granted}), criteria)
+    if not check.permits:
+        return block(check.reason)
+    return GuardDecision(
+        guard=g,
+        verdict=GuardVerdict.PERMIT,
+        reason="separation_criteria_met",
+        inputs_hash=h,
+        granted_scope=granted,
+    )
+
+
+# --- WO-083 end ---
+
+
 # --- the GuardPort adapter -----------------------------------------------------------------
 
 
@@ -515,3 +634,26 @@ class BoundaryGuards:
         if name in EVIDENCE_GUARDS:
             return evidence_guard(name, ctx)
         return _PURE[name](self.inputs(ctx), self.boundary.criteria)
+
+    # --- WO-083 begin: separation ---
+    def separation_decision(
+        self, facts: SeparationFacts, *, contact_id: str, basin: str, now_s: float
+    ) -> tuple[GuardDecision, GuardInputs]:
+        """``separation_slow_permitted`` for one advisory; the orders are re-checked at
+        ``now_s`` (``status_at``), so an expired epoch blocks, and the degraded reasons
+        narrow the scope through ``effective_scope``. Returns the decision and its inputs.
+        """
+        status = self.status_at(now_s)
+        reasons = self.approver_status.degraded_reasons()
+        inputs = GuardInputs(
+            contact_id=contact_id,
+            now_s=now_s,
+            standing_orders_signed=status.signed,
+            standing_orders_scope=effective_scope(status, reasons),
+            approver_reachable=self.approver_status.reachable,
+            basin=basin,
+            degraded_reasons=reasons,
+        )
+        return separation_slow_permitted(inputs, self.boundary.criteria, facts), inputs
+
+    # --- WO-083 end ---
