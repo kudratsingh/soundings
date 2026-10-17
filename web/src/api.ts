@@ -148,8 +148,9 @@ export interface PhysicsInfo {
   cards: PhysicsCard[]
   nodes: PhysicsNode[]
   ring_class: string
-  sea_state: number
+  sea_state: number | null
   config: string
+  pending: string | null
 }
 
 export const fetchPhysics = () => getJson<PhysicsInfo>('/api/physics')

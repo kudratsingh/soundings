@@ -6,6 +6,10 @@ parameter's value, unit, source and "demo value" label; and the live sensor rang
 the range at which the passive-sonar detection probability is 0.5 for each hydrophone node
 given that node's current ambient noise (base + sea state + nearby vessel transits).
 
+Until part 1 is on main (``soundings/physics.py`` and ``config/physics.yaml``),
+``physics_available()`` is false: there are no cards, the stream sends no rings (the map
+keeps each node's harbor ``range_m``), and the deck keeps its one-line disclaimer.
+
 Nothing here decides anything (CLAUDE.md 2.2): it turns config and observed AIS fixes into
 numbers to draw. Pure and deterministic (CLAUDE.md 2.4): no clock, no RNG, sorted
 iteration, 6-dp rounding at the boundary.
@@ -13,6 +17,8 @@ iteration, 6-dp rounding at the boundary.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,6 +32,7 @@ from soundings.schemas._base import CONFIG_DIR
 from soundings.schemas.harbor import SensorNode, load_harbor
 
 PHYSICS_YAML = CONFIG_DIR / "physics.yaml"
+PENDING_NOTE = "The physics cards arrive with WO-089 part 1 (soundings/physics.py)."
 PHYSICS_HEADING = "Detection model: simulated for this demonstration"
 DEMO_LABEL = "demo value"
 RING_CLASS = "propeller_tonal_present"
@@ -63,6 +70,19 @@ class SensorRange:
             "effective_range_m": self.effective_range_m,
             "nl_db": self.nl_db,
         }
+
+
+def physics_available(path: Path | None = None) -> bool:
+    """True once WO-089 part 1 is on this branch: the module and its config both exist."""
+    return (path or PHYSICS_YAML).is_file() and (
+        importlib.util.find_spec("soundings.physics") is not None
+    )
+
+
+def _physics() -> Any:
+    """``soundings.physics`` (WO-089 part 1), imported by name so this module type-checks
+    and imports before part 1 is on the branch."""
+    return importlib.import_module("soundings.physics")
 
 
 # --- config walking ---------------------------------------------------------------------
@@ -165,7 +185,9 @@ def physics_cards(path: Path | None = None) -> list[dict[str, Any]]:
     """One card per model: name, equation, parameters (value, unit, source, label), and
     what the model does not include. Equations come from ``soundings.physics.model_cards``;
     every number comes from ``config/physics.yaml``."""
-    from soundings.physics import model_cards
+    if not physics_available(path):
+        return []
+    model_cards = _physics().model_cards
 
     data = raw_physics(path)
     out: list[dict[str, Any]] = []
@@ -228,7 +250,10 @@ def node_ranges(
     cfg: Any = None,
 ) -> list[SensorRange]:
     """Each node's ring at the given vessel fixes ``(lat, lon, speed_mps)``, by node id."""
-    from soundings.physics import ambient_noise_db, effective_range_m, load_physics_config
+    phys = _physics()
+    ambient_noise_db = phys.ambient_noise_db
+    effective_range_m = phys.effective_range_m
+    load_physics_config = phys.load_physics_config
 
     inp = inputs or ring_inputs()
     conf = cfg if cfg is not None else load_physics_config()
@@ -268,8 +293,11 @@ def sensor_range_series(
     nodes: Sequence[SensorNode] | None = None,
 ) -> dict[int, list[SensorRange]]:
     """The rings at tick 0 and at every tick where any ring changes (the stream sends
-    these; the screen holds the last one). Without vessels that is tick 0 alone."""
-    from soundings.physics import load_physics_config
+    these; the screen holds the last one). Without vessels that is tick 0 alone; without
+    WO-089 part 1 it is empty."""
+    if not physics_available():
+        return {}
+    load_physics_config = _physics().load_physics_config
 
     hub = list(nodes) if nodes is not None else list(load_harbor().sensor_nodes)
     inp = ring_inputs()
@@ -301,6 +329,8 @@ __all__ = [
     "iter_params",
     "node_ranges",
     "param_row",
+    "PENDING_NOTE",
+    "physics_available",
     "physics_cards",
     "raw_physics",
     "ring_inputs",

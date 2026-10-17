@@ -514,6 +514,11 @@ def ask_line(rep: Report) -> str:
 
 # --- WO-089 begin: physics cards (slide 10) ---
 PHYSICS_SRC = "file:soundings/physics.py#model_cards"
+LEGACY_DETECTION_LINE = (
+    "Detection is simulated for this demonstration: range falloff, noise, track gaps, "
+    "biologic false alarms."
+)
+"""Slide 10's line until WO-089 part 1 (``soundings/physics.py``) is on the branch."""
 
 
 def physics_value(param: dict[str, Any]) -> str:
@@ -526,8 +531,10 @@ def physics_cards_html() -> str:
     """One card per model: its name and equation (from ``model_cards``) and each parameter's
     value and unit from ``config/physics.yaml`` under ``data-src="config:physics.<key>"``,
     with the source in the element's title. Every value is a demo value."""
-    from soundings.physics_view import physics_cards
+    from soundings.physics_view import physics_available, physics_cards
 
+    if not physics_available():
+        return f'<p class="legacy">{esc(LEGACY_DETECTION_LINE)}</p>'
     out: list[str] = []
     for i, card in enumerate(physics_cards()):
         head = f'<h4>{esc(card["name"])}</h4><code class="eq">{esc(card["equation"])}</code>'
@@ -547,13 +554,14 @@ def physics_cards_html() -> str:
 
 def physics_not_modeled() -> str:
     """The union of every card's "what we do NOT model", in card order."""
-    from soundings.physics_view import physics_cards
+    from soundings.physics_view import NOT_MODELED_FLOOR, physics_cards
 
     seen: list[str] = []
     for card in physics_cards():
         for item in card["not_modeled"]:
             if item not in seen:
                 seen.append(item)
+    seen = seen or list(NOT_MODELED_FLOOR)
     return src_span(f"{PHYSICS_SRC}.not_modeled", esc(", ".join(seen)), cls="src text")
 
 

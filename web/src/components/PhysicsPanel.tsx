@@ -13,6 +13,13 @@ const pretty = (name: string) => name.replaceAll('_', ' ').replaceAll('.', ' · 
 
 export default function PhysicsPanel({ physics }: Props) {
   if (!physics) return <p className="small muted">Physics cards are loading.</p>
+  if (physics.pending)
+    return (
+      <div data-testid="physics-panel">
+        <h3>{physics.heading}</h3>
+        <p className="small muted">{physics.pending}</p>
+      </div>
+    )
   return (
     <div data-testid="physics-panel">
       <h3>{physics.heading}</h3>

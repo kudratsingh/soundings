@@ -66,6 +66,17 @@ def _sample(s02: list[StreamEvent]) -> dict[str, StreamEvent]:
         **env, payload=ev.ApprovalResultPayload(request_id="req-1", outcome="timeout")
     )
     out["error"] = ev.ErrorEvent(**env, payload=ev.ErrorPayload(message="x"))
+    # --- WO-089 begin: built when the stream has no rings (WO-089 part 1 not on the branch) ---
+    out.setdefault(
+        "sensor_ranges",
+        ev.SensorRangesEvent(
+            **env,
+            payload=ev.SensorRangesPayload(
+                nodes=[ev.SensorRangeRow(node_id="hyd_1", effective_range_m=400.0, nl_db=70.0)]
+            ),
+        ),
+    )
+    # --- WO-089 end ---
     return out
 
 

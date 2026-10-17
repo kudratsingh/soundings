@@ -526,7 +526,12 @@ def test_pdf_has_eleven_pages(tmp_path: Path) -> None:
 # --- WO-089 begin: slide 10 carries the physics cards, every value from config ---
 # ---------------------------------------------------------------------------
 
-PHYSICS = yaml.safe_load((REPO / "config" / "physics.yaml").read_text())
+PHYSICS_YAML = REPO / "config" / "physics.yaml"
+PHYSICS = yaml.safe_load(PHYSICS_YAML.read_text()) if PHYSICS_YAML.exists() else {}
+needs_physics = pytest.mark.skipif(
+    not (PHYSICS_YAML.exists() and (REPO / "soundings" / "physics.py").exists()),
+    reason="soundings/physics.py and config/physics.yaml land with WO-089 part 1",
+)
 
 
 def _physics_leaves() -> dict[str, Any]:
@@ -535,6 +540,7 @@ def _physics_leaves() -> dict[str, Any]:
     return dict(iter_params(PHYSICS))
 
 
+@needs_physics
 @pytest.mark.parametrize("which", ["page_with", "page_without"])
 def test_physics_cards_replace_the_disclaimer_line(
     which: str, request: pytest.FixtureRequest
@@ -558,6 +564,7 @@ def test_physics_cards_replace_the_disclaimer_line(
         assert item in not_modeled
 
 
+@needs_physics
 def test_physics_values_match_config(page_with: str) -> None:
     leaves = _physics_leaves()
     shown = {
@@ -576,6 +583,19 @@ def test_template_holds_the_physics_keys() -> None:
     t = TEMPLATE.read_text()
     assert "{{ physics_cards }}" in t and "{{ physics_not_modeled }}" in t
     assert "Detection is simulated for this demonstration: range falloff" not in t
+
+
+def test_legacy_line_until_part_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import soundings.physics_view as pv
+
+    monkeypatch.setattr(pv, "physics_available", lambda path=None: False)
+    page = build_deck.build(FIXTURE, tmp_path / "i.html", devpost=None, curve=tmp_path / "x.png")
+    honesty = dict(walk(page).slides)["honesty"]
+    assert build_deck.LEGACY_DETECTION_LINE in honesty
+    for item in ("hydrodynamics", "beam patterns", "multipath", "bottom type"):
+        assert item in honesty
+    assert [name for name, _ in walk(page).slides] == SLIDE_ORDER
+    assert not re.search(r"\d", "".join(walk(page).free_text))
 
 
 # --- WO-089 end ---

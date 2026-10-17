@@ -13,12 +13,16 @@ import yaml
 from fastapi.testclient import TestClient
 
 from soundings.api import create_app
-from soundings.physics_view import NOT_MODELED_FLOOR, iter_params
+from soundings.physics_view import NOT_MODELED_FLOOR, iter_params, physics_available, ring_inputs
 from soundings.schemas.denylist import find_denylisted
 from soundings.schemas.harbor import load_harbor
 
 REPO = Path(__file__).resolve().parent.parent
 PHYSICS_YAML = REPO / "config" / "physics.yaml"
+needs_physics = pytest.mark.skipif(
+    not physics_available(),
+    reason="soundings/physics.py and config/physics.yaml land with WO-089 part 1",
+)
 
 
 @pytest.fixture(scope="module")
@@ -31,6 +35,8 @@ def body() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def raw() -> dict[str, Any]:
+    if not PHYSICS_YAML.exists():
+        pytest.skip("config/physics.yaml lands with WO-089 part 1")
     data: dict[str, Any] = yaml.safe_load(PHYSICS_YAML.read_text(encoding="utf-8"))
     return data
 
@@ -40,6 +46,7 @@ def test_heading_keeps_the_honesty_text(body: dict[str, Any]) -> None:
     assert body["label"] == "demo value"
 
 
+@needs_physics
 def test_cards_have_equation_sources_and_not_modeled(
     body: dict[str, Any], raw: dict[str, Any]
 ) -> None:
@@ -60,6 +67,7 @@ def test_cards_have_equation_sources_and_not_modeled(
             assert item in card["not_modeled"], (card["name"], item)
 
 
+@needs_physics
 def test_every_config_parameter_is_on_a_card(body: dict[str, Any], raw: dict[str, Any]) -> None:
     shown = {p["key"] for c in body["cards"] for p in c["parameters"]}
     for key, node in iter_params(raw):
@@ -67,9 +75,9 @@ def test_every_config_parameter_is_on_a_card(body: dict[str, Any], raw: dict[str
         assert key in shown, f"{key} is in config/physics.yaml but on no card"
 
 
+@needs_physics
 def test_nodes_have_effective_ranges(body: dict[str, Any]) -> None:
     from soundings.physics import effective_range_m, load_physics_config
-    from soundings.physics_view import ring_inputs
 
     harbor_ids = sorted(n.node_id for n in load_harbor().sensor_nodes)
     nodes = body["nodes"]
@@ -105,3 +113,13 @@ def test_about_assumptions_follow_the_detection_model() -> None:
     assert any("SL - TL - NL - DT" in line for line in sonar)
     assert detection_assumptions(SimpleNamespace(model="gaussian")) == list(DETECTION_ASSUMPTIONS)
     assert detection_assumptions(object()) == list(DETECTION_ASSUMPTIONS)
+
+
+def test_pending_without_part_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    import soundings.api_routes.physics as route
+
+    monkeypatch.setattr(route, "physics_available", lambda: False)
+    body = TestClient(create_app()).get("/api/physics").json()
+    assert body["cards"] == [] and body["nodes"] == []
+    assert "WO-089 part 1" in body["pending"]
+    assert "simulated for this demonstration" in body["heading"]

@@ -13,9 +13,11 @@ from fastapi import APIRouter
 
 from soundings.physics_view import (
     DEMO_LABEL,
+    PENDING_NOTE,
     PHYSICS_HEADING,
     RING_CLASS,
     node_ranges,
+    physics_available,
     physics_cards,
     ring_inputs,
 )
@@ -25,6 +27,17 @@ router = APIRouter(tags=["physics"])
 
 
 def physics_payload() -> dict[str, Any]:
+    if not physics_available():
+        return {
+            "heading": PHYSICS_HEADING,
+            "label": DEMO_LABEL,
+            "cards": [],
+            "nodes": [],
+            "ring_class": RING_CLASS,
+            "sea_state": None,
+            "config": "config/physics.yaml",
+            "pending": PENDING_NOTE,
+        }
     inputs = ring_inputs()
     nodes = {n.node_id: n for n in load_harbor().sensor_nodes}
     return {
@@ -38,6 +51,7 @@ def physics_payload() -> dict[str, Any]:
         "ring_class": RING_CLASS,
         "sea_state": inputs.sea_state,
         "config": "config/physics.yaml",
+        "pending": None,
     }
 
 

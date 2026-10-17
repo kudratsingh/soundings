@@ -18,6 +18,7 @@ from soundings.physics_view import (
     VESSEL_FIX_MAX_AGE_S,
     SensorRange,
     node_ranges,
+    physics_available,
     sensor_range_series,
     vessel_fixes_at,
 )
@@ -27,6 +28,10 @@ from soundings.stream.engine import stream_events
 from soundings.stream.events import SensorRangesEvent
 
 REPO = Path(__file__).resolve().parent.parent
+needs_physics = pytest.mark.skipif(
+    not physics_available(),
+    reason="soundings/physics.py and config/physics.yaml land with WO-089 part 1",
+)
 NODES = tuple(load_harbor().sensor_nodes)
 HYD = {n.node_id: n for n in NODES}
 
@@ -49,6 +54,7 @@ def _ring(rings: list[SensorRange], node_id: str) -> float:
     return float(next(r.effective_range_m for r in rings if r.node_id == node_id))
 
 
+@needs_physics
 def test_a_vessel_nearby_raises_noise_and_shrinks_the_ring() -> None:
     calm = node_ranges(NODES)
     lat, lon = _offset("hyd_1", 150.0)
@@ -64,6 +70,7 @@ def test_a_vessel_nearby_raises_noise_and_shrinks_the_ring() -> None:
     assert max(loss, key=lambda k: loss[k]) == "hyd_1"
 
 
+@needs_physics
 def test_closer_vessels_shrink_the_ring_more() -> None:
     radii = []
     for d in (2000.0, 800.0, 300.0, 100.0):
@@ -83,6 +90,7 @@ def test_stale_fixes_stop_counting() -> None:
     assert vessel_fixes_at(track, last_ok + 1, 5.0) == []
 
 
+@needs_physics
 def test_synthetic_transit_shrinks_then_restores_the_ring() -> None:
     """A vessel crossing past hyd_1 at 6 m/s, one AIS report every two 5 s ticks."""
     reports = []
@@ -100,6 +108,7 @@ def test_synthetic_transit_shrinks_then_restores_the_ring() -> None:
     assert sensor_range_series({"v1": reports}, 220, 5.0, NODES) == series
 
 
+@needs_physics
 def test_every_tick_carries_the_rings() -> None:
     stream = stream_events("S02", 3)
     ticks = [e.tick for e in stream if e.type == "tick"]
@@ -134,6 +143,7 @@ def _ring_at(series: dict[int, list[SensorRange]], tick: int, node_id: str) -> f
     return _ring(series[max(t for t in series if t <= tick)], node_id)
 
 
+@needs_physics
 def test_bt01_rings_shrink_during_a_transit() -> None:
     """The owner's exit test: in BT-01 the ring of the node nearest a vessel transit is
     smaller at the transit's closest approach than ten minutes before it."""
@@ -162,3 +172,14 @@ def test_bt01_rings_shrink_during_a_transit() -> None:
     )
     assert r_during < r_before
     assert sensor_range_series(ais, n_ticks, tick_s, NODES) == series
+
+
+def test_no_rings_without_part_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    import soundings.physics_view as pv
+
+    monkeypatch.setattr(pv, "physics_available", lambda path=None: False)
+    lat, lon = _offset("hyd_1", 100.0)
+    assert pv.sensor_range_series({"v1": [Fix(0, lat, lon, 5.0)]}, 10, 5.0, NODES) == {}
+    assert pv.physics_cards() == []
+    stream = stream_events("S02", 3)
+    assert not any(isinstance(e, SensorRangesEvent) for e in stream)
