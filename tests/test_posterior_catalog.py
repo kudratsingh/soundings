@@ -4,7 +4,7 @@ Ground truth is read here only to pick which observed contact to grade; the scor
 the evidence table alone. Registry rows are still Phase 2 placeholders (``unknown``) and
 are skipped. S05 adds the WO-021 acoustic hail (merged on main) on the closing prefix:
 without a hail the closing vehicle is indistinguishable from a filed survey on kinematics
-and acoustics at the WO-012 derived-row confidences (DECISIONS 2026-10-17, WO-030).
+and acoustics at the WO-012 derived-row confidences (DECISIONS 2026-10-16 23:40, WO-030).
 """
 
 from __future__ import annotations

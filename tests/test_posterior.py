@@ -267,7 +267,7 @@ def test_conflict_widens_entropy_wo_order_drift_then_tonal() -> None:
 
     From the base prior the margin collapses (0.255 -> 0.022) but entropy dips 0.09 bits
     because tonal=true also prunes the BIOLOGIC/DEBRIS tail; the posterior stays wide
-    (about 1.95 bits) and the two leaders end nearly tied. See DECISIONS 2026-10-17 WO-030.
+    (about 1.95 bits) and the two leaders end nearly tied. See DECISIONS 2026-10-16 23:40 (WO-030).
     """
     alone = _chain(("drift_consistency", "high"))
     both = _chain(("drift_consistency", "high"), ("propeller_tonal_present", "true"))
