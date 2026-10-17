@@ -173,7 +173,7 @@ watch: detection and range rings. ask: hail latency. No ladder threshold changes
 - §2.2: physics values feed the evidence table only; nothing sets a rung.
 
 ## Done
-PR: #49 (UI half, 4202721) and PR_CODE (code half) · Merged commit: see docs/STATE.md · Test summary (code half, `make check` exit 0): 2023 passed, 8 skipped, 1 xfailed · STATE.md updated: yes
+PR: #49 (UI half, 4202721) and #57 (code half) · Merged commit: see docs/STATE.md · Test summary (code half, `make check` exit 0): 2023 passed, 8 skipped, 1 xfailed · STATE.md updated: yes
 
 Code half (`wo/089c-physics-core-code`):
 - `config/physics.yaml`: every parameter `{value, unit, source, label: demo value}`; tuned SL 130 dB (all classes), alpha 1 dB/km, DT 21.36549 dB, k 2.0 dB, calm NL 56.19331 dB, so the effective range is 400.000008 m and the cut-off 800.000016 m for every class.
