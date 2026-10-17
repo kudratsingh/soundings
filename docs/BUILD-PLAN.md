@@ -1,5 +1,7 @@
 # Build plan — phases, goals, exit tests
 
+> **Revision note (2026-10-17).** Owner decisions after the build opened are recorded in CLAUDE.md §8 "Amendments" (A1–A9) and DECISIONS.md. The original Phase 0–6 text is kept. Phase 7, the revised Phase 8, the Phase 9 twists rule and the work-order numbering are dated sections below; where they differ from older text, the dated sections win.
+
 Clock: build opens Fri Oct 16 ~9:30 PM PT. Submission locks Sat Oct 17 10:00 PM PT. Twists: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM (six hours to respond to each). Finalist deck due Sun 9:00 AM; Devpost links lock Sun 11:00 AM; pitches Sun 1:15 PM.
 
 Each phase is one or more work orders (WOs) under `docs/work-orders/`. A phase is done only when every exit test passes with `MODEL_MODE=replay`. Phases 0–6 are the product. Phase 7 is the owner's Saturday-morning directives (ATC at scale, physics cards). Phase 8 is the submission. Phase 9 is reserved for the twists and runs in parallel. (Until 2026-10-17 the twist section below was headed Phase 7; older work-order text that says "Phase 7 twist proofs" means Phase 9.)
@@ -149,6 +151,60 @@ Addenda: WO-061 (QR code to the registry form), WO-062 (presenter mode, 3:00 sho
 - The catalog S01..S08 expected outcomes do not move. Any move is a spec change, with a line in `docs/log/DECISIONS.md` and an explanation in the PR.
 - `make check` is green with `MODEL_MODE=replay`.
 
+### Phase 7 — ATC at scale: per-WO exit tests, waves and clock (added 2026-10-17)
+
+Sources: owner Phase 7 directives 06:05 and 06:35 PDT (quoted in `docs/STATE.md`), CLAUDE.md §8 A1–A9, the WO files named below, DECISIONS.md rows 2026-10-17 06:37–07:51. Exit tests are listed by command; the full clause text is in each WO file and binds over this summary.
+
+**Product line (CLAUDE.md §8 A9).** Soundings proposes slots and advisories, operators accept, it never steers anything, the work stops at the handoff. No route planning, no commands to contacts or to operators' vehicles. Separation advisories go through `guards.py` like any other `slow`; slot proposals change nothing until an operator accepts. The platform's own responder vehicle is a probe under A2 (WO-088).
+
+**WO-080 Busy Tuesday (BT-01)** · Wave A · depends on WO-010/011/012/020/021/022; rogue `HANDED_OFF` gated on WO-033 runner v2.
+- Goal: a committed, regenerable busy day: 40 filed jobs (one no-show), 3 AIS vessel transits, biologic false alarms at the configured rate, one rogue with S05's definition; opt-in `skip_idle_ticks`.
+- Exit tests: `tests/test_busy_tuesday.py -k filed_cleared` (39 filed CLEARED_AT_ASK, 0 interruptions) · `-k rogue_handed_off` · two runs at seed 7 byte-identical (`-k two_runs` + CLI diff) · `-k runtime` (< 60 s headless, `ticks_stepped < n_ticks`) · `tests/test_vessel_transit.py` (incl. `-k schema_additive`) · `tests/test_generate.py` · `-k false_alarm_rate` · `tests/test_tick_skipping.py` · `-k reacquire_precision` · `-k no_show` · `-k ais_feature` · `tests/test_busy_tuesday_rules.py` (§2.1, §2.2, §2.4, §2.5, §2.6) · `make check`.
+
+**WO-081 conflict detection at filing** · Wave B · depends on WO-020, WO-010, WO-022, WO-080 part A, WO-060 (e2e).
+- Goal: on filing, find every in-force plan overlapping in area, depth band and window; record reason-coded conflicts; both plans `conflicted`; the plan is still accepted and still counts for the matcher.
+- Exit tests: `tests/test_conflicts.py::test_three_way_table` · `tests/test_conflicts_integration.py::test_bt01_filing_under_200ms` · e2e `tests/e2e/test_registry_conflicts.py` (form shows "conflicts with <plan> 14:00-16:00") · `tests/test_conflicts.py`, `tests/test_conflicts_property.py`, `tests/test_conflicts_api.py` · `::test_conflicted_plan_still_clears` · `-k deterministic` · `::test_no_clock_no_model` · denylist grep · `make check`.
+
+**WO-082 slot proposal (CP-SAT)** · Wave C (drop candidate at 3:00 PM) · depends on WO-081, WO-020, WO-022, WO-080 part A, WO-060 (e2e).
+- Goal: for a conflicted plan, propose start shifts minimizing total delay under zone capacity, earliest/latest start and no shift for plans in the water; single worker, fixed seed, 2 s; accept/decline by an operator; nothing sent to any vehicle.
+- Exit tests: `tests/test_slots.py::test_six_plan_optimum` · `-k deterministic` · `tests/test_slots_api.py::test_accept_updates_and_clears` · `::test_decline_changes_nothing` · `::test_infeasible_names_binding` · `tests/test_slots.py`, `tests/test_slots_api.py` · `tests/test_slots_integration.py::test_s01_in_water_plan_kept` · e2e `tests/e2e/test_registry_proposal.py` · `::test_proposal_is_not_control` · `test_no_clock` · denylist grep · `make check`.
+
+**WO-083 separation advisories (CPA/TCPA)** · Wave B · depends on WO-080 part A, WO-041, WO-042 part A, WO-022, WO-012, WO-010 (WO-033 for the gated rogue assertion).
+- Goal: CPA/TCPA per vessel transit × in-water filed job; a `slow` (`advisory_one_basin`) proposed when CPA < `separation_m` and 0 < TCPA < `advisory_window_s`, through the standing-orders guard; every decision audited with its geometry; no ladder state added.
+- Exit tests: `tests/test_cpa.py::test_known_geometry` (1 m / 1 s) · `tests/test_separation.py::test_thresholds` · `tests/test_separation_guard.py::test_blocked_unsigned_or_expired` · `::test_audited_with_inputs` · `test_course_conversion`, `test_properties`, `test_encounter_once`, `test_in_water_jobs`, `test_slow_permitted_unchanged` · `tests/test_separation_bt01.py` (+ `-k deterministic`) · `::test_no_model_imports` · denylist grep · `make check`.
+
+**WO-084 projected tracks (Kalman)** · Wave C (drop candidate at 3:00 PM) · depends on WO-012, WO-011, WO-010.
+- Goal: hand-rolled 2-D constant-velocity Kalman filter per contact: smoothed position, 60 s projection, uncertainty ellipse; `closing_velocity_source` flag.
+- Exit tests: `tests/test_kalman.py::test_straight_track_rmse` · `::test_projection_60s` (< 30 m) · `::test_deterministic` · features/evidence/posterior catalog tests unchanged · `test_ellipse_closed_form`, `test_filter_basics`, `test_projection_view` · `tests/test_kalman_vs_window.py` (+ `::test_flag_on_catalog`) · `::test_no_truth_in_package` · denylist grep.
+
+**WO-085 surge triage queue** · Wave D (pure core may start in Wave B; DECISIONS 06:37) · depends on WO-080 A+B, WO-033, WO-043, WO-031, WO-030, WO-012, WO-011, WO-050, WO-060, WO-061.
+- Goal: under `contact_surge(n)`, investigations and interruptions are allocated in a deterministic priority queue; the rogue is still handed off within budget.
+- Exit tests: `tests/test_triage_runner.py -k rogue_within_budget` · `-k interruptions_per_hour` (surge ≤ no-surge + 1) · `-k order_deterministic` · `tests/test_triage.py -k priority|tie_break|admit|arbiter|config` · `-k catalog_unchanged`, `-k bt01_no_surge`, `-k surge_toggle_wired`, `-k surge_ids_queued` · `tests/test_triage_rules.py` (§2.1, §2.2, §2.4, §2.5, §2.6).
+
+**WO-086 rung ledger + blunt-policy counter + radar styling** · Wave D (pure parts may start in Wave C) · depends on WO-050, WO-051, WO-060, WO-061, WO-080, WO-084.
+- Goal: a live rung ledger beside the map and a red counterfactual "berth closures under the blunt policy" from the `bang` baseline, counted with the eval harness helpers so screen and `report.json` agree.
+- Exit tests: counters match the eval harness for the same run · bang counter increments per unknown contact · no denylist words in labels · Playwright smoke · `tests/test_ledger.py` · `tests/test_ledger_integration.py::test_bt01_story` · determinism · `::test_display_only` · `::test_blunt_labeled_counterfactual` · `pnpm -C web build`, `make check`.
+
+**WO-087 bounded live mode (stage)** · Wave C · depends on WO-032, WO-042, WO-061 (badge).
+- Goal: `MODEL_MODE=live` honors `LIVE_CALL_BUDGET`, 6 s per-call timeout, deterministic fallback on any error, every call audited with its path, UI badge "model: live" / "model: fallback". Built now, enabled only Sunday (A4).
+- Exit tests: `tests/test_live_mode.py -k budget|timeout|error|persisted|ci_refuses|guard_unchanged` · `-k path_recorded` / `-k llm_path` · `tests/test_api_model_mode.py` · S05 seed 11 with budget 0 deterministic · `make check`, denylist clean.
+
+**WO-088 responder platform (mobile probe)** · added 07:45 (CLAUDE.md §8 A1, A2; DECISIONS 07:51) · in flight · WO file not yet on `main`.
+- Goal: one simulated responder vehicle per harbor dispatched **to look** at a contact, at rung ask: standoff ≥ 25 m, geofenced to declared security zones, re-stations if the contact moves, never closes faster than the contact, never between contact and asset, one dispatch per contact; the planner requests a look, never a position (guard-enforced, logged to VIOLATIONS.md).
+- Exit tests: defined by the WO file when written (§7: a WO without exit tests is not a WO).
+
+**WO-089 physics cards (detection model)** · added 07:50, renumbered (CLAUDE.md §8 A1, A3; DECISIONS 07:51, 07:53) · after WO-080 part A · split P1 `wo/089a-physics-core`, P2 `wo/089b-physics-ui-deck` · depends on WO-011, WO-012, WO-021, WO-060, WO-080 part A, WO-088 (battery hook), WO-090 (deck).
+- Goal: passive-sonar-equation detection with sourced "demo value" parameters in `config/physics.yaml`; About → Physics cards; live range rings; deck slide 10. See SPEC-SIM §2a.
+- Exit tests: detection probability monotone in range and in noise; range rings shrink during a BT-01 transit; S07/S08 unchanged in outcome; catalog outcomes unchanged except where the report explains · `tests/test_physics.py` · `tests/test_detection_model_sonar.py` · `tests/test_catalog_outcomes_physics.py` · ring shrink (P2) · S05 seed 11 and BT-01 seed 7 byte-identical · `tests/test_deck.py` (still 11 slides) · About header "simulated for this demonstration", denylist clean · `make check`.
+
+**WO-061 addendum (QR to the registry form)** · Wave C with WO-061 · see the WO-061 "Coordinator addenda (QR code, owner directive 06:05 PDT)" section.
+
+**Waves and clock (owner directive 06:35; STATE.md).**
+- A (now): WO-060, WO-031, WO-080 · B: WO-032, WO-033, WO-081, WO-083 · C: WO-042, WO-043, WO-082, WO-084, WO-087, WO-061 (+QR) · D: WO-051, WO-085, WO-086, WO-062 (demo runner + ≤ 3 min video).
+- **3:00 PM drop rule:** if Wave C is not merged by 3:00 PM, drop WO-082 and WO-084 and report hours saved; never drop exit tests. If WO-082 is dropped the QR addendum shows only the conflict line (DECISIONS 06:37).
+- Clock (Sat 2026-10-17, PDT): freeze non-demo work **18:00**; final video render **20:00**; hard freeze **20:30**; Devpost **21:30**; submission **22:00**.
+
+
 ---
 
 ## Phase 8 — Submission (target: Sat 9:00 PM; hard stop 9:45 PM)
@@ -157,7 +213,7 @@ Addenda: WO-061 (QR code to the registry form), WO-062 (presenter mode, 3:00 sho
 
 **Work orders.** WO-090 deck + Devpost fields; WO-091 README for the review committee; WO-092 mentor brief (owner Phase 8 directive, 2026-10-17 06:45 PT; hourly STATUS lines are coordinator work, not a WO).
 
-**Checklist.** Project name + lens (Crisis Mitigation) + one line · pitch deck · demo video · code repo link · all teammates added · two-line responsible-use note · tools used (including the owner's own open-source agent framework, Anthropic API, OpenSeaMap tiles, Leaflet, FastAPI, any IBM Bob use if claiming that prize) · hardware: n/a.
+**Checklist.** Project name + lens (Crisis Mitigation) + one line · pitch deck · demo video · code repo link · all teammates added · two-line responsible-use note · tools used (including a state-machine agent design the owner has used before, Anthropic API, OpenSeaMap tiles, Leaflet, FastAPI, any IBM Bob use if claiming that prize) · hardware: n/a.
 
 **Exit tests.**
 - `README.md` quickstart works on a fresh clone in < 5 min (`make setup && make demo`).
@@ -167,7 +223,30 @@ Addenda: WO-061 (QR code to the registry form), WO-062 (presenter mode, 3:00 sho
 
 ---
 
-## Phase 9 — Twist responses (runs in parallel: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM)
+## Phase 8 — submission deliverables (revised 2026-10-17)
+
+Sources: owner Phase 8 directive 06:45 PDT (items 1–5, as cited in WO-090/091/092), WO-062 addenda (`docs/work-orders/WO-062-ADDENDUM-video-sound.md`, owner directives ~06:15 PDT), STATE.md fixture-run and budget lines, CLAUDE.md §8 A4. This revises the checklist above; the exit tests above still apply where not replaced.
+
+- **WO-090 deck + Devpost fields.** `make deck` renders an 11-slide 16:9 deck (`docs/deck/index.html`, PDF export) in hub order: Title, The seat and the moment, The ladder, Two lives, Live demo, The boundary table, Evidence, Twists, What it runs on, Honesty + responsible use, Next. Every number comes from `artifacts/eval/report.json`; boundary from `config/ladder.yaml`; twist rows from `docs/DECK-INPUTS.md`; BOM figures labeled estimate (DECISIONS 06:47). No hand-typed figures.
+- **Tools-used line.** Generic: "a state-machine agent design the owner has used before"; no other repository is named or linked anywhere in the submission (owner directive 2026-10-17; CLAUDE.md §8 and WORKFLOW §10).
+- **WO-091 committee README.** `README.md` ≤ 120 lines, two screens: one paragraph, `docs/architecture.svg`, three UI screenshots, quickstart (`make setup && make demo`) verified on a fresh clone, eval and deck locations, honesty section, read-in-order list, repo map. Deadline Sat 18:00.
+- **WO-092 mentor brief.** `docs/MENTOR-BRIEF.md` for the 10:00 sessions: one page per mentor, the one decision we are stuck on, three questions, `make demo` steps to show, files to have open.
+- **WO-062 presenter mode, video, sound** (addenda; split per coordinator notes: WO-062P presenter mode + sound events after WO-060 part A; WO-062 part B recording/VO/YouTube in Wave D after WO-086 and WO-061).
+  - Presenter mode `/?presenter=1`: caption bar, step counter, Space advances, reset to step 0 in < 2 s, replay only.
+  - Shot list (2:50–3:00) in `docs/demo-script.yaml`: cold open 0:00 · problem 0:12 · Busy Tuesday at 20× 0:30 · Harbor Night at 1× 1:00 · twist 1:50 · evidence 2:15 · dual use 2:40.
+  - Recording: Playwright headless Chromium 1920×1080, 30 fps; `artifacts/demo-fallback.mp4` (silent, captions baked in) via bundled imageio-ffmpeg (H.264, yuv420p, CRF 18, AAC, faststart); `artifacts/thumbnail.png` 1280×720.
+  - Voiceover prep: `docs/vo-script.md` (≤ 28 words per 10 s, no vendor names, "simulated" once), `make video-merge VO=…` (−16 LUFS, SFX −22 dB), `docs/youtube.md`; owner records the final take and uploads.
+  - Sound: five < 1 s SFX generated locally (hail ping, advisory chime, hold tone, handoff chime, twist klaxon-lite), fired on audit-log events only.
+  - Deadlines: final render **20:00** (addendum §6). The 16:00 and 18:00 checkpoints come from the coordinator schedule (no DECISIONS row yet).
+- **Hourly STATUS line** (directive item 1): one line per hour in `docs/STATE.md` → "Hourly status": time, merged WOs, ETA, slips.
+- **Fixture run** (the one paid step before Sunday; WO-051 addendum item 1, STATE.md): ~12:30, after BT-01, WO-033 and WO-042 merge; probe_planner + hypothesis_writer over S04–S08 and the BT-01 rogue, sitrep_writer over every handoff scenario (~60 calls); count and dollar estimate from `scripts/paid-run-gate.py`; waits for the owner's exact `approve paid run …` phrase; record once; back to replay. Budget **$15 total** (DECISIONS 06:40). Planner ablation runs after it.
+- **Stage live mode** (WO-087; CLAUDE.md §8 A4): Sunday only, enabled by `approve paid run stage live budget 40`; otherwise `MODEL_MODE=replay`.
+
+---
+
+## Phase 9 — Twists (scored at final submission; no per-twist deadline)
+
+*Heading revised 2026-10-17 (was "Twist responses (runs in parallel: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM)"; CLAUDE.md §8 A8).* Requirement: Twists 2 and 3 each produce a toggle, scenario, or feature with a test.
 
 **Goal.** Each twist response changes the build and ships proof. Pipeline in `docs/TWIST-PLAYBOOK.md`.
 
@@ -186,3 +265,46 @@ Addenda: WO-061 (QR code to the registry form), WO-062 (presenter mode, 3:00 sho
 3. Coverage-gap heatmap: where a contact could approach undetected; "where would two more hydrophones go."
 4. Acoustic classifier on real recordings (ShipsEar / DeepShip) replacing the feature-table stub for the tonal feature. Only if someone is idle; label clearly.
 5. Voice handoff via Retell for the SITREP read-out to the backup approver.
+
+---
+
+## Work-order numbering (added 2026-10-17)
+
+Status lives in `docs/STATE.md` → "Work-order status" (one row per WO); this table is the index only. Numbers follow `docs/work-orders/`, not chat (CLAUDE.md §8 A1).
+
+| WO | title | phase |
+|---|---|---|
+| 000 | repo + scaffold | 0 |
+| 010 | schemas + harbor map | 1 |
+| 011 | sim + scenario catalog | 1 |
+| 012 | evidence table + features | 1 |
+| 020 | registry | 2 |
+| 021 | challenge-response | 2 |
+| 022 | matcher + ask rung | 2 |
+| 030 | posterior | 3 |
+| 031 | probes + planner | 3 |
+| 032 | LLM planner guard | 3 |
+| 033 | investigation machine | 3 |
+| 040 | ladder machine | 4 |
+| 041 | guards + standing orders | 4 |
+| 042 | SITREP + handoff + audit | 4 |
+| 043 | watch after handoff | 4 |
+| 050 | baselines | 5 |
+| 051 | eval harness (+ eval directive addendum) | 5 |
+| 060 | watch-officer UI | 6 |
+| 061 | judge panel (+ QR addendum, model badge) | 6 |
+| 062 | demo runner (+ presenter mode 062P, video, sound) | 6 / 8 |
+| 070 | voice handoff (stretch 5; gated on Phase 6 green) | stretch |
+| 080 | Busy Tuesday scenario BT-01 | 7 |
+| 081 | conflict detection at filing | 7 |
+| 082 | slot proposal (CP-SAT) | 7 |
+| 083 | separation advisories (CPA/TCPA) | 7 |
+| 084 | projected tracks (Kalman) | 7 |
+| 085 | surge triage queue | 7 |
+| 086 | rung ledger + blunt-policy counter + radar styling | 7 |
+| 087 | bounded live mode (stage) | 7 |
+| 088 | responder platform (mobile probe) | 7 |
+| 089 | physics cards (sonar-equation detection) | 7 |
+| 090 | deck + Devpost fields | 8 |
+| 091 | README for the review committee | 8 |
+| 092 | mentor brief | 8 |
