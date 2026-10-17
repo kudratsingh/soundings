@@ -191,7 +191,8 @@ def test_shot_list_loads_with_presenter_fields() -> None:
     for step in script.steps:
         assert step.t and step.caption and step.speed in ("1x", "20x"), step.t
         assert step.say
-    assert [s.speed for s in script.steps] == ["1x", "1x", "20x", "1x", "20x", "1x", "1x"]
+    # WO-062B: Harbor Night (S05) runs at 20x so the hold and the handoff land in the shot.
+    assert [s.speed for s in script.steps] == ["1x", "1x", "20x", "20x", "20x", "1x", "1x"]
     assert script.steps[3].scenario == "S05" and script.steps[3].pause_for_click
     assert script.steps[2].beats == (
         ActionName.FILE_PLAN_QR,
