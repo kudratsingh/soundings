@@ -231,6 +231,10 @@ class RunResult:
     hails: tuple[HailRecord, ...] = ()
     reacquisitions: tuple[ReacquireMatch, ...] = ()
     ticks_stepped: int = 0  # WO-080: ticks the loop ran (< n_ticks when idle ticks skip)
+    # --- WO-085 begin --- (empty unless ScenarioRunner(triage=...))
+    triage_log: tuple[TriageDecision, ...] = ()
+    triage_log_hash: str = ""
+    # --- WO-085 end ---
 
     def case(self, case_id: str) -> CaseResult:
         for c in self.cases:
@@ -396,8 +400,10 @@ class ScenarioRunner:
         hail_cfg: HailConfig | None = None,
         known: KnownOperatorTable | None = None,
         skip_idle_ticks: bool = False,  # WO-080: outcome-identical tick skipping
+        triage: TriageConfig | None = None,  # WO-085: None keeps v2/v3 exactly as merged
     ) -> None:
         self.skip_idle_ticks = skip_idle_ticks
+        self.triage = triage  # WO-085
         self.harbor = harbor if harbor is not None else load_harbor()
         self.scenario = (
             resolve_scenario(scenario, self.harbor) if isinstance(scenario, str) else scenario
@@ -1678,10 +1684,13 @@ class _V2Run(_V1Run):
         advance_responder(self.kit.world, tick, self.kit.rung)  # WO-088D: a point per tick
         super().step(tick)
         self.flush_ladder()
+        self.triage_admit(tick)  # WO-085 seam 1: admissions in queue order (no-op in v2)
         for case_id in sorted(self.handles, key=_case_sort_key):
             handle = self.handles[case_id]
             case = self.cases[case_id]
             if handle.done or case.state is not S.INVESTIGATING:
+                continue
+            if not handle.started and not self.may_start(case_id):  # WO-085: queued
                 continue
             before = len(self.kit.choices)
             cps = handle.step(tick) if handle.started else handle.start(tick)
@@ -1695,6 +1704,20 @@ class _V2Run(_V1Run):
             if handle.done:
                 self.finish(case, handle, tick)
                 self.flush_ladder()
+        self.triage_grant(tick)  # WO-085 seam 2: the officer channel (no-op in v2)
+
+    # --- WO-085 begin --- (hooks; runner v2 admits at once and grants nothing)
+    def triage_admit(self, tick: int) -> None:
+        del tick
+
+    def may_start(self, case_id: str) -> bool:
+        del case_id
+        return True
+
+    def triage_grant(self, tick: int) -> None:
+        del tick
+
+    # --- WO-085 end ---
 
     def finish(self, case: _Case, handle: InvestigationHandle, tick: int) -> None:
         result = handle.result()
@@ -1851,7 +1874,8 @@ class ScenarioRunnerV2(ScenarioRunner):
         """``llm_roles`` defaults to False (DECISIONS 23:05); when on, replay only.
         ``responder`` (WO-088, default None: the catalog run) adds the S02 search beat
         and lets the planner dispatch the responder to look."""
-        run = _V2Run(
+        run_cls = _V2Run if self.triage is None else _TriageV2Run  # WO-085
+        run = run_cls(
             self,
             llm_roles=llm_roles,
             violations_path=violations_path,
@@ -3044,6 +3068,220 @@ def main(argv: Sequence[str] | None = None) -> int:  # type: ignore[no-redef]
 
 # --- WO-043 end: runner v3 ---
 # --- end v3 (WO-043) ---
+
+# --- triage (WO-085) ---
+# --- WO-085 begin: surge triage ---
+# With ``ScenarioRunner(..., triage=TriageConfig)`` runner v2 (and v3, which runs v2) puts
+# every ESCALATE through ``soundings.triage``: the case enters INVESTIGATING as before, but
+# its machine starts only when ``TriageQueue.admit`` gives it one of
+# ``investigation_slots`` (seam 1); the handoff SITREP to the officer, a failed
+# investigation's handoff and every eyes-on look go through ``OfficerArbiter`` (seam 2),
+# and the HANDOFF -> HANDED_OFF transition fires at its grant tick. Triage orders work
+# only: every recommendation still comes from the WO-033 stop rule, nothing is dropped,
+# and ``triage=None`` leaves every log byte-identical (tests/test_triage_runner.py).
+
+from soundings.eval.policies import InterruptionKind  # noqa: E402
+from soundings.triage import (  # noqa: E402
+    OfficerArbiter,
+    TriageConfig,
+    TriageDecision,
+    TriageEntry,
+    TriageEvent,
+    TriageQueue,
+    TriageRecorder,
+    triage_inputs,
+    triage_log_hash_of,
+)
+
+
+class _TriageV2Run(_V2Run):
+    """Runner v2 with the investigation slots and the officer channel in queue order."""
+
+    def __init__(self, runner: ScenarioRunner, **kwargs: Any) -> None:
+        super().__init__(runner, **kwargs)
+        assert runner.triage is not None
+        self.tcfg: TriageConfig = runner.triage
+        self.queue = TriageQueue()
+        self.arbiter = OfficerArbiter(self.tcfg, self.tick_s)
+        self.recorder = TriageRecorder()
+        self.running: set[str] = set()
+        self.admitted: set[str] = set()
+        self.row_counts: dict[str, int] = {}
+        self.entries: dict[str, TriageEntry] = {}
+        self.eyes_seen: dict[str, int] = {}
+        self.awaiting: dict[str, tuple[_Case, InvestigationHandle]] = {}
+        self.deferred_logged: set[tuple[str, str, int]] = set()
+        self.kit.planner_adapter.eyes_on_gate = self.eyes_on_allowed
+
+    # --- inputs -----------------------------------------------------------------------------
+
+    def entry(self, case: _Case, tick: int) -> TriageEntry:
+        inputs = triage_inputs(
+            self.table,
+            case.contact_id,
+            case.case_id,
+            tick,
+            self.kit.tables,
+            self.kit.prior_cfg,
+            self.tcfg,
+        )
+        return TriageEntry.of(inputs, self.tcfg)
+
+    def log(self, tick: int, event: TriageEvent, e: TriageEntry, rank: int, **kw: Any) -> None:
+        self.recorder.record(
+            tick,
+            event,
+            case_id=e.case_id,
+            contact_id=e.contact_id,
+            priority=e.priority,
+            rank=rank,
+            evidence_row_ids=e.inputs.evidence_row_ids,
+            **kw,
+        )
+
+    def eyes_on_allowed(self, contact_id: str, tick: int) -> bool:
+        return self.arbiter.eyes_on_allowed(self.active_case.get(contact_id, contact_id), tick)
+
+    # --- seam 1: the queue --------------------------------------------------------------------
+
+    def ask_reply(self, case: _Case, c: _Contact, tick: int, hail: HailResult) -> None:
+        had = case.case_id in self.handles
+        super().ask_reply(case, c, tick, hail)
+        if had or case.case_id not in self.handles:
+            return
+        self.enqueue(case, tick)
+
+    def enqueue(self, case: _Case, tick: int) -> None:
+        e = self.entry(case, tick)
+        self.queue.push(e)
+        self.entries[case.case_id] = e
+        self.row_counts[case.case_id] = len(self.table.for_contact(case.contact_id))
+        self.log(tick, TriageEvent.ENQUEUED, e, self.queue.rank(case.case_id))
+
+    def triage_admit(self, tick: int) -> None:
+        # 0. any handle opened outside ask_reply (WO-094's carry-over path) queues too.
+        for k in sorted(self.handles, key=_case_sort_key):
+            h, case = self.handles[k], self.cases[k]
+            if k not in self.entries and not h.started and case.state is S.INVESTIGATING:
+                self.enqueue(case, tick)
+        # 1. re-key every queued case whose contact got new evidence rows.
+        for e in self.queue.ordered():
+            case = self.cases[e.case_id]
+            if case.state is not S.INVESTIGATING:
+                self.queue.remove(e.case_id)
+                self.log(tick, TriageEvent.REMOVED, e, -1)
+                continue
+            n = len(self.table.for_contact(e.contact_id))
+            if n == self.row_counts.get(e.case_id):
+                continue
+            self.row_counts[e.case_id] = n
+            new = self.entry(case, tick)
+            self.entries[e.case_id] = new
+            if (
+                new.priority != e.priority
+                or new.inputs.evidence_row_ids != e.inputs.evidence_row_ids
+            ):
+                self.queue.rekey(new)
+                if new.priority != e.priority:
+                    self.log(tick, TriageEvent.REKEYED, new, self.queue.rank(e.case_id))
+        # 2. free the slots of machines that stopped or failed.
+        for k in sorted(self.running, key=_case_sort_key):
+            if self.handles[k].done or self.cases[k].state is not S.INVESTIGATING:
+                self.running.discard(k)
+        # 3. admit in queue order.
+        free = self.tcfg.investigation_slots - len(self.running)
+        for rank, e in enumerate(self.queue.admit(free)):
+            self.running.add(e.case_id)
+            self.admitted.add(e.case_id)
+            self.log(tick, TriageEvent.ADMITTED, e, rank)
+
+    def may_start(self, case_id: str) -> bool:
+        return case_id in self.admitted
+
+    # --- seam 2: the officer channel ----------------------------------------------------------
+
+    def collect_eyes(self, case_id: str, tick: int) -> None:
+        handle = self.handles[case_id]
+        machine = handle.machine
+        if machine is None:
+            return
+        n = machine.ledger.interruptions
+        seen = self.eyes_seen.get(case_id, 0)
+        e = self.entries[case_id]
+        for _ in range(n - seen):
+            self.arbiter.request(
+                case_id, InterruptionKind.EYES_ON, tick, e.priority, contact_id=e.contact_id
+            )
+        self.eyes_seen[case_id] = n
+
+    def finish(self, case: _Case, handle: InvestigationHandle, tick: int) -> None:
+        self.collect_eyes(case.case_id, tick)
+        result = handle.result()
+        rec = result.recommendation
+        prio = self.entries[case.case_id].priority
+        if (
+            result.state is InvestigationState.STOPPED
+            and rec is not None
+            and rec.outcome is StopOutcome.HANDOFF
+        ):
+            # The handoff SITREP reaches the officer at its grant tick (never refused).
+            self.awaiting[case.case_id] = (case, handle)
+            self.arbiter.request(
+                case.case_id, InterruptionKind.HANDOFF, tick, prio, contact_id=case.contact_id
+            )
+            return
+        super().finish(case, handle, tick)
+        if case.state is S.FAILED:  # a failed investigation goes to a person
+            self.arbiter.request(
+                case.case_id, InterruptionKind.HANDOFF, tick, prio, contact_id=case.contact_id
+            )
+
+    def triage_grant(self, tick: int) -> None:
+        for k in sorted(self.handles, key=_case_sort_key):
+            if k in self.entries:
+                self.collect_eyes(k, tick)
+        for g in self.arbiter.grant_due(tick):
+            e = self.entries[g.case_id]
+            self.recorder.record(
+                tick,
+                TriageEvent.GRANTED,
+                case_id=g.case_id,
+                contact_id=g.contact_id,
+                priority=g.priority,
+                rank=0,
+                evidence_row_ids=e.inputs.evidence_row_ids,
+                kind=g.kind.value,
+            )
+            if g.kind is InterruptionKind.HANDOFF and g.case_id in self.awaiting:
+                case, handle = self.awaiting.pop(g.case_id)
+                _V2Run.finish(self, case, handle, tick)
+                self.flush_ladder()
+        for rank, p in enumerate(self.arbiter.pending):
+            key = (p.case_id, p.kind.value, p.requested_tick)
+            if key in self.deferred_logged:
+                continue
+            self.deferred_logged.add(key)
+            self.recorder.record(
+                tick,
+                TriageEvent.DEFERRED,
+                case_id=p.case_id,
+                contact_id=p.contact_id,
+                priority=p.priority,
+                rank=rank,
+                evidence_row_ids=self.entries[p.case_id].inputs.evidence_row_ids,
+                kind=p.kind.value,
+            )
+
+    def active(self) -> bool:
+        return super().active() or bool(self.arbiter.pending) or bool(self.awaiting)
+
+    def result(self) -> RunResultV2:
+        base = super().result()
+        log = tuple(self.recorder.decisions)
+        return dataclasses.replace(base, triage_log=log, triage_log_hash=triage_log_hash_of(log))
+
+
+# --- WO-085 end: surge triage ---
 
 # --- sim_likelihoods (WO-051) ---
 # ``ScenarioRunner(..., sim_likelihoods=None, stopping=None)``: both default to None, which

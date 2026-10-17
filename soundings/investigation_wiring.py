@@ -417,6 +417,7 @@ class PlannerAdapter:
         self.tables = tables
         self.label = label
         self.choices: list[RecordedChoice] = []
+        self.eyes_on_gate: Callable[[str, int], bool] | None = None  # WO-085
 
     def next_probe(
         self, table: EvidenceTable, posterior: PosteriorReport, budget: BudgetView, rung: Rung
@@ -440,6 +441,10 @@ class PlannerAdapter:
         ledger = planner_ledger(cid, budget.ledger, budget.limits)
         ledger.seed_dispatches(cid, responder_dispatches(table, cid))
         # --- WO-088 end ---
+        # --- WO-085 begin --- (the officer channel refuses an eyes-on look: no room left)
+        if self.eyes_on_gate is not None and not self.eyes_on_gate(cid, budget.tick):
+            ledger = eyes_on_refused(ledger, cid)
+        # --- WO-085 end ---
         state = PlannerState(
             contact_id=cid,
             posterior=posterior.posterior,
@@ -509,6 +514,23 @@ class PlannerAdapter:
         return choice
 
     # --- WO-088D end ---
+
+
+# --- WO-085 begin ---
+def eyes_on_refused(ledger: BudgetLedger, contact_id: str) -> BudgetLedger:
+    """A copy of ``ledger`` with the contact's interruption budget spent, so the planner
+    picks its next probe or stops (WO-085: the officer channel's eyes-on cap). The
+    per-contact ``BudgetLimits`` are untouched."""
+    out = ledger.copy()
+    c = out.counts(contact_id)
+    limit = out.limits.human_interruptions_per_contact
+    out._counts[contact_id] = c.model_copy(  # noqa: SLF001 - same seeding as planner_ledger
+        update={"interruptions": max(c.interruptions, limit)}
+    )
+    return out
+
+
+# --- WO-085 end ---
 
 
 # --- the writer --------------------------------------------------------------------------

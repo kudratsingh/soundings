@@ -142,7 +142,22 @@ ask (INVESTIGATING admission order, eyes-on allowance) and hand to a person (han
 - §3: `config` (no threshold literal; `config/ladder.yaml` untouched).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see branch PR (wo/085-surge-triage) · Merged commit: see STATE.md · Test summary: 2548 passed, 21 skipped, 1 xfailed (full suite on main after WO-080/088D/094) (WO-085: test_triage 34, test_triage_runner 17 incl. 1 recorded xfail, test_triage_rules 7) · STATE.md updated: WO-085 row
+
+What landed (all opt-in; `triage=None` keeps v2/v3 byte-identical, proven against `tests/fixtures/triage_catalog_pre_wo085.json` captured on main first):
+- `soundings/triage.py` + `config/triage.yaml` as specified (`OfficerArbiter(cfg, tick_s)`; `TriageRecorder` builds the log; `TriageDecision.kind` names the granted interruption).
+- Runner: `ScenarioRunner(..., triage=)`; `_TriageV2Run` in the `# --- triage (WO-085) ---` block, chosen by `ScenarioRunnerV2.run` (v3 runs v2, so it inherits it). Seams in v2: `triage_admit` (re-key, free slots, admit), `may_start`, `triage_grant`; HANDOFF -> HANDED_OFF fires at its grant tick. The planner's eyes-on allowance is `BudgetLedger` plus `eyes_on_allowed` (`investigation_wiring.eyes_on_refused`).
+- Stream: `BatchReplaySource` runs v2 with triage for a scenario carrying `contact_surge` (`surge_runner`); WO-060 part B's `V3Source` (`soundings/stream/v3.py`, the stepped source; there is no `stepped.py`) builds `ScenarioRunnerV3(..., triage=load_triage_config())` for such a run (marked WO-085 block).
+- The audit-key crash triage exposed in S05 (a guard decision with no checkpoint and no action has no contact id) was fixed on main by WO-060B (`unattributed:` prefix); WO-085's own fix was dropped at rebase.
+
+Exit tests (synthetic stand-in `tests/fixtures/triage_bt_synthetic.yaml`, since BT-01 is not on main; v2, seed 7, `llm_roles=False`):
+- rogue_within_budget: passes (lineage end HANDED_OFF at tick 169 vs 120 without surge, slot = 60 ticks; within probe, paid and interruption budgets; before berth arrival).
+- interruptions_per_hour: every interruption is a GRANTED decision (passes). The clause itself fails: 59 vs 9 interruptions in 0.5 h (118/h vs 19/h; 61 vs 9 before WO-089's detection model). Recorded as an imperative xfail with the numbers, not weakened. Cause: the surge's own stop-rule HANDOFFs are mandatory officer interruptions (DECISIONS 06:37: never refused); triage can delay them but not remove them.
+- order_deterministic: passes; the PYTHONHASHSEED 0/1 diff of `tests.support.bt01.main` is empty.
+
+BT-01 probe (PR #33 merged locally, not committed): without surge, triage on equals triage off for the rogue lineage end (HANDED_OFF at tick 5594, a late re-acquired track parked at the berth; the first rogue track hands off at 1797); 176 interruptions in 8 h (22/h). With contact_surge(25): 424 interruptions (53/h), and the lineage end hands off at tick 10375 because the officer channel is saturated (capacity 240 grants in 8 h) and nearly every priority is 0.0 at escalation (time_to_nearest_critical_asset unknown, or not closing for a parked contact), so the order falls back to contact id. Two BT-01 runs take about 7 minutes. Hence `SOUNDINGS_TRIAGE_BT01=1` is opt-in.
+
+Open questions for the coordinator: (1) the interruptions/h clause conflicts with the never-refused handoff ruling under the single interruption definition; (2) the priority formula gives about 0 to a contact parked at an asset (not closing) and to any contact without a time-to-asset row at escalation; (3) v3's ladder approval requests and backup pages are not yet routed through the arbiter (v2's are); (4) S05 with triage on reaches HANDED_OFF but no longer passes through HOLDING (its own eyes-on look takes the officer slot first, so the handoff lands 120 s later).
 
 ## Notes for downstream
 - WO-086: rank and priority per contact are in `RunResult.triage_log`. The UI may show "queue position", but no label may suggest that triage dismissed a contact. Nothing is dismissed.

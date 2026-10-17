@@ -1,0 +1,12 @@
+# Surge triage (WO-085). STRESS-TEST SETTINGS for the demonstration, not operational
+# guidance. When contacts arrive faster than the harbor can look at them, Soundings
+# investigates and interrupts the watch officer in order of urgency:
+#   priority = threat_mass x zone_criticality / max(time_to_nearest_critical_asset, ttc_floor_s)
+# Ties break by contact id. Triage only orders work: it sets no rung and never drops a
+# handoff. The officer's review time per interruption is read from config/eval.yaml
+# (baselines.human_review_s), not copied here.
+ttc_floor_s: 30                       # owner directive: anything closer than this is "now"
+investigation_slots: 4                # investigations running at once
+optional_interruptions_per_hour: 2    # eyes-on looks granted per trailing window
+optional_window_s: 3600               # the trailing window for the eyes-on cap
+unknown_zone_criticality: 1.0         # assumption: an unplaced contact is never starved

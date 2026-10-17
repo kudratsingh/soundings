@@ -233,8 +233,15 @@ class V3Source:
         self.manual = manual
         self.approver = ManualApprover() if manual else None
         vpath = violations_path if violations_path is not None else DEFAULT_VIOLATIONS_PATH
+        # --- WO-085: surge triage --- (a run carrying contact_surge goes through the
+        # triage queue and the officer channel; every other run keeps triage=None)
+        from soundings.triage import load_triage_config
+
+        surge = any(t.name is ToggleName.CONTACT_SURGE for t in scenario.toggles)
+        triage = load_triage_config() if surge else None
+        # --- WO-085 end ---
         with use_kit_client(client):
-            self.rs: RunSession = ScenarioRunnerV3(scenario, seed=req.seed).start(
+            self.rs: RunSession = ScenarioRunnerV3(scenario, seed=req.seed, triage=triage).start(
                 llm_roles=self.run_client.llm_roles,
                 violations_path=vpath,
                 toggles=toggles,
