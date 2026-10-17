@@ -9,6 +9,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,9 @@ from tests.e2e._judge import offline
 REPO = Path(__file__).resolve().parents[2]
 WEB_DIST = REPO / "web" / "dist"
 SHOT = REPO / "artifacts" / "judge-qr.png"
+# Plans are filed for tomorrow: the slot solver never moves a plan into the past, so a
+# fixed afternoon today would turn infeasible once the clock passes it.
+DAY = (date.today() + timedelta(days=1)).isoformat()
 
 
 @pytest.fixture
@@ -73,8 +77,8 @@ def _file_from_phone(browser: Any, url: str, plan_id: str, start: str, end: str)
     phone.fill("#vehicle", "Survey glider")
     phone.fill("#modem_id", "MOD-4401")
     phone.fill("#contact_channel", "sim-phone-judge")
-    phone.fill("#start_at", f"2026-10-17T{start}")
-    phone.fill("#end_at", f"2026-10-17T{end}")
+    phone.fill("#start_at", f"{DAY}T{start}")
+    phone.fill("#end_at", f"{DAY}T{end}")
     phone.fill("#utc_offset", "-07:00")
     with phone.expect_response(lambda r: r.url.endswith("/api/plans") and r.status == 201):
         phone.click("#submit")
@@ -109,8 +113,8 @@ def _api_plan(base: str, plan_id: str, modem: str) -> None:
         "vehicle": f"ROV-{plan_id}",
         "modem_id": modem,
         "area": zone,
-        "start_at": "2026-10-17T14:00:00-07:00",
-        "end_at": "2026-10-17T16:00:00-07:00",
+        "start_at": f"{DAY}T14:00:00-07:00",
+        "end_at": f"{DAY}T16:00:00-07:00",
         "contact_channel": "radio ch 16",
     }
     r = httpx.post(f"{base}/api/plans", json=body)
