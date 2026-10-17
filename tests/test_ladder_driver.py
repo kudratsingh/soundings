@@ -407,3 +407,37 @@ def test_no_model_imports_and_no_wall_clock() -> None:
                     assert alias.name != "time", name
             if isinstance(node, ast.Attribute):
                 assert node.attr not in ("now", "utcnow", "today", "time_ns"), (name, node.attr)
+
+
+# --- WO-043 part B: real catalog scenarios through runner v2 and the driver -----------------
+
+from soundings.eval.catalog_verify import grade  # noqa: E402
+from soundings.runner import ScenarioRunnerV3  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("sid", "state"),
+    [
+        ("S01", LadderState.CLEARED_AT_ASK),
+        ("S02", LadderState.LOST_VEHICLE),
+        ("S07", LadderState.RESOLVED_BENIGN),
+        ("S08", LadderState.HAZARD_NOTICE),
+        ("S05", LadderState.HANDED_OFF),
+    ],
+)
+def test_catalog_through_driver_no_standing_orders(sid: str, state: LadderState) -> None:
+    """``NoStandingOrdersGuards`` (no orders): each Phase 2/3 outcome, and S05 unsigned."""
+    result = ScenarioRunnerV3(sid).run(orders_path=None)
+    assert result.orders == "unsigned"
+    g = grade(result)
+    assert g.terminal_state is state
+    for run in result.ladder.values():
+        assert LadderState.ADVISING_SLOW not in run.visited
+        assert LadderState.HOLDING not in run.visited
+        assert run.interruptions == 0
+
+
+def test_s04_primary_through_driver_resolved_benign() -> None:
+    result = ScenarioRunnerV3("S04").run(orders_path=None)
+    primary = grade(result).lineage[0]
+    assert result.ladder[primary].handling_outcome is LadderState.RESOLVED_BENIGN
