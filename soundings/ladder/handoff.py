@@ -61,8 +61,8 @@ from .audit import (
     AuditLog,
     AuditSink,
     GuardInputsLog,
-    LlmCallPayload,
     SitrepPayload,
+    llm_call_payload,
 )
 from .checkpoint import LadderCheckpoint
 from .sitrep import (
@@ -322,12 +322,15 @@ class HandoffService:
         cid = sitrep.contact_id
         entries: list[AuditEntry] = []
         if outcome.llm_outcome is not None and outcome.fixture_key is not None:
-            call = LlmCallPayload(
+            # --- WO-087 begin: the row carries the call's path, tokens and latency ---
+            call = llm_call_payload(
                 role=ROLE_SITREP_WRITER,
                 fixture_key=outcome.fixture_key,
                 outcome=outcome.llm_outcome,
                 violation_reason=None if outcome.violation is None else outcome.violation.value,
+                call=outcome.call,
             )
+            # --- WO-087 end ---
             call_key = f"{ROLE_SITREP_WRITER}:{cid}:{outcome.fixture_key}"
             entries.append(AuditEntry(AuditKind.LLM_CALL, call, cid, call_key))
         row = SitrepPayload(

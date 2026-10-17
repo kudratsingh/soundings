@@ -42,6 +42,12 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.include_router(runs_router)
     # --- WO-060 end ---
 
+    # --- WO-087 begin: GET /api/model_mode (judge-panel badge; before the web/dist mount) ---
+    from soundings.api_routes.model_mode import router as model_mode_router
+
+    application.include_router(model_mode_router)
+    # --- WO-087 end ---
+
     # --- WO-062P begin: presenter mode (shot list JSON, presenter log) ---
     from soundings.api_routes.presenter import router as presenter_router
 
