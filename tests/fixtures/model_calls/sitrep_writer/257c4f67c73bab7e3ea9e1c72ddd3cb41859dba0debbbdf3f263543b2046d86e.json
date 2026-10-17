@@ -1,0 +1,287 @@
+{
+  "inputs": {
+    "actions_taken": [
+      {
+        "clause": "standing_orders.slow.advisory_one_basin",
+        "evidence_ids": [
+          "c20171b3e787e21f",
+          "508f3db5c760644b",
+          "e6f4094fb892482d"
+        ],
+        "rung": "slow",
+        "t_s": 60.0
+      },
+      {
+        "clause": "standing_orders.hold.hold_one_gate_or_berth",
+        "evidence_ids": [
+          "1df8e52fb033a81b",
+          "b7a9edad651b03c8",
+          "bd8407adb5e1b407"
+        ],
+        "rung": "hold",
+        "t_s": 212.0
+      },
+      {
+        "clause": "approval.hold_longer",
+        "evidence_ids": [
+          "1df8e52fb033a81b",
+          "b7a9edad651b03c8",
+          "bd8407adb5e1b407"
+        ],
+        "rung": "hold",
+        "t_s": 1172.0
+      }
+    ],
+    "approver_unreachable": false,
+    "contact_id": "c-0005",
+    "decision_row_ids": [
+      "f880a6886de292c8",
+      "19284abbbac3eb5c",
+      "dce973ccf65164df",
+      "ec076befd8f18baa",
+      "edcf2fd4d91c6248",
+      "40dbef3ff25333f3",
+      "7af8cc681c636cfa",
+      "d9579450ed86bf32"
+    ],
+    "evidence_row_count": 1448,
+    "evidence_rows": [
+      {
+        "assumes": "",
+        "feature": "zone_id",
+        "kind": "fact",
+        "row_id": "f880a6886de292c8",
+        "source": "sim.detector:hyd_1",
+        "t": 0,
+        "unit": "id",
+        "value": "fuel_berths"
+      },
+      {
+        "assumes": "",
+        "feature": "drift_consistency",
+        "kind": "fact",
+        "row_id": "19284abbbac3eb5c",
+        "source": "probe:drift_check",
+        "t": 1,
+        "unit": "ratio",
+        "value": 0.1
+      },
+      {
+        "assumes": "",
+        "feature": "speed_over_ground",
+        "kind": "fact",
+        "row_id": "dce973ccf65164df",
+        "source": "probe:kinematics_profile",
+        "t": 1,
+        "unit": "m/s",
+        "value": 1.2
+      },
+      {
+        "assumes": "",
+        "feature": "registry_match",
+        "kind": "fact",
+        "row_id": "ec076befd8f18baa",
+        "source": "probe:registry_lookup",
+        "t": 12,
+        "unit": "category",
+        "value": "none"
+      },
+      {
+        "assumes": "",
+        "feature": "hail_reply",
+        "kind": "fact",
+        "row_id": "edcf2fd4d91c6248",
+        "source": "probe:acoustic_hail",
+        "t": 12,
+        "unit": "category",
+        "value": "none"
+      },
+      {
+        "assumes": "",
+        "feature": "zone_criticality",
+        "kind": "fact",
+        "row_id": "508f3db5c760644b",
+        "source": "ladder_monitor",
+        "t": 30,
+        "unit": "ratio",
+        "value": 0.9
+      },
+      {
+        "assumes": "",
+        "feature": "time_to_nearest_critical_asset",
+        "kind": "fact",
+        "row_id": "c20171b3e787e21f",
+        "source": "ladder_monitor",
+        "t": 30,
+        "unit": "s",
+        "value": 450.0
+      },
+      {
+        "assumes": "",
+        "feature": "nearest_asset_id",
+        "kind": "fact",
+        "row_id": "e6f4094fb892482d",
+        "source": "ladder_monitor",
+        "t": 30,
+        "unit": "id",
+        "value": "fuel_berth_1"
+      },
+      {
+        "assumes": "",
+        "feature": "time_to_nearest_critical_asset",
+        "kind": "fact",
+        "row_id": "1df8e52fb033a81b",
+        "source": "ladder_monitor",
+        "t": 106,
+        "unit": "s",
+        "value": 298.0
+      },
+      {
+        "assumes": "",
+        "feature": "zone_criticality",
+        "kind": "fact",
+        "row_id": "b7a9edad651b03c8",
+        "source": "ladder_monitor",
+        "t": 106,
+        "unit": "ratio",
+        "value": 0.9
+      },
+      {
+        "assumes": "",
+        "feature": "nearest_asset_id",
+        "kind": "fact",
+        "row_id": "bd8407adb5e1b407",
+        "source": "ladder_monitor",
+        "t": 106,
+        "unit": "id",
+        "value": "fuel_berth_1"
+      },
+      {
+        "assumes": "",
+        "feature": "nearest_asset_id",
+        "kind": "fact",
+        "row_id": "40dbef3ff25333f3",
+        "source": "ladder_monitor",
+        "t": 585,
+        "unit": "id",
+        "value": "fuel_berth_1"
+      },
+      {
+        "assumes": "",
+        "feature": "time_to_nearest_critical_asset",
+        "kind": "fact",
+        "row_id": "7af8cc681c636cfa",
+        "source": "ladder_monitor",
+        "t": 585,
+        "unit": "s",
+        "value": 0.0
+      },
+      {
+        "assumes": "",
+        "feature": "zone_criticality",
+        "kind": "fact",
+        "row_id": "d9579450ed86bf32",
+        "source": "ladder_monitor",
+        "t": 585,
+        "unit": "ratio",
+        "value": 0.9
+      }
+    ],
+    "label": "stress-test estimate",
+    "missing_features": [
+      "speed_variance",
+      "depth",
+      "depth_variance",
+      "heading_persistence",
+      "turn_rate",
+      "closing_rate_to_nearest_critical_asset",
+      "dwell_time_in_zone",
+      "track_gap_ratio",
+      "loiter_score",
+      "transit_pattern",
+      "propeller_tonal_present",
+      "tonal_band",
+      "cavitation_index",
+      "breathing_or_click_present",
+      "broadband_level",
+      "plan_id",
+      "modem_id",
+      "hail_sent_at",
+      "operator_known",
+      "hour_of_day",
+      "pattern_of_life_anomaly",
+      "ais_surface_correlation",
+      "sensor_health",
+      "visibility_for_camera"
+    ],
+    "posterior": {
+      "BIOLOGIC": 0.56533,
+      "DEBRIS_OR_DRIFT": 0.001113,
+      "FILED_OFF_PLAN": 0.000989,
+      "FILED_ON_PLAN": 0.000967,
+      "SURFACE_VESSEL_AIS_OFF": 0.176072,
+      "UNAUTHORIZED_DIVER": 0.030875,
+      "UNAUTHORIZED_UUV": 0.203206,
+      "UNFILED_KNOWN_OPERATOR": 0.021448
+    },
+    "posterior_row_ids": [
+      "19284abbbac3eb5c",
+      "dce973ccf65164df",
+      "ec076befd8f18baa",
+      "edcf2fd4d91c6248"
+    ],
+    "prompt_version": "s1.0",
+    "question_for_human": null,
+    "recommended_rung": "hand_to_person",
+    "role": "sitrep_writer",
+    "search_box": null,
+    "status": "final",
+    "uncertain": false
+  },
+  "key": "257c4f67c73bab7e3ea9e1c72ddd3cb41859dba0debbbdf3f263543b2046d86e",
+  "output": {
+    "assumptions": [],
+    "contact_summary": "Contact c-0005 is inside the fuel berths zone near fuel_berth_1, with no registry match and no answer to the hail",
+    "facts": [
+      {
+        "evidence_ids": [
+          "ec076befd8f18baa"
+        ],
+        "text": "No filed plan matches the contact (registry lookup at tick 12)"
+      },
+      {
+        "evidence_ids": [
+          "edcf2fd4d91c6248"
+        ],
+        "text": "The acoustic hail at tick 12 got no reply"
+      },
+      {
+        "evidence_ids": [
+          "f880a6886de292c8"
+        ],
+        "text": "First detected inside the fuel berths zone"
+      },
+      {
+        "evidence_ids": [
+          "40dbef3ff25333f3"
+        ],
+        "text": "The nearest critical asset is fuel_berth_1"
+      }
+    ],
+    "person_must_decide": [
+      "Whether the contact at fuel_berth_1 needs people on scene, and who is told"
+    ],
+    "recommended_rung": "hand_to_person",
+    "unknowns": [
+      {
+        "evidence_ids": [],
+        "text": "missing: propeller_tonal_present"
+      },
+      {
+        "evidence_ids": [],
+        "text": "missing: depth"
+      }
+    ]
+  },
+  "role": "sitrep_writer"
+}

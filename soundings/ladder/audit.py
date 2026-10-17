@@ -28,21 +28,31 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StrictStr, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    StrictStr,
+    model_serializer,
+    model_validator,
+)
 from sqlalchemy import Engine, event, text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Field as SQLField
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from soundings.canonical import canonical_json, round6
+from soundings.clock import TickClock
+from soundings.ladder.actions import LadderAction
 from soundings.ladder.approval import ApprovalToken, token_hash
+from soundings.ladder.checkpoint import LadderCheckpoint
 from soundings.ladder.types import GuardDecision
 from soundings.registry.store import db_path_from_env
 from soundings.schemas._base import HarborId, NonNegFloat, StrictModel
@@ -127,11 +137,37 @@ class ActionPayload(StrictModel):
     evidence_row_ids: tuple[RowIdRef, ...] = ()
 
 
+SITREP_PATHS = ("template", "fixture-replay", "fallback-after-rejection", "live")
+"""Which path produced a SITREP (WO-042 part B); ``live`` is reserved for WO-087."""
+
+
 class SitrepPayload(StrictModel):
+    """A SITREP row. ``path``, ``fixture_key`` and ``violation_reason`` (WO-042 part B) are
+    left out of the stored payload when unset, so part A rows hash exactly as before."""
+
     markdown_sha256: Hex64
     writer: Literal["template", "llm"]
     status: Literal["draft", "final", "update"]
     recommended_rung: Rung
+    path: Literal["template", "fixture-replay", "fallback-after-rejection", "live"] | None = None
+    fixture_key: Key | None = None
+    violation_reason: HarborId | None = None
+    channel: HarborId | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        for name in ("path", "fixture_key", "violation_reason", "channel"):
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
+
+    @model_validator(mode="after")
+    def _reason_iff_rejected(self) -> SitrepPayload:
+        rejected = self.path == "fallback-after-rejection"
+        if self.path is not None and rejected != (self.violation_reason is not None):
+            raise ValueError("violation_reason is set exactly on fallback-after-rejection")
+        return self
 
 
 class LlmCallPayload(StrictModel):
@@ -420,18 +456,138 @@ class AuditLog:
         return VerifyResult(True, len(rows), None, prev)
 
 
+# --- the ladder listener (WO-042 part B) --------------------------------------------------
+
+
+class AuditSink:
+    """A WO-040 ``LadderListener`` that writes every step to an ``AuditLog``.
+
+    Per listener call, in this order: probe rows from the event's ``probe_calls`` (once per
+    idempotency key; calls that do not fit ``ProbePayload`` are skipped), the transition row
+    (when a checkpoint was written), one guard row per ``GuardDecision``, the approval row
+    for an ``approval`` event (``token_hash`` only), then one row per action. ``t_s`` is
+    the run clock (``clock.now_s()``; the checkpoint's ``now_s`` when there is one).
+
+    A ``GuardDecision`` carries only ``inputs_hash`` and the granted scope, so the guard
+    row's ``inputs`` holds exactly those; the full ``GuardInputs`` dump needs the guard
+    port to expose its inputs (an open item for WO-043 part B).
+    """
+
+    def __init__(self, audit: AuditLog, run_id: str, clock: TickClock | None = None) -> None:
+        self.audit = audit
+        self.run_id = run_id
+        self.clock = clock
+        self._probe_keys: set[str] = set()
+
+    def _t_s(self, checkpoint: LadderCheckpoint | None) -> float:
+        if checkpoint is not None:
+            return float(checkpoint.now_s)
+        if self.clock is not None:
+            return float(self.clock.now_s())
+        return 0.0
+
+    def __call__(
+        self,
+        checkpoint: LadderCheckpoint | None,
+        actions: Sequence[LadderAction],
+        decisions: Sequence[GuardDecision],
+    ) -> None:
+        t_s = self._t_s(checkpoint)
+        cid = ""
+        if checkpoint is not None:
+            cid = checkpoint.contact_id
+        elif actions:
+            cid = actions[0].contact_id
+        put = self.audit.append
+        if checkpoint is not None:
+            event = checkpoint.event
+            row_ids = tuple(r.row_id for r in event.payload.rows)
+            for call in event.payload.extra.get("probe_calls", ()) or ():
+                try:
+                    probe = ProbePayload.model_validate(dict(call))
+                except (ValueError, TypeError):
+                    continue
+                if probe.idempotency_key in self._probe_keys:
+                    continue
+                self._probe_keys.add(probe.idempotency_key)
+                put(AuditKind.PROBE, probe, run_id=self.run_id, t_s=t_s, contact_id=cid)
+            put(
+                AuditKind.TRANSITION,
+                TransitionPayload(
+                    from_state=checkpoint.from_state,
+                    to_state=checkpoint.to_state,
+                    event=event.kind.value,
+                    arg=event.arg,
+                    rung=checkpoint.rung,
+                    checkpoint_hash=checkpoint.hash,
+                    evidence_row_ids=row_ids,
+                ),
+                run_id=self.run_id,
+                t_s=t_s,
+                contact_id=cid,
+            )
+        for decision in decisions:
+            dumped = {
+                "inputs_hash": decision.inputs_hash,
+                "granted_scope": None
+                if decision.granted_scope is None
+                else decision.granted_scope.model_dump(mode="json"),
+            }
+            put(
+                AuditKind.GUARD_DECISION,
+                guard_decision_payload(decision, dumped),
+                run_id=self.run_id,
+                t_s=t_s,
+                contact_id=cid,
+            )
+        if checkpoint is not None and checkpoint.event.kind.value == "approval":
+            put(
+                AuditKind.APPROVAL,
+                _approval_row(checkpoint),
+                run_id=self.run_id,
+                t_s=t_s,
+                contact_id=cid,
+            )
+        for action in actions:
+            put(
+                AuditKind.ACTION,
+                ActionPayload(
+                    action=action.kind.value,
+                    idempotency_key=action.idempotency_key,
+                    rung=None if checkpoint is None else checkpoint.rung,
+                ),
+                run_id=self.run_id,
+                t_s=t_s,
+                contact_id=action.contact_id or cid,
+            )
+
+
+def _approval_row(checkpoint: LadderCheckpoint) -> ApprovalPayload:
+    event = checkpoint.event
+    outcome: Literal["granted", "denied", "timeout"] = (
+        "granted" if event.arg == "granted" else "denied" if event.arg == "denied" else "timeout"
+    )
+    raw = event.payload.approval_token
+    token = None if raw is None else ApprovalToken.model_validate(raw)
+    scope = event.payload.requested_scope
+    action = None if token is not None else (scope.action if scope is not None else "approval")
+    return approval_payload(token, outcome=outcome, action=action)
+
+
 __all__ = [
     "APPEND_ONLY_MESSAGE",
     "AUDIT_TABLE",
     "GENESIS_HASH",
     "PAYLOAD_MODELS",
     "RETENTION_LABEL",
+    "SITREP_PATHS",
     "ActionPayload",
     "ApprovalPayload",
     "AuditError",
     "AuditKind",
     "AuditLog",
     "AuditRow",
+    "AuditSink",
     "GuardDecisionPayload",
     "LlmCallPayload",
     "ProbePayload",
