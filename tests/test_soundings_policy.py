@@ -1,9 +1,8 @@
 """WO-051 part B: the soundings policy over runner v3, on the real catalog.
 
-S04's re-acquired track ends in an uncertain budget handoff on main (DECISIONS 2026-10-17
-07:31 and 08:30; strict xfails in tests/test_investigation.py and
-tests/test_catalog_expected.py). The S04 clause here is a strict xfail for the same open
-question; nothing was tuned to move it.
+S04's re-acquired track resolves benign on seeds 3-5 after WO-094 but still ends in an
+uncertain budget handoff on seeds 1 and 2; those two are strict xfails for the open question
+(DECISIONS 2026-10-17 07:31 and 08:30); nothing was tuned to move them.
 """
 
 from __future__ import annotations
@@ -33,10 +32,11 @@ from soundings.sim.scenario import resolve_scenario
 
 SEEDS = (1, 2, 3, 4, 5)
 S04_OPEN_QUESTION = (
-    "S04's re-acquired track ends in an uncertain C_BUDGET handoff under runner v3 "
-    "(DECISIONS 2026-10-17 07:31/08:30; strict xfail upstream); open question for the "
-    "coordinator, no table or threshold changed"
+    "S04's re-acquired track still ends in an uncertain budget handoff on seeds 1 and 2 under "
+    "runner v3 after WO-094 (seeds 3-5 resolve benign); open question for the coordinator, no "
+    "table or threshold changed"
 )
+S04_HANDOFF_SEEDS = frozenset({1, 2})
 
 
 @cache
@@ -90,8 +90,15 @@ def test_s01_s03_cleared_at_ask(seed: int) -> None:
             assert g.interruptions == 0, (sid, gid)
 
 
-@pytest.mark.xfail(strict=True, reason=S04_OPEN_QUESTION)
-@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize(
+    "seed",
+    [
+        pytest.param(s, marks=pytest.mark.xfail(strict=True, reason=S04_OPEN_QUESTION))
+        if s in S04_HANDOFF_SEEDS
+        else s
+        for s in SEEDS
+    ],
+)
 def test_s04_resolved_benign(seed: int) -> None:
     g = outcome_for_gt(_run("S04", seed), "gt-1")
     assert g.terminal_state is LadderState.RESOLVED_BENIGN

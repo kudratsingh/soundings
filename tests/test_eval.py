@@ -12,12 +12,14 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from soundings.canonical import canonical_json
 from soundings.eval.harness import run_campaign
+from soundings.eval.jobs import WORKERS_ENV
 from soundings.eval.metrics import LlmDiff, PlannerDifference
 from soundings.eval.perturb import TableShift
 from soundings.eval.policies import (
@@ -62,6 +64,16 @@ BUILD_PLAN_COLUMNS = (
     "shutdown_usd",
     "probes_used",
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _pool_size_under_xdist() -> Iterator[None]:
+    """Under xdist every worker may run a campaign; keep each one's process pool small so
+    the suite does not oversubscribe a shared machine (results do not depend on it)."""
+    with pytest.MonkeyPatch.context() as m:
+        if os.environ.get("PYTEST_XDIST_WORKER") and not os.environ.get(WORKERS_ENV):
+            m.setenv(WORKERS_ENV, "2")
+        yield
 
 
 @pytest.fixture(scope="module")
@@ -361,10 +373,10 @@ def test_report_deterministic(tmp_path: Path) -> None:
 
 CATALOG_SEEDS = (1, 2, 3, 4, 5)
 AT_OR_BELOW_ASK_OPEN_QUESTION = (
-    "Soundings resolves 27 of 45 catalog ground-truth contacts at or below ask (60.0%) over "
-    "seeds 1..5 under runner v3: S04 ends in an uncertain budget handoff on every seed "
-    "(the open S04 question, DECISIONS 2026-10-17 07:31/08:30) and S08 hands its debris to a "
-    "person on seeds 1, 2 and 5. No threshold or table was changed (CLAUDE.md 3)."
+    "Soundings resolves 30 of 45 catalog ground-truth contacts at or below ask (66.7%) over "
+    "seeds 1..5 under runner v3 after WO-094: S04 still ends in a budget handoff on seeds 1 "
+    "and 2, and S08's debris reaches a person on seeds 1, 2 and 5. No threshold or table was "
+    "changed (CLAUDE.md 3)."
 )
 LOCAL_ONLY = pytest.mark.skipif(
     os.environ.get("SOUNDINGS_CI", "").strip() not in ("", "0"),
@@ -389,47 +401,54 @@ def _env() -> dict[str, str]:
     return env
 
 
-@pytest.fixture(scope="module")
-def catalog_report() -> EvalReport:
-    """Catalog x seeds 1..5, all three policies (the claims the deck pastes)."""
+@LOCAL_ONLY
+def test_catalog_claims() -> None:
+    """Catalog x seeds 1..5, all three policies (one test: one campaign per xdist worker).
+
+    The >= 70% at-or-below-ask claim (DECISIONS 23:05 rule) is checked last and behaves as a
+    strict xfail: it xfails with the real reading while it does not hold and fails once it
+    does, so the marker is removed then."""
+    from soundings.eval.metrics import at_or_below_ask
+    from soundings.eval.policies import outcome_for_gt
+
     cfg = load_eval_config()
-    return run_campaign(
+    rep = run_campaign(
         "catalog",
         CATALOG_SEEDS,
         perturb_magnitude=cfg.eval.perturb_magnitude,
         perturb_seed=cfg.eval.perturb_seed,
         include_llm_diff=False,
     )
-
-
-@LOCAL_ONLY
-def test_catalog_claims(catalog_report: EvalReport) -> None:
-    out = catalog_report.outcomes
+    out = rep.outcomes
     snd, bang, hq = out[PolicyName.SOUNDINGS], out[PolicyName.BANG], out[PolicyName.HUMAN_QUEUE]
-    assert catalog_report.policies_pending == {}
+    assert rep.policies_pending == {}
     assert snd.runs == bang.runs == hq.runs == 40
     assert snd.gt_contacts == 45
     assert snd.missed_threats == 0
     assert bang.missed_threats == 0
     assert bang.shutdown_minutes > max(snd.shutdown_minutes, hq.shutdown_minutes)
     assert hq.interruptions_per_hour > max(snd.interruptions_per_hour, bang.interruptions_per_hour)
-    doc = json.loads(canonical_json(catalog_report))
-    md = render_markdown(catalog_report)
+    doc = json.loads(canonical_json(rep))
+    md = render_markdown(rep)
     header = next(cols for sec, cols in _tables(md) if sec == "Outcomes by policy")
     for policy in PolicyName:
         for col in BUILD_PLAN_COLUMNS:
             assert col in doc["outcomes"][policy.value], (policy, col)
             assert col in header
     # S01 and both S03 divers are counted at or below ask for every seed
-    from soundings.eval.metrics import at_or_below_ask
-    from soundings.eval.policies import outcome_for_gt
-
-    assert catalog_report.per_scenario  # rows exist for every scenario and policy
     for sid, gts in (("S01", ("gt-1",)), ("S03", ("gt-1", "gt-2"))):
         for seed in CATALOG_SEEDS:
             run = _soundings_run(sid, seed)
             for gid in gts:
                 assert at_or_below_ask(outcome_for_gt(run, gid)), (sid, seed, gid)
+    # the report prints the real reading (no rounding up)
+    assert snd.at_or_below_ask_pct is not None
+    assert f"| soundings | 45 | {snd.at_or_below_ask_pct:.2f} |" in md
+    s04 = [at_or_below_ask(outcome_for_gt(_soundings_run("S04", s), "gt-1")) for s in CATALOG_SEEDS]
+    claim = snd.at_or_below_ask_pct >= 70.0 and all(s04)
+    if not claim:
+        pytest.xfail(f"{AT_OR_BELOW_ASK_OPEN_QUESTION} (read {snd.at_or_below_ask_pct:.2f}%)")
+    pytest.fail("the >= 70% claim now holds: drop the xfail branch of this test")
 
 
 def _soundings_run(sid: str, seed: int):  # type: ignore[no-untyped-def]
@@ -437,27 +456,6 @@ def _soundings_run(sid: str, seed: int):  # type: ignore[no-untyped-def]
     from soundings.sim.scenario import resolve_scenario
 
     return SoundingsPolicy().run(resolve_scenario(sid), seed)
-
-
-@LOCAL_ONLY
-@pytest.mark.xfail(strict=True, reason=AT_OR_BELOW_ASK_OPEN_QUESTION)
-def test_catalog_at_or_below_ask_claim(catalog_report: EvalReport) -> None:
-    """The >= 70% claim (DECISIONS 23:05 rule) and S04 counted on every seed."""
-    snd = catalog_report.outcomes[PolicyName.SOUNDINGS]
-    assert snd.at_or_below_ask_pct is not None and snd.at_or_below_ask_pct >= 70.0
-    from soundings.eval.metrics import at_or_below_ask
-    from soundings.eval.policies import outcome_for_gt
-
-    for seed in CATALOG_SEEDS:
-        assert at_or_below_ask(outcome_for_gt(_soundings_run("S04", seed), "gt-1"))
-
-
-@LOCAL_ONLY
-def test_at_or_below_ask_reading_is_reported(catalog_report: EvalReport) -> None:
-    """Until the claim holds, the report states the real number (no rounding up)."""
-    snd = catalog_report.outcomes[PolicyName.SOUNDINGS]
-    assert snd.at_or_below_ask == 27 and snd.at_or_below_ask_pct == 60.0
-    assert "| soundings | 45 | 60.00 |" in render_markdown(catalog_report)
 
 
 def test_per_contact_table_matches_ledger(report: EvalReport) -> None:
@@ -491,33 +489,61 @@ def test_every_table_has_seeds_and_method(markdown: str) -> None:
         assert "Method: Seeds " in sec, title
 
 
-@pytest.fixture(scope="module")
-def make_eval() -> tuple[float, Path]:
-    """``make eval`` once (the exact Makefile line), timed."""
+@LOCAL_ONLY
+def test_make_eval(tmp_path: Path) -> None:
+    """``make eval`` (the exact Makefile line) under the time bound, with every sweep, the
+    PNG, and a second process (the BUILD-PLAN seed form) giving byte-identical report.md,
+    report.json and PNG, also inside its archive. One test so xdist runs it once."""
     import time
 
     started = time.monotonic()
     subprocess.run(["make", "eval"], cwd=REPO, check=True, capture_output=True, env=_env())
-    return time.monotonic() - started, REPO / "artifacts" / "eval"
-
-
-@LOCAL_ONLY
-def test_make_eval_under_budget(make_eval: tuple[float, Path]) -> None:
-    wall, out = make_eval
-    assert wall < MAKE_EVAL_BOUND_S, wall
+    wall = time.monotonic() - started
+    out = REPO / "artifacts" / "eval"
+    # Under xdist (`make test` runs -n auto) wall time measures contention with the other
+    # workers, not make eval; the bound is asserted when this test runs on its own (the
+    # exit-test command: uv run pytest tests/test_eval.py::test_make_eval).
+    timed = os.environ.get("PYTEST_XDIST_WORKER_COUNT", "1") in ("", "1")
+    if timed:
+        assert wall < MAKE_EVAL_BOUND_S, wall
     for name in ("report.md", "report.json", "threshold_curve.png", "timing.json"):
         assert (out / name).is_file(), name
     timing = json.loads((out / "timing.json").read_text(encoding="utf-8"))
-    assert timing["wall_time_s"] < MAKE_EVAL_BOUND_S
-    report = EvalReport.model_validate_json((out / "report.json").read_text(encoding="utf-8"))
-    assert report.seeds == CATALOG_SEEDS and report.policies_pending == {}
+    assert timing["wall_time_s"] > 0.0
+    if timed:
+        assert timing["wall_time_s"] < MAKE_EVAL_BOUND_S
+    _check_sweeps(out)
+    other = tmp_path / "e2"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "soundings.eval",
+            "--suite",
+            "catalog",
+            "--seeds",
+            "1..5",
+            "--mode",
+            "replay",
+            "--out",
+            str(other),
+        ],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        env=_env(),
+    )
+    for name in ("report.md", "report.json", "threshold_curve.png"):
+        assert (out / name).read_bytes() == (other / name).read_bytes(), name
+    (archive,) = sorted((other / "runs").iterdir())
+    for name in ("report.md", "report.json"):
+        assert (archive / name).read_bytes() == (out / name).read_bytes(), name
 
 
-@LOCAL_ONLY
-def test_sweeps_sections(make_eval: tuple[float, Path]) -> None:
-    _, out = make_eval
+def _check_sweeps(out: Path) -> None:
     md = (out / "report.md").read_text(encoding="utf-8")
     report = EvalReport.model_validate_json((out / "report.json").read_text(encoding="utf-8"))
+    assert report.seeds == CATALOG_SEEDS and report.policies_pending == {}
     sw = report.sweeps
     assert sw is not None
     headings = [ln for ln in md.split("\n") if ln.startswith("## ")]
@@ -568,35 +594,3 @@ def test_sweeps_sections(make_eval: tuple[float, Path]) -> None:
     assert sw.ablation.sentence and sw.ablation.sentence in md
     assert all(r.missed_threats == 0 for r in sw.ablation.rows)
     assert NO_LLM_EFFECT_SENTENCE in md or report.llm.diff is not None
-
-
-@LOCAL_ONLY
-def test_full_report_deterministic(make_eval: tuple[float, Path], tmp_path: Path) -> None:
-    """A second process (the BUILD-PLAN seed form) gives byte-identical report.md,
-    report.json and PNG to ``make eval``, and the same files inside its archive."""
-    _, out = make_eval
-    other = tmp_path / "e2"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "soundings.eval",
-            "--suite",
-            "catalog",
-            "--seeds",
-            "1..5",
-            "--mode",
-            "replay",
-            "--out",
-            str(other),
-        ],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-        env=_env(),
-    )
-    for name in ("report.md", "report.json", "threshold_curve.png"):
-        assert (out / name).read_bytes() == (other / name).read_bytes(), name
-    (archive,) = sorted((other / "runs").iterdir())
-    for name in ("report.md", "report.json"):
-        assert (archive / name).read_bytes() == (out / name).read_bytes(), name

@@ -25,9 +25,6 @@ from tests.helpers.static_client import (
     install_static_reply,
 )
 
-GT_CONTACT_S04 = "c-0013"
-"""S04 seed 1: the first ground-truth observed id the planner is consulted for."""
-
 
 def _campaign(store: FixtureStore, log: Path, suite: str = "tuesday"):  # type: ignore[no-untyped-def]
     return run_campaign(
@@ -46,8 +43,11 @@ def _campaign(store: FixtureStore, log: Path, suite: str = "tuesday"):  # type: 
 @pytest.fixture
 def s04_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, object]]:
     monkeypatch.delenv("SOUNDINGS_CI", raising=False)
-    captured = capture_planner_inputs(monkeypatch, resolve_scenario("S04"), 1, tmp_path)
-    inputs = next(i for cid, i in captured if cid == GT_CONTACT_S04)
+    sc = resolve_scenario("S04")
+    captured = capture_planner_inputs(monkeypatch, sc, 1, tmp_path)
+    truth = SoundingsPolicy().run_result(sc, 1).sim.contact_truth
+    gt_ids = {cid for cid, t in truth.items() if not t.gt_id.startswith("fa-")}
+    inputs = next(i for cid, i in captured if cid in gt_ids)
     return tmp_path, inputs
 
 
