@@ -3,6 +3,8 @@
 Phase: 6 · Branch: `wo/061-judge-panel` · Worktree: `../soundings-worktrees/wo-061-judge-panel` · Est: 6 h · Owner: frontend / demo (unassigned); coordinator Kudrat
 Depends on: WO-010 (`Scenario`, `load_scenario`, `Harbor.zone_at`, `Harbor.nearest_asset`), WO-011 (`catalog_paths`), WO-021 (`config/known_operators.yaml`), WO-040 (`soundings.ladder.ports.ApproverPort`, `ApprovalReply`), WO-041 (`issue_token`, `ApprovalToken`, `token_hash`), WO-042 (`AuditLog`), WO-043 (`ScenarioRunner.start`, `RunSession`, `ApproverPort` injection), WO-060 (`RunEngine`, `register_source`, event schema, `HarborMap`, `useRun`, `ApprovalButton`). Wave 9.
 
+> **Addenda:** the judge panel also shows a QR code to the registry form (owner directive 06:05; section appended below) and the model-path badge "model: live" / "model: fallback" from `GET /api/model_mode` (WO-087).
+
 ## Goal
 A judge can spawn a contact live. They click a point on the map, choose a behavior (filed / unfiled / closing / loitering / silent) and an acoustic profile, and press Go. The server turns that choice, through a fixed and deterministic mapping, into a scenario file `scenarios/live/L-<YYYYMMDDTHHMMSS>.yaml`, which is gitignored and has an empty `expected` block. It validates the file with the same loader the catalog uses, starts a run through WO-060's `RunEngine`, and returns the `run_id`. The UI switches to that run and shows the first contact within 2 s. Because the run goes through the same pipeline as the catalog, the judge's contact can be reproduced afterwards from the file and its seed (SPEC-SIM §5).
 
@@ -135,3 +137,96 @@ PR: · Merged commit: · Test summary: · STATE.md updated:
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - If `soundings/schemas/scenario.py` on main still requires `Expected.terminal_state` for every id, make it optional when the scenario id matches `^L-` (judge-injected live scenarios) with a unit test in tests/test_schemas.py; this one-line schema edit is approved for WO-061.
+
+## Coordinator addenda (QR code, owner directive 06:05 PDT)
+
+Binding. Recorded in `docs/log/DECISIONS.md`. Est: +3 h on top of WO-061. Depends on: WO-061 itself (`JudgePanel.tsx`, `JUDGE_LABELS`, `tests/test_inject.py::test_vocabulary`), WO-020 (registry router and `/registry` form), WO-060 (in flight on `origin/wo/060a-ui-core`: `HarborMap` `overlay`, `api.ts`, `GET /api/harbor`, `tests/e2e/conftest.py`), WO-081 (conflicts on `PlanView`), WO-082 (CP-SAT proposal with accept/decline). Wave C; the QR part merges after WO-082. If WO-082 is dropped under the 3:00 PM rule, `ProposalCard` shows the WO-081 conflict line only and `test_conflicted_plan_shows_proposal` narrows to the conflict marker; owner to confirm (the directive clause names the proposal).
+
+### What is added
+The judge panel shows a QR code that opens the registry form, so a judge can file a plan from a phone. The plan they file must appear on the map within 2 s. If the plan is conflicted, the screen shows WO-082's CP-SAT proposal with Accept and Decline. The operator decides, and nothing changes until they accept. This is the registry's ordinary-day path. It proposes slots and never sets a rung.
+
+### Backend
+- **Router.** `soundings/api_routes/qr.py`, `router` mounted in `soundings/api.py` before the `web/dist` mount, inside a marked `WO-061 QR` block.
+- **SVG route.** `GET /api/qr?target=/registry` returns `image/svg+xml` and sends the encoded URL in the `X-QR-Payload` response header. `target` must be in `QR_TARGETS = frozenset({"/registry"})`; anything else returns 422, so the endpoint cannot be turned into an open link generator.
+- **Info route.** `GET /api/qr/info?target=/registry` returns `{url, loopback: bool}`. The panel prints the URL under the code and warns when `loopback` is true ("a phone cannot reach localhost; open the screen on the LAN address").
+- **Base URL.** `qr_base_url(request)` takes the env value `SOUNDINGS_PUBLIC_BASE_URL` (for example `http://192.168.1.20:8000`) when it is set. Otherwise it uses `str(request.base_url)`, so the host comes from the request. It never probes the network.
+- **Rendering.** `qr_svg(url: str) -> bytes` is `segno.make(url, error="m", micro=False)` saved as SVG with `scale=4`, `border=2` and `xmldecl=False`. This gives byte-identical output for the same URL.
+- **Make target.** `make dev-lan` runs uvicorn on `0.0.0.0` for the demo laptop. `make dev` stays on loopback (see the open question on LAN exposure).
+
+### Frontend
+- **QR in the panel.** `JudgePanel.tsx` renders `<img data-testid="judge-qr" src="/api/qr?target=/registry">`, with the URL text in `[data-testid=judge-qr-url]` (carrying `data-url`). Every new string goes into `JUDGE_LABELS`.
+- **Plan polling.** `web/src/usePlans.ts` polls `GET /api/plans?status=active` every `PLAN_POLL_MS = 1000`. Polling is chosen over pushing plan events into the run WebSocket because a plan filed from a phone arrives in wall-clock time. If it were put into the seeded run stream, two runs would no longer be byte-identical (§2.4).
+- **Plan layer.** `web/src/components/PlanLayer.tsx` (passed to `HarborMap` as `overlay`) draws each plan's `area` zone polygon, dashed, with a centroid marker `[data-testid=plan-marker][data-plan=<plan_id>][data-conflicted=true|false]`.
+- **Proposal card.** `web/src/components/ProposalCard.tsx` appears for a conflicted plan. It shows WO-082's proposed shifts ("P-… start 14:00 → 14:40") or WO-082's explicit "no feasible slot", naming the binding constraint. Its buttons are `[data-testid=proposal-accept]` and `[data-testid=proposal-decline]`, and they call WO-082's accept and decline endpoints. The card is labelled "proposal: the operator accepts or declines".
+- **Form on a phone.** `registry.html` already carries a viewport meta tag. Check it at 390×844, and make the WO-081 conflict line ("conflicts with <plan> 14:00-16:00") wrap rather than overflow.
+
+### Files expected
+- `soundings/api_routes/qr.py`; `soundings/api.py` (block `# --- WO-061 QR ---`); `Makefile` (`dev-lan` target)
+- `web/src/usePlans.ts`, `web/src/components/PlanLayer.tsx`, `web/src/components/ProposalCard.tsx`; `web/src/components/JudgePanel.tsx` and `web/src/App.tsx` (inside WO-061's existing marked blocks)
+- `soundings/registry/static/registry.html` (block `<!-- WO-061 QR -->`, CSS wrap only)
+- `pyproject.toml` (the `segno` line with a trailing `# WO-061 QR` comment; its own `[[tool.mypy.overrides]]` table for `segno.*` if stubs are missing), `uv.lock`
+- `tests/test_api_qr.py`, `tests/e2e/test_judge_qr.py`; `docs/log/DECISIONS.md` (segno row; `make dev-lan` LAN exposure); `docs/STATE.md` (WO-061 row only)
+
+### Exit tests (must all pass with `MODEL_MODE=replay`, no network)
+- [ ] (directive, verbatim) The judge panel also shows a QR code to the registry form so a judge can file a plan from a phone; the filed plan must appear on the map within 2 s and (if conflicted) show the CP-SAT proposal.
+- [ ] `make e2e` runs `tests/e2e/test_judge_qr.py::test_filed_plan_on_map_within_2s` with non-loopback requests aborted and `SOUNDINGS_DB` set to a temporary file. The test:
+  1. opens `/?tiles=off&judge=1` and clicks `judge-open`;
+  2. asserts `[data-testid=judge-qr]` has loaded with `naturalWidth > 0`;
+  3. reads `judge-qr-url[data-url]`, which must end in `/registry` on the live server;
+  4. opens that URL in a second page with a 390×844 viewport, fills the form and submits it, recording `t0` at the 201 response;
+  5. waits on the first page for `[data-testid=plan-marker][data-plan=<id>]` and asserts the elapsed time is at most 2.0 s.
+
+  This proves the phone-to-map path end to end.
+- [ ] `tests/e2e/test_judge_qr.py::test_conflicted_plan_shows_proposal`:
+  - Setup: file 3 plans through the API in one zone, with overlapping depth and window (more than the default capacity of 2), then file a fourth from the phone page.
+  - Proposal card: the marker shows `data-conflicted=true`, and `proposal-card` appears within 2 s with WO-082's shift text.
+  - Decline: clicking `proposal-decline` leaves `GET /api/plans/<id>` byte-equal to its value before the click.
+  - Accept: refiling and clicking `proposal-accept` updates the plan's window and turns the marker to `data-conflicted=false` within 2 s.
+
+  This proves that nothing changes until the operator accepts.
+- [ ] `uv run pytest tests/test_api_qr.py` checks the following:
+  - the response is 200 with `image/svg+xml`, and `xml.etree.ElementTree.fromstring` parses it with an `{http://www.w3.org/2000/svg}svg` root;
+  - the payload given to the generator is exactly `<base>/registry`, checked by monkeypatching `soundings.api_routes.qr.segno.make` to record its argument (no pure-Python QR decoder is a dependency, so the test checks the input, not a decode);
+  - the `X-QR-Payload` header matches that payload;
+  - the body equals `qr_svg("<base>/registry")`;
+  - `target=/api/plans`, `target=https://example.com` and an empty target each return 422;
+  - with `SOUNDINGS_PUBLIC_BASE_URL` set, the env value is used; with it unset and a `testserver` host, the request host is used; `info.loopback` is true for `127.0.0.1` and `localhost`.
+- [ ] Determinism: `uv run pytest tests/test_api_qr.py::test_svg_byte_identical` renders the same URL twice in-process and once in a subprocess under `PYTHONHASHSEED=1`, with equal sha256. The existing `python -m soundings.stream` JSONL diff (above) still prints nothing, which proves plan polling added nothing to the run stream.
+- [ ] Rule proof §2.2:
+  - `tests/test_api_qr.py::test_qr_display_only`: an AST scan shows `soundings/api_routes/qr.py` imports nothing from `soundings.ladder`, `soundings.llm` or `anthropic`.
+  - `tests/e2e/test_judge_qr.py::test_conflicted_plan_shows_proposal`: the proposal card has no control except accept and decline, and neither touches a run.
+  - A plan filed from the phone changes the registry only. The ladder still decides every contact.
+- [ ] Rule proof §2.1/§2.5: `grep -rinEf config/denylist.txt soundings/api_routes/qr.py web/src/components/JudgePanel.tsx web/src/components/PlanLayer.tsx web/src/components/ProposalCard.tsx web/src/usePlans.ts` prints nothing; `test_vocabulary` covers the new `JUDGE_LABELS`. No string implies route planning or directing a vehicle; the card says "proposes", "proposal" and "operator accepts".
+- [ ] `pnpm -C web exec tsc --noEmit && pnpm -C web build` exits 0; `make check` green.
+
+### Interfaces
+Exposed:
+- WO-061 `soundings.api_routes.qr.router`, `.QR_TARGETS`, `.qr_base_url(request) -> str`, `.qr_svg(url: str) -> bytes`
+- HTTP routes: `GET /api/qr?target=`, `GET /api/qr/info?target=`
+- Make target: `make dev-lan`
+- Web: `web/src/usePlans.ts` (`usePlans()`, `PLAN_POLL_MS`), `web/src/components/PlanLayer.tsx`, `web/src/components/ProposalCard.tsx`
+- `data-testid` values: `judge-qr`, `judge-qr-url`, `plan-marker`, `proposal-card`, `proposal-accept`, `proposal-decline`
+
+Consumed:
+- WO-020 (on main): `soundings.registry.router.{router, registry_page}` and the `GET /api/plans?status=active` route.
+- WO-020 (on main): `soundings.registry.models.{PlanView, PlanStatus}` (`PlanView.area` is a zone id).
+- WO-060 (in flight, `origin/wo/060a-ui-core`): `Harbor.zones[].polygon` via `GET /api/harbor`, `HarborMap` `overlay` prop, `tests/e2e/conftest.py`.
+- WO-081 (not on main; names per WO-081): the `conflicted` status and the `conflicts[]` on `PlanView`.
+- WO-082 (not on main; names per WO-082): the proposal GET route and the accept/decline POST routes for one plan. The coordinator reconciles exact paths in WO-082's Notes for downstream.
+
+### Rungs touched and hard rules
+None. The QR route and plan layer touch the registry only. §2.1/§2.5: denylist grep and `test_vocabulary`; §2.2: `test_qr_display_only`; §2.4: `test_svg_byte_identical` and the unchanged stream JSONL diff.
+
+### Model calls and dependencies
+None. Dependency adds (logged in DECISIONS.md per owner directive): `segno>=1.6.6` (runtime, pure Python, no transitive dependencies on 3.12; chosen over browser-side QR so `package.json` is unchanged).
+
+### Cut line
+Drop in this order:
+1. `GET /api/qr/info`'s loopback warning text (keep the URL text).
+2. The dashed zone outline (keep the centroid marker).
+3. `make dev-lan` (set `SOUNDINGS_PUBLIC_BASE_URL` by hand).
+
+Never cut an exit test.
+
+### Notes
+- Venue Wi-Fi often isolates clients. Rehearse on a phone hotspot with the laptop joined to it, and set `SOUNDINGS_PUBLIC_BASE_URL` to the laptop's hotspot address.
