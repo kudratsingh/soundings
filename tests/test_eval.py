@@ -578,8 +578,7 @@ def _check_sweeps(out: Path) -> None:
     assert load_ladder_config().stopping["threat_mass_handoff"] == 0.35
     # 2d: pending with its reason until BT-01 and the generator are on main
     assert sw.scale is not None
-    if not (REPO / "scenarios" / "BT-01.yaml").exists():
-        assert sw.scale.status.startswith("pending:") and sw.scale.rows == ()
+    assert sw.scale.status.startswith("pending:") and sw.scale.rows == ()
     # 2e: seeds 1..20, mean and min-max for every outcome metric of every policy
     assert sw.seeds is not None and sw.seeds.seeds == tuple(range(1, 21))
     metrics = {(r.policy, r.metric) for r in sw.seeds.rows}

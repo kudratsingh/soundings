@@ -465,21 +465,24 @@ def scale_pending_reason(scenario_root: Path | None = None) -> str | None:
     )
 
 
+SCALE_DEFERRED = (
+    "pending: scenarios/BT-01.yaml and soundings.sim.generate landed on main (WO-080 part A) "
+    "after this build's 2d gate; BT-01 at 40/100/200 jobs is a follow-up that needs WO-080 "
+    "part B tick skipping to fit make eval's 5-minute budget (one 40-job day is tens of "
+    "seconds to minutes of runner v3 on a shared machine)"
+)
+
+
 def scale_section(reason: str | None) -> ScaleSection:
+    """2d. ``reason`` is ``scale_pending_reason()``; with BT-01 and the generator present the
+    section is still pending (``SCALE_DEFERRED``) until the runs are wired."""
     method = (
-        "BT-01 generated at 40, 100 and 200 jobs (WO-080 generator), soundings, wall time of "
-        "the in-process run, interruptions per simulated hour and the share of filed "
-        "contacts cleared at ask."
+        "BT-01 generated at 40, 100 and 200 jobs (WO-080 generator), soundings; "
+        "interruptions per simulated hour and the share of filed contacts cleared at ask "
+        "(wall time per size in timing.json)."
     )
-    if reason is not None:
-        return ScaleSection(status=reason, method=method, png=None, rows=())
-    # BT-01 exists but the generator's interface is WO-080's; the hook stays explicit.
-    return ScaleSection(
-        status="pending: generator interface not wired in this build",
-        method=method,
-        png=None,
-        rows=(),
-    )
+    status = reason if reason is not None else SCALE_DEFERRED
+    return ScaleSection(status=status, method=method, png=None, rows=())
 
 
 def seed_section(
@@ -522,7 +525,11 @@ def seed_section(
 # ---------------------------------------------------------------------------
 
 
-ABLATION_SCENARIOS = "S04-S08,BT-01"
+ABLATION_SCENARIOS = "S04-S08"
+ABLATION_DEFERRED: tuple[str, ...] = ("BT-01",)
+"""Listed as pending in ``make eval``: an 8-hour, 400-contact day x 3 arms is minutes of
+runner v3 without WO-080 part B tick skipping; ``python -m soundings.eval.ablation
+--scenarios S04-S08,BT-01`` runs it on its own."""
 
 
 class AblationRowOut(StrictModel):
@@ -551,6 +558,7 @@ def ablation_section() -> AblationSection | None:
     method = str(getattr(module, "METHOD", "")).removeprefix("method: ")
     try:
         ids, pending = module.expand_scenarios(ABLATION_SCENARIOS)
+        pending = tuple(pending) + ABLATION_DEFERRED
         rep = module.run_ablation(scenarios=ids, pending=pending)
         sentence = str(module.ablation_sentence(rep))
     except Exception as exc:  # e.g. a replay miss under SOUNDINGS_CI (WORKFLOW 8)
