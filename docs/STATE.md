@@ -49,7 +49,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
 | 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
-| 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |
+| 080 | Busy Tuesday scenario BT-01 | part A in PR (schema, vessel_transit + AIS feed, generator, BT-01, grading); part B next | wo/080-busy-tuesday | see branch PR | | part A: 56 new tests (vessel 28, generate 13, busy_tuesday 6, rules 9) |
 | 081 | conflict detection at filing | WO being written | wo/081-conflict-detection | | | |
 | 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
 | 083 | separation advisories (CPA/TCPA) | WO being written | wo/083-separation-advisories | | | |
