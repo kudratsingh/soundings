@@ -162,3 +162,23 @@ PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
 - 70% rule: a ground-truth contact counts as resolved at or below ask when its terminal state ∈ {CLEARED_AT_ASK, RESOLVED_BENIGN, HAZARD_NOTICE, LOST_VEHICLE} and its max rung ≤ ask. Report false-alarm contacts on a separate line, not in the denominator. Expected 7 of 9 on the catalog.
 - Use the single interruption definition from WO-022's addenda.
 - If main lacks `run_scenario(..., likelihoods=None)` when WO-051 starts, WO-051 adds that keyword (one small commit in soundings/sim).
+
+## Part A done (coordinator split)
+Built on main without runner v3 (2026-10-17 06:10 PDT). Branch `wo/051a-eval-core`; 42 new tests; `make check` green, 1454 passed after rebasing on WO-031, WO-032, WO-062 part A and WO-043 part A.
+
+Built:
+- `soundings/eval/perturb.py`: `perturb_likelihoods(spec, magnitude, seed)`, `unpin_acoustics(scenario, spec=None)`, `table_shift(a, b) -> TableShift(max_abs, mean_abs, cells)`, `ACOUSTIC_PIN_FEATURES`, `ZERO_FLOOR` (1e-4; structural zeros are floored so every perturbed bucket is > 0), `MIN_BUCKET` (1e-6).
+- `soundings/eval/metrics.py`: `PolicyMetrics`, `FalseAlarmMetrics`, `compute_metrics(runs, *, ladder_cfg)`, `compute_false_alarms(runs)`, `policy_metrics`, `rolled_outcomes(run)`, `AT_OR_BELOW_ASK_TERMINALS`, `at_or_below_ask(gt)`, `median_seconds(values) -> (median, unhandled)`, `LlmDiff`, `PlannerDifference`, `diff_planners(fallback_runs, llm_runs)` (with the "helped or not" verdict), `DIFF_FIELDS`.
+- `soundings/eval/report.py`: `EvalReport`, `build_report(...)`, `render_markdown`, `write_report(report, out_dir) -> (md, json)`, `REPORT_COLUMNS` (outcomes, false_alarms, per_scenario, misspecified, misspecified_changes, llm_diff), `NO_LLM_EFFECT_SENTENCE`, `SAME_PROBES_SENTENCE`, `PENDING_RUNNER_V3`, `inputs_sha256`, `misspecified_section`, `llm_section`.
+- `soundings/eval/harness.py`: `run_campaign(suite, seeds, *, policies, perturb_magnitude, perturb_seed, include_misspecified, include_llm_diff, fixture_store, violations_log, mode, soundings_factory, use_default_soundings, twists_root, ladder_cfg, eval_cfg)`, `resolve_suite`, `parse_seeds`, `default_out`, `SuiteError`, `SeedsError`, and the Protocol `SoundingsFactory.__call__(*, planner, fixture_store, violations_log) -> Policy`. `default_soundings_factory()` returns None until `soundings.eval.soundings_policy` exists, then builds it through WO-050 `make_policy("soundings", planner=, fixture_store=, violations_log=)`; with None the report lists soundings as `pending runner v3` in every table.
+- `soundings/eval/__main__.py`: typer CLI; the Makefile line, `--seeds 1..5`, `--suite twist0N`, default `--out`, `--perturb-magnitude/--perturb-seed` (defaults from `config/eval.yaml`), `--no-misspecified`, `--no-llm-diff`; `--mode record|live` prints `estimated model calls: N` and exits 3; bad suite/seeds/mode exit 2.
+- Tests: `tests/test_perturb.py`, `tests/test_metrics.py`, `tests/test_eval_cli.py` (`test_seed_forms`, `test_suite_resolution`, `test_live_mode_refused`, `test_no_network`), `tests/test_eval.py` (baselines over S01..S08 x seeds 1,2; `test_columns_stable`, `test_misspecified_section`, magnitude 0, `test_honesty_labels`, `test_report_vocabulary_clean`, `test_report_deterministic` as two CLI processes).
+
+Mis-specified reading: both columns of that section run the suite with acoustic pins cleared; `nominal` samples from config/likelihoods.yaml, `misspecified` from the perturbed copy (so magnitude 0 gives zero deltas). The baselines ignore acoustics, so their deltas are 0 by construction.
+
+Remains for Part B:
+- `soundings/eval/soundings_policy.py` (`SoundingsPolicy(planner=, fixture_store=, violations_log=)` over runner v3) and the runner's `# --- sim_likelihoods (WO-051) ---` block; `tests/test_soundings_policy.py`.
+- `tests/test_eval.py::test_catalog_claims` (catalog x seeds 1..5, soundings >= 70% at or below ask, S01/S03/S04 counted every seed, 0 missed threats; bang strictly highest shutdown-minutes and human_queue strictly highest interruptions over all three policies); the scorer-likelihood check in `test_misspecified_section`.
+- `tests/test_eval_llm_diff.py`, `tests/helpers/static_client.py`, `tests/fixtures/eval_static/*.json`.
+- The owner addendum `WO-051-ADDENDUM-eval-directive.md` items 2a-2e and 3 (perturbation at ±20%: pass the magnitude that maps to it, toggle sweep, threshold sweep, BT-01 scale, seeds 1-20 mean/min-max, planner ablation); part A does none of them.
+- `make eval` with all three policies; drop the `SOUNDINGS_PENDING` branches in `tests/test_eval.py` once soundings runs.
