@@ -175,17 +175,25 @@ class LadderMachine:
     def advance(self, tick: int | None = None) -> list[StepResult]:
         """Fire every due timer of this contact, earliest first, as its event.
 
-        ``tick`` defaults to the ``TickClock`` tick, or the latest event tick otherwise.
+        A timer is consumed only by the transition its event fires (``_fire``), so the
+        pending timers stay a function of the checkpoints. A due timer whose event fires no
+        row stays pending and is tried again on the next call. ``tick`` defaults to the
+        ``TickClock`` tick, or the latest event tick otherwise.
         """
         if tick is None:
             tick = self._clock.tick if isinstance(self._clock, TickClock) else self._last_tick
         results: list[StepResult] = []
+        tried: set[Timer] = set()
         while True:
-            due = [t for t in self.timers.due(self._clock) if t.contact_id == self.contact_id]
+            due = [
+                t
+                for t in self.timers.due(self._clock)
+                if t.contact_id == self.contact_id and t not in tried
+            ]
             if not due:
                 return results
             timer = due[0]
-            self.timers.pop(timer)
+            tried.add(timer)
             kind, arg = TIMER_EVENTS[timer.name]
             event = LadderEvent(
                 kind=kind,
@@ -292,6 +300,9 @@ class LadderMachine:
         row = TRANSITIONS[index]
         src = self._state
         self._commit_payload(event)
+        fired_timer = event.payload.extra.get("timer")
+        if isinstance(fired_timer, str):
+            self.timers.cancel(fired_timer, self.contact_id)
         actions = tuple(self._act(kind, row, permit, event, now_s) for kind in row.actions)
         if row.dst in HANDLING_TERMINAL_STATES:
             self.timers.cancel_contact(self.contact_id)
@@ -430,7 +441,7 @@ class LadderMachine:
             zone_criticality=criticality,
             basin=p.basin if p.basin is not None else self._basin,
             nearest_asset_id=asset_id,
-            active_holds=self._ledger.active_holds(),
+            active_holds=self._ledger.active_holds(exclude_contact=self.contact_id),
             backup_paged=self._backup_paged,
             approval_token=p.approval_token,
             requested_scope=p.requested_scope or self._requested,

@@ -96,10 +96,16 @@ class ActionLedger:
     def keys(self, contact_id: str | None = None) -> tuple[str, ...]:
         return tuple(r.action.idempotency_key for r in self.records(contact_id))
 
-    def active_holds(self) -> int:
-        """Contacts, across the whole run, with more ``start_hold`` than ``release_hold``."""
+    def active_holds(self, exclude_contact: str | None = None) -> int:
+        """Contacts, across the whole run, with more ``start_hold`` than ``release_hold``.
+
+        ``exclude_contact`` leaves one contact out: the machine passes its own id, so a
+        re-delivered event after a crash sees the same world it saw the first time.
+        """
         balance: dict[str, int] = {}
         for r in self._records.values():
+            if r.action.contact_id == exclude_contact:
+                continue
             if r.action.kind is ActionKind.START_HOLD:
                 balance[r.action.contact_id] = balance.get(r.action.contact_id, 0) + 1
             elif r.action.kind is ActionKind.RELEASE_HOLD:

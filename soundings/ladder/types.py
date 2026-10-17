@@ -183,7 +183,11 @@ class LadderTimings(StrictModel):
 
 
 class GuardContext(StrictModel):
-    """Everything a guard may read. Unknown inputs are ``None``, never imputed."""
+    """Everything a guard may read. Unknown inputs are ``None``, never imputed.
+
+    ``active_holds`` counts the holds of every other contact in the run (a contact has at
+    most one hold of its own: no row enters HOLDING from HOLDING).
+    """
 
     contact_id: str
     state: LadderState
