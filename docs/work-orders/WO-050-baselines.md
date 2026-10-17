@@ -106,7 +106,7 @@ None changed. The code reads all five rungs to build histograms. `bang` models a
 §2.1, §2.2, §2.4, §2.5: see Rule proofs above.
 
 ## Done
-PR: see docs/STATE.md row 050 · Merged commit: squash commit on main (see PR) · Test summary: 838 passed (29 WO-050: 24 unit incl. 10 interruption-table cases, 5 integration) · STATE.md updated: yes
+PR: see docs/STATE.md row 050 · Merged commit: squash commit on main (see PR) · Test summary: 979 passed after rebase (29 WO-050: 24 unit incl. 10 interruption-table cases, 5 integration) · STATE.md updated: yes
 
 As built (differences from the text above, all recorded in DECISIONS 2026-10-16 23:38):
 - Interruptions follow the one binding definition (DECISIONS 23:05, WO-022 addenda): `interruption_kind` returns approval_request (entering `AWAITING_APPROVAL`, or a `berth_reopened` step), handoff (entering `HANDED_OFF`), backup_page (`backup_paged` event) or eyes_on (`request_watch_officer_look` probe or a `person_recheck`). Platform `sitrep_update` steps in `WATCH_AFTER_HANDOFF` do NOT count (the WO text said they did). human_queue's re-checks are the person looking (no platform watches for it), logged as `person_recheck`, and count as eyes_on.
