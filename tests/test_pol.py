@@ -24,16 +24,14 @@ from soundings.investigation.pol import (
     PolCell,
     PolTable,
     anomaly_score,
-    contact_rate,
-    generate_normal_month,
     load_pol_table,
-    synthetic_scenario,
     weekday_of_day,
 )
 from soundings.schemas.enums import FeatureName, Hypothesis
 from soundings.schemas.evidence import UNKNOWN, EvidenceValue
 from soundings.schemas.harbor import load_harbor
 from soundings.sim.current import load_current_field, tide_phase_for_hour
+from soundings.sim.normal_month import contact_rate, generate_normal_month, synthetic_scenario
 from soundings.sim.run import run_scenario
 from soundings.sim.scenario import catalog_paths, resolve_scenario
 
