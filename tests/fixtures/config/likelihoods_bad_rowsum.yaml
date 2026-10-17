@@ -1,0 +1,141 @@
+# Deliberately broken copy of config/likelihoods.yaml for tests/test_likelihood_tables.py:
+# drift_consistency / DEBRIS_OR_DRIFT sums to 1.05. Never load this outside tests.
+# P(feature bucket | hypothesis). Each row sums to 1.0 across buckets (tested).
+# These are stress-test tables for the demonstration. They are shared by the
+# simulator (which samples from them) and the scorer (which reads them), so the
+# eval also runs "mis-specified" variants where the sim draws from perturbed
+# tables (soundings/eval/perturb.py) to show the scorer is not grading its own
+# homework.
+#
+# Buckets are defined once in soundings/investigation/features.py and referenced
+# here by name. A feature missing from a hypothesis row is treated as
+# uninformative (skipped), never imputed.
+
+features:
+
+  drift_consistency:        # 0-1 correlation with configured current field
+    buckets: [low, mid, high]
+    thresholds: [0.3, 0.7]
+    FILED_ON_PLAN:           [0.70, 0.25, 0.05]
+    FILED_OFF_PLAN:          [0.20, 0.30, 0.50]
+    UNFILED_KNOWN_OPERATOR:  [0.70, 0.25, 0.05]
+    BIOLOGIC:                [0.55, 0.35, 0.10]
+    DEBRIS_OR_DRIFT:         [0.03, 0.12, 0.90]
+    SURFACE_VESSEL_AIS_OFF:  [0.75, 0.20, 0.05]
+    UNAUTHORIZED_UUV:        [0.85, 0.12, 0.03]
+    UNAUTHORIZED_DIVER:      [0.60, 0.30, 0.10]
+
+  propeller_tonal_present:
+    buckets: [false, true]
+    FILED_ON_PLAN:           [0.25, 0.75]
+    FILED_OFF_PLAN:          [0.60, 0.40]
+    UNFILED_KNOWN_OPERATOR:  [0.25, 0.75]
+    BIOLOGIC:                [0.97, 0.03]
+    DEBRIS_OR_DRIFT:         [0.98, 0.02]
+    SURFACE_VESSEL_AIS_OFF:  [0.20, 0.80]
+    UNAUTHORIZED_UUV:        [0.30, 0.70]
+    UNAUTHORIZED_DIVER:      [0.85, 0.15]   # DPV possible
+
+  breathing_or_click_present:
+    buckets: [false, true]
+    FILED_ON_PLAN:           [0.95, 0.05]
+    FILED_OFF_PLAN:          [0.95, 0.05]
+    UNFILED_KNOWN_OPERATOR:  [0.95, 0.05]
+    BIOLOGIC:                [0.30, 0.70]
+    DEBRIS_OR_DRIFT:         [0.97, 0.03]
+    SURFACE_VESSEL_AIS_OFF:  [0.97, 0.03]
+    UNAUTHORIZED_UUV:        [0.97, 0.03]
+    UNAUTHORIZED_DIVER:      [0.60, 0.40]   # regulator noise
+
+  transit_pattern:
+    buckets: [straight, lawnmower, orbit, random, stationary]
+    FILED_ON_PLAN:           [0.25, 0.45, 0.10, 0.10, 0.10]
+    FILED_OFF_PLAN:          [0.15, 0.10, 0.05, 0.40, 0.30]
+    UNFILED_KNOWN_OPERATOR:  [0.30, 0.40, 0.10, 0.10, 0.10]
+    BIOLOGIC:                [0.10, 0.02, 0.08, 0.70, 0.10]
+    DEBRIS_OR_DRIFT:         [0.30, 0.02, 0.03, 0.35, 0.30]
+    SURFACE_VESSEL_AIS_OFF:  [0.60, 0.05, 0.10, 0.20, 0.05]
+    UNAUTHORIZED_UUV:        [0.45, 0.10, 0.35, 0.05, 0.05]
+    UNAUTHORIZED_DIVER:      [0.40, 0.05, 0.20, 0.25, 0.10]
+
+  depth:                    # metres
+    buckets: [surface, shallow, mid, deep]
+    thresholds: [1.0, 4.0, 10.0]
+    FILED_ON_PLAN:           [0.05, 0.30, 0.45, 0.20]
+    FILED_OFF_PLAN:          [0.25, 0.35, 0.30, 0.10]
+    UNFILED_KNOWN_OPERATOR:  [0.05, 0.30, 0.45, 0.20]
+    BIOLOGIC:                [0.40, 0.45, 0.13, 0.02]
+    DEBRIS_OR_DRIFT:         [0.70, 0.25, 0.04, 0.01]
+    SURFACE_VESSEL_AIS_OFF:  [0.95, 0.05, 0.00, 0.00]
+    UNAUTHORIZED_UUV:        [0.02, 0.18, 0.50, 0.30]
+    UNAUTHORIZED_DIVER:      [0.10, 0.50, 0.35, 0.05]
+
+  speed_over_ground:        # m/s
+    buckets: [drift, slow, cruise, fast]
+    thresholds: [0.3, 0.8, 2.0]
+    FILED_ON_PLAN:           [0.10, 0.30, 0.55, 0.05]
+    FILED_OFF_PLAN:          [0.50, 0.30, 0.15, 0.05]
+    UNFILED_KNOWN_OPERATOR:  [0.10, 0.30, 0.55, 0.05]
+    BIOLOGIC:                [0.15, 0.30, 0.40, 0.15]
+    DEBRIS_OR_DRIFT:         [0.80, 0.18, 0.02, 0.00]
+    SURFACE_VESSEL_AIS_OFF:  [0.05, 0.15, 0.40, 0.40]
+    UNAUTHORIZED_UUV:        [0.05, 0.25, 0.60, 0.10]
+    UNAUTHORIZED_DIVER:      [0.20, 0.60, 0.20, 0.00]
+
+  ais_surface_correlation:  # 0-1
+    buckets: [none, weak, strong]
+    thresholds: [0.3, 0.7]
+    FILED_ON_PLAN:           [0.80, 0.15, 0.05]
+    FILED_OFF_PLAN:          [0.80, 0.15, 0.05]
+    UNFILED_KNOWN_OPERATOR:  [0.80, 0.15, 0.05]
+    BIOLOGIC:                [0.85, 0.12, 0.03]
+    DEBRIS_OR_DRIFT:         [0.85, 0.12, 0.03]
+    SURFACE_VESSEL_AIS_OFF:  [0.10, 0.30, 0.60]   # a boat with AIS off still often correlates with a radar/visual surface track
+    UNAUTHORIZED_UUV:        [0.90, 0.08, 0.02]
+    UNAUTHORIZED_DIVER:      [0.85, 0.12, 0.03]
+
+  registry_match:
+    buckets: [exact, area_mismatch, window_mismatch, none]
+    FILED_ON_PLAN:           [0.90, 0.05, 0.04, 0.01]
+    FILED_OFF_PLAN:          [0.05, 0.50, 0.40, 0.05]
+    UNFILED_KNOWN_OPERATOR:  [0.00, 0.05, 0.05, 0.90]
+    BIOLOGIC:                [0.00, 0.01, 0.01, 0.98]
+    DEBRIS_OR_DRIFT:         [0.00, 0.01, 0.01, 0.98]
+    SURFACE_VESSEL_AIS_OFF:  [0.00, 0.01, 0.01, 0.98]
+    UNAUTHORIZED_UUV:        [0.00, 0.01, 0.01, 0.98]
+    UNAUTHORIZED_DIVER:      [0.00, 0.01, 0.01, 0.98]
+
+  hail_reply:
+    buckets: [valid, invalid, none, timeout]
+    FILED_ON_PLAN:           [0.90, 0.02, 0.03, 0.05]
+    FILED_OFF_PLAN:          [0.20, 0.05, 0.45, 0.30]
+    UNFILED_KNOWN_OPERATOR:  [0.80, 0.05, 0.05, 0.10]
+    BIOLOGIC:                [0.00, 0.01, 0.94, 0.05]
+    DEBRIS_OR_DRIFT:         [0.00, 0.01, 0.94, 0.05]
+    SURFACE_VESSEL_AIS_OFF:  [0.00, 0.02, 0.88, 0.10]
+    UNAUTHORIZED_UUV:        [0.01, 0.09, 0.80, 0.10]
+    UNAUTHORIZED_DIVER:      [0.00, 0.02, 0.88, 0.10]
+
+  pattern_of_life_anomaly:  # 0-1
+    buckets: [normal, unusual, anomalous]
+    thresholds: [0.5, 0.85]
+    FILED_ON_PLAN:           [0.70, 0.25, 0.05]
+    FILED_OFF_PLAN:          [0.30, 0.45, 0.25]
+    UNFILED_KNOWN_OPERATOR:  [0.50, 0.35, 0.15]
+    BIOLOGIC:                [0.75, 0.20, 0.05]
+    DEBRIS_OR_DRIFT:         [0.55, 0.30, 0.15]
+    SURFACE_VESSEL_AIS_OFF:  [0.50, 0.35, 0.15]
+    UNAUTHORIZED_UUV:        [0.10, 0.30, 0.60]
+    UNAUTHORIZED_DIVER:      [0.10, 0.30, 0.60]
+
+  loiter_score:             # 0-1
+    buckets: [low, mid, high]
+    thresholds: [0.3, 0.7]
+    FILED_ON_PLAN:           [0.60, 0.30, 0.10]
+    FILED_OFF_PLAN:          [0.30, 0.30, 0.40]
+    UNFILED_KNOWN_OPERATOR:  [0.60, 0.30, 0.10]
+    BIOLOGIC:                [0.50, 0.35, 0.15]
+    DEBRIS_OR_DRIFT:         [0.40, 0.30, 0.30]
+    SURFACE_VESSEL_AIS_OFF:  [0.70, 0.25, 0.05]
+    UNAUTHORIZED_UUV:        [0.25, 0.30, 0.45]
+    UNAUTHORIZED_DIVER:      [0.30, 0.35, 0.35]
