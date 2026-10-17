@@ -122,6 +122,20 @@ def responder_snapshots(
     return None
 
 
+# --- WO-088D begin ---
+def real_responder_trail(scenario: Scenario, seed: int) -> tuple[ResponderSnapshotLike, ...]:
+    """The harbor's real responder over this run: runner v2 with ``DEFAULT_RESPONDER``
+    (``config/responder.yaml``), one snapshot per tick. Deterministic (same scenario and
+    seed, same trail); the stream still only replays what the run produced."""
+    from soundings.runner import DEFAULT_RESPONDER, ScenarioRunnerV2
+
+    result = ScenarioRunnerV2(scenario, seed=seed).run(responder=DEFAULT_RESPONDER)
+    return tuple(cast(Sequence[ResponderSnapshotLike], result.responder_trail))
+
+
+# --- WO-088D end ---
+
+
 def _round_opt(value: float | None) -> float | None:
     return None if value is None else round6(value)
 
@@ -182,6 +196,7 @@ __all__ = [
     "config_defaults",
     "ResponderProvider",
     "ResponderSnapshotLike",
+    "real_responder_trail",  # WO-088D
     "register_responder_provider",
     "responder_payloads",
     "responder_snapshots",
