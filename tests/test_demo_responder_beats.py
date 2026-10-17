@@ -13,7 +13,7 @@ SCRIPT = REPO / "docs" / "demo-script.yaml"
 LOOK_CAPTION = (
     "The platform goes to look. It never goes closer than 25 m. The call is still a person's."
 )
-VO_NOTE = REPO / "docs" / "work-orders" / "WO-062-ADDENDUM-responder-vo.md"
+VO_NOTE = REPO / "docs" / "work-orders" / "WO-062-ADDENDUM-video-sound.md"
 
 
 def test_harbor_night_gains_the_look_caption() -> None:

@@ -56,3 +56,27 @@ The video and the stage demo run with sound ON; captions stay as the safety net,
 - Keep the WO-062 Part A scheduler compatible: each step keeps `t` and `say`; add `caption`, `speed`, `spotlight`, `pause_for_click`, `action`. The new shot list replaces docs/demo-script.yaml when WO-062P lands (not before WO-062 Part A merges).
 - Dependencies: `imageio-ffmpeg` (dev, approved 23:05); `tesseract` is an optional system tool (fallback per exit test 3); macOS `say` for the VO draft only; numpy generates the SFX files, which are committed under web/public/sfx (each < 1 s, −18 dBFS peak) together with the generator script.
 - The ping sound in WO-086 and the SFX events here are the same mechanism: one `sfx` module in web/src fed by the same WebSocket events the audit log records.
+
+<!-- --- WO-088 begin --- -->
+## WO-088 addendum: responder lines for the video and the vo-script
+
+Recorded 2026-10-17 08:37 PDT by the WO-088 part C agent (owner directive 07:45 PDT; CLAUDE.md section 8 A2, numbered WO-088 per A1). Fold these into `docs/vo-script.md` when WO-062 Part B writes it.
+
+### Presenter captions (`docs/demo-script.yaml`)
+
+- **1:00 Harbor Night (S05).** The main caption stays verbatim: "Our work stops here. The call is a person's." A second, smaller caption line (`subcaption`) adds the owner's line: "The platform goes to look. It never goes closer than 25 m. The call is still a person's."
+- **0:30 Busy Tuesday.** The `say` line gains the S02 search beat: "A silent glider is found in the drift box." The on-screen caption is unchanged, because it is held word for word to the directive's beat list.
+
+### vo-script lines
+
+- Harbor Night, before the hold: "The platform goes to look. It never goes closer than 25 m. The call is still a person's."
+- Busy Tuesday, the S02 beat: "The glider went quiet. The platform searched the drift box, and it is found in the drift box."
+
+### Sound
+
+- `responder_dispatch.wav` plays two short rising notes (E5 then A5, 0.42 s, -18 dBFS). It comes from `scripts/gen_sfx.py` and plays through `web/src/sfx.ts` on the `responder` event that starts a dispatch to look (`dispatched: true`). Like the other sounds, it obeys the presenter mute.
+
+### Vocabulary
+
+Look, station, standoff, dispatch to look, return to dock. The responder is a probe at rung ask, and nothing happens after the handoff.
+<!-- --- WO-088 end --- -->
