@@ -1643,11 +1643,6 @@ class _ActiveIndex:
         return sorted(self._live)
 
 
-def _beyond_reacquire_gap(run: _V1Run, last_tick: int, first_tick: int) -> bool:
-    """``match_reacquisition``'s own gap test, applied before building a ``LostTrack``."""
-    return (first_tick - last_tick) * run.tick_s > run.cfg.reacquire.max_gap_s
-
-
 def _wake_every_tick(run: _V1Run) -> bool:
     """True while any case is past ASKING and not terminal (later runners act per tick).
 
