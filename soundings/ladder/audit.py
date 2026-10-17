@@ -710,6 +710,14 @@ class AuditSink:
             cid = checkpoint.contact_id
         elif actions:
             cid = actions[0].contact_id
+        # --- WO-051 begin ---
+        # A refused step (no row fired, no action) still writes its guard decisions; the
+        # machine passes no checkpoint, so the contact comes from what the guard read, else
+        # a fixed placeholder. Before this, such a step raised "malformed idempotency key"
+        # (runner v3, S05 seeds 2 and 5 under the signed orders).
+        if not cid and decisions:
+            cid = _refused_step_contact(self.guard_inputs, decisions)
+        # --- WO-051 end ---
         out: list[AuditEntry] = []
         step_key: str | None = None
         if checkpoint is not None:
@@ -771,6 +779,27 @@ class AuditSink:
         entries = self.entries(checkpoint, actions, decisions)
         if entries:
             self.audit.append_many(entries, run_id=self.run_id, t_s=self._t_s(checkpoint))
+
+
+# --- WO-051 begin ---
+UNATTRIBUTED_CONTACT = "unattributed"
+"""Key prefix for guard rows of a refused step whose contact the sink cannot name."""
+
+
+def _refused_step_contact(
+    guard_inputs: Callable[[str], Mapping[str, Any] | None] | None,
+    decisions: Sequence[GuardDecision],
+) -> str:
+    if guard_inputs is not None:
+        for decision in decisions:
+            read = guard_inputs(decision.inputs_hash)
+            cid = None if read is None else read.get("contact_id")
+            if isinstance(cid, str) and _KEY_RE.match(cid):
+                return cid
+    return UNATTRIBUTED_CONTACT
+
+
+# --- WO-051 end ---
 
 
 class GuardInputsLog:

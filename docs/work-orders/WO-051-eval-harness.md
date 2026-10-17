@@ -156,7 +156,7 @@ None changed. The code reports on watch, ask, slow, hold and hand to a person.
 §2.2, §2.3, §2.4, §2.5, §2.6: see Rule proofs above.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see the part B PR on `wo/051-eval-harness` (parts A #24, B1 #43) · Merged commit: squash on merge · Test summary: see "Part B done" below · STATE.md updated: yes
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - 70% rule: a ground-truth contact counts as resolved at or below ask when its terminal state ∈ {CLEARED_AT_ASK, RESOLVED_BENIGN, HAZARD_NOTICE, LOST_VEHICLE} and its max rung ≤ ask. Report false-alarm contacts on a separate line, not in the denominator. Expected 7 of 9 on the catalog.
@@ -196,3 +196,19 @@ Built:
 First reading (seeds 1..3, bands untouched): 0 false shutdowns at every threshold; missed threats 1/4/4/5/5 of 6 threat-trap runs at 0.25/0.30/0.35/0.40/0.45. TR-02 and TR-03 often top out as FILED_OFF_PLAN because registry rows are still the Phase 2 `unknown` placeholder in the evidence table, so the scorer-level threat_mass stays below the band. This is a calibration finding for part B and the sensitivity curve, not a reason to move the bands or the threshold.
 
 Shell determinism note: with archives, `diff -r /tmp/e1 /tmp/e2` is empty when both runs pass the same `--stamp`; without it the two `runs/` folder names differ by stamp while every `report.json` is byte-identical.
+
+## Part B done (2026-10-17 10:49 PDT)
+Branch `wo/051-eval-harness`. The soundings policy over runner v3, the addendum sweeps 2a-2e and the item-3 hook; `make eval` runs all three policies and every sweep in about 2 minutes (8 workers on this shared machine; `timing.json`).
+
+Built:
+- `soundings/eval/soundings_policy.py`: `SoundingsPolicy(planner="fallback"|"llm", fixture_store=None, violations_log=None, *, stopping=None, toggles=())`; `run_result()` is the raw `RunResultV3` (signed standing orders, default approver, in-memory audit, closed); `_from_run_result` maps ladder checkpoints (v2 transitions for a contact with no ladder run) to WO-050 `Transition`s, inserts non-cached probe calls inside `INVESTIGATING` and `page_backup` actions as `BACKUP_PAGED`, stops each contact's log at `HANDED_OFF` (watch-after-handoff updates are never interruptions), and assembles through `assemble_run` over the scenario-length sim (same contacts and `track_hash` as the baselines) with `hold_shutdowns` and `slow_minutes` closed on v3's extended horizon. `planner_stats(result)`, `transitions_of(result)`.
+- `soundings/runner.py`: `ScenarioRunner(..., sim_likelihoods=None, stopping=None)`; the kwargs, their attributes and the three call sites (scenario sim, v3 extended sim, investigation kit) sit in WO-051 markers; the `# --- sim_likelihoods (WO-051) ---` block documents them.
+- `soundings/ladder/audit.py` (WO-051 block): a refused ladder step (guard decisions, no checkpoint, no action) keys its guard rows by the contact the guard read, else `unattributed`; runner v3 raised "malformed idempotency key" on S05 seeds 2 and 5 under the signed orders.
+- `soundings/eval/jobs.py`: picklable `PolicySpec`/`Job`, `run_jobs` (dedup by key, spawn `ProcessPoolExecutor`, results in key order; `SOUNDINGS_EVAL_WORKERS`, default `min(cpus, 8)`); a sweep job that raises becomes a `JobError` row.
+- `soundings/eval/sweeps.py`: 2a `misspecified_20` (magnitude ln 1.2 = 0.182322, i.e. +-20% at one sigma), 2b `toggle_section` (every `ToggleName` x catalog with stated parameters, `sweep_toggle`), 2c `threshold_section` + `write_threshold_png` (`stopping.threat_mass_handoff` 0.25..0.45 through an overridden `StoppingConfig`), 2d `scale_section` (pending with its reason while `scenarios/BT-01.yaml` and `soundings.sim.generate` are absent), 2e `seed_section` (seeds 1-20, mean and min-max per metric), `ablation_hook()` (`soundings.eval.ablation.ablation_table` once WO-093 lands).
+- `soundings/eval/report.py`: `## Per observed contact` (`PER_CONTACT_COLUMNS`, a `Counter` of `ContactOutcome.max_rung` per run: WO-086's ledger numbers), a `Method: Seeds ...` line under every table, the sweep sections, `REPORT_COLUMNS` extended; `harness.run_campaign(..., include_sweeps=False, sweep_seeds=1..20, workers=None)`; CLI `--sweeps/--no-sweeps` (default on), writes `threshold_curve.png` and `timing.json`.
+- Tests: `tests/test_soundings_policy.py`, `tests/test_eval_llm_diff.py`, `tests/helpers/static_client.py`, `tests/fixtures/eval_static/*.json`, part B tests in `tests/test_eval.py`.
+
+Readings (catalog x seeds 1..5, `make eval`): soundings 27/45 ground-truth contacts at or below ask (60.0%), 0 missed threats, 0 false shutdowns, 15 shutdown-minutes (the S05 hold); bang 0 missed, 1292.97 shutdown-minutes; human_queue 30.71 interruptions/h vs 12.00 soundings and 12.78 bang. The >= 70% claim does not hold on main: S04 ends HANDED_OFF on every seed (the open S04 question) and S08 hands its debris to a person on seeds 1, 2 and 5; `test_catalog_at_or_below_ask_claim` and `test_s04_resolved_benign` are strict xfails naming it, and the report prints the real number. 2a: +-20% tables change no outcome (missed threats stay 0). 2c: missed threats 0 and false shutdowns 0 at every threshold; benign contacts handed to a person 9/8/8/8/8. 2b: every toggle runs; S08 matches its expected terminal 4/5 under fog_no_camera vs 3/5 untoggled.
+
+Wall time is the one non-deterministic output, so it lives in `<out>/timing.json` (the method lines point there) and never in `report.md`/`report.json`; two processes give byte-identical reports and PNG.

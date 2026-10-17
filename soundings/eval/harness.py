@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import yaml
 
+from soundings.canonical import round6
 from soundings.eval.families import FAMILIES, FamilyError, family_paths
+from soundings.eval.jobs import Job, JobError, JobResult, PolicySpec, run_jobs
 from soundings.eval.metrics import LlmDiff, diff_planners
 from soundings.eval.perturb import perturb_likelihoods, table_shift, unpin_acoustics
 from soundings.eval.policies import (
@@ -34,17 +36,35 @@ from soundings.eval.policies import (
     make_policy,
 )
 from soundings.eval.report import (
+    NO_LLM_EFFECT_SENTENCE,
     PENDING_RUNNER_V3,
     EvalReport,
+    LlmSection,
     MisspecifiedSection,
     build_report,
     inputs_sha256,
     misspecified_section,
 )
+from soundings.eval.sweeps import (
+    MIS20_MAGNITUDE,
+    NO_TOGGLE,
+    SEEDS_1_20,
+    THRESHOLDS,
+    TOGGLES,
+    SweepsReport,
+    misspecified_20,
+    scale_pending_reason,
+    scale_section,
+    seed_section,
+    sweep_toggle,
+    threshold_section,
+    toggle_section,
+)
 from soundings.schemas import (
     LadderConfig,
     LikelihoodSpec,
     Scenario,
+    load_harbor,
     load_ladder_config,
     load_likelihood_spec,
 )
@@ -202,6 +222,18 @@ def run_policy(
     ]
 
 
+def _spec(name: PolicyName, *, planner: str = "fallback", **kw: Any) -> PolicySpec:
+    if name is PolicyName.SOUNDINGS:
+        return PolicySpec(name=name, planner="llm" if planner == "llm" else "fallback", **kw)
+    return PolicySpec(name=name)
+
+
+def _ok(result: JobResult) -> PolicyRun:
+    if isinstance(result, JobError):
+        raise RuntimeError(f"eval run {result.key} failed: {result.error}")
+    return result
+
+
 def run_campaign(
     suite: str,
     seeds: Sequence[int],
@@ -219,65 +251,200 @@ def run_campaign(
     twists_root: Path | None = None,
     ladder_cfg: LadderConfig | None = None,
     eval_cfg: EvalConfig | None = None,
+    include_sweeps: bool = False,
+    sweep_seeds: Sequence[int] = SEEDS_1_20,
+    workers: int | None = None,
 ) -> EvalReport:
     """Run the campaign and build the report (nothing is written here).
 
     ``soundings_factory=None`` with ``use_default_soundings`` resolves the real
-    ``SoundingsPolicy`` if its module exists; otherwise soundings is pending."""
+    ``SoundingsPolicy`` if its module exists; otherwise soundings is pending. With the
+    default factory every run is a picklable job (``soundings.eval.jobs``) and runs in a
+    process pool of ``workers`` (default ``SOUNDINGS_EVAL_WORKERS`` or ``min(cpus, 8)``);
+    an injected factory or a ``fixture_store`` runs those soundings jobs in this process.
+    ``include_sweeps`` adds the addendum sections (``soundings.eval.sweeps``): 2a +-20%,
+    2b toggles, 2c thresholds, 2d scale (pending without BT-01), 2e ``sweep_seeds``."""
     ladder = ladder_cfg if ladder_cfg is not None else load_ladder_config()
     ecfg = eval_cfg if eval_cfg is not None else load_eval_config()
     paths = resolve_suite(suite, twists_root=twists_root)
-    scenarios = load_suite(paths)
+    scenarios = sorted(load_suite(paths), key=lambda s: s.id)
     seed_list = tuple(sorted(set(seeds)))
     factory = soundings_factory
-    if factory is None and use_default_soundings:
+    default_factory = factory is None and use_default_soundings
+    if default_factory:
         factory = default_soundings_factory()
+    vlog = None if violations_log is None else str(violations_log)
 
-    active: dict[PolicyName, Policy] = {}
     pending: dict[PolicyName, str] = {}
+    active: list[PolicyName] = []
+    injected: dict[str, Policy] = {}
     for name in PolicyName:
         if name not in policies:
             continue
-        if name is PolicyName.SOUNDINGS:
-            if factory is None:
-                pending[name] = PENDING_RUNNER_V3
-                continue
-            active[name] = factory(
-                planner="fallback", fixture_store=None, violations_log=violations_log
+        if name is PolicyName.SOUNDINGS and factory is None:
+            pending[name] = PENDING_RUNNER_V3
+            continue
+        active.append(name)
+    soundings_on = PolicyName.SOUNDINGS in active
+    if soundings_on and not default_factory and factory is not None:
+        injected["fallback"] = factory(
+            planner="fallback", fixture_store=None, violations_log=violations_log
+        )
+    if soundings_on and include_llm_diff and factory is not None:
+        if fixture_store is not None or not default_factory:
+            injected["llm"] = factory(
+                planner="llm", fixture_store=fixture_store, violations_log=violations_log
             )
-        else:
-            active[name] = make_policy(name, cfg=ecfg, ladder=ladder)
 
-    runs: list[PolicyRun] = []
-    for policy in active.values():
-        runs.extend(run_policy(policy, scenarios, seed_list))
+    def job(
+        name: PolicyName,
+        sc: Scenario,
+        seed: int,
+        *,
+        planner: str = "fallback",
+        sc_key: str | None = None,
+        lk: LikelihoodSpec | None = None,
+        lk_key: str = "config",
+        threshold: float | None = None,
+        tolerate: bool = False,
+    ) -> Job:
+        spec = _spec(name, planner=planner, threat_mass_handoff=threshold, violations_log=vlog)
+        direct = None
+        if name is PolicyName.SOUNDINGS and threshold is None:
+            direct = injected.get(planner)
+        return Job(
+            spec=spec,
+            scenario=sc,
+            scenario_key=sc.id if sc_key is None else sc_key,
+            seed=seed,
+            likelihoods=lk,
+            likelihoods_key=lk_key,
+            policy=direct,
+            tolerate_errors=tolerate,
+        )
+
+    jobs: list[Job] = []
+    main = [job(n, sc, s) for n in active for sc in scenarios for s in seed_list]
+    jobs += main
+
+    real = load_likelihood_spec()
+    unpinned = [unpin_acoustics(sc, real) for sc in scenarios]
+    mis_jobs: tuple[list[Job], list[Job]] = ([], [])
+    perturbed: LikelihoodSpec | None = None
+    if include_misspecified:
+        perturbed = perturb_likelihoods(real, perturb_magnitude, perturb_seed)
+        pkey = f"perturbed:{round6(perturb_magnitude)}:{perturb_seed}"
+        for n in active:
+            for sc in unpinned:
+                for s in seed_list:
+                    mis_jobs[0].append(job(n, sc, s, sc_key=f"{sc.id}+unpinned"))
+                    mis_jobs[1].append(
+                        job(n, sc, s, sc_key=f"{sc.id}+unpinned", lk=perturbed, lk_key=pkey)
+                    )
+        jobs += mis_jobs[0] + mis_jobs[1]
+
+    llm_jobs: list[Job] = []
+    if include_llm_diff and soundings_on:
+        llm_jobs = [
+            job(PolicyName.SOUNDINGS, sc, s, planner="llm", tolerate=True)
+            for sc in scenarios
+            for s in seed_list
+        ]
+        jobs += llm_jobs
+
+    sweep_jobs: dict[str, list[tuple[Any, Job]]] = {}
+    stopping_default = load_ladder_config().stopping.get("threat_mass_handoff")
+    if include_sweeps and soundings_on:
+        snd = PolicyName.SOUNDINGS
+        harbor = load_harbor()
+        p20 = perturb_likelihoods(real, MIS20_MAGNITUDE, perturb_seed)
+        k20 = f"perturbed:{MIS20_MAGNITUDE}:{perturb_seed}"
+        sweep_jobs["mis20_nominal"] = [
+            (None, job(snd, sc, s, sc_key=f"{sc.id}+unpinned"))
+            for sc in unpinned
+            for s in seed_list
+        ]
+        sweep_jobs["mis20"] = [
+            (None, job(snd, sc, s, sc_key=f"{sc.id}+unpinned", lk=p20, lk_key=k20, tolerate=True))
+            for sc in unpinned
+            for s in seed_list
+        ]
+        sweep_jobs["toggles"] = [
+            (
+                (t.value, sc.id),
+                job(
+                    snd,
+                    sweep_toggle(sc, t, harbor),
+                    s,
+                    sc_key=f"{sc.id}+{t.value}",
+                    tolerate=True,
+                ),
+            )
+            for t in TOGGLES
+            for sc in scenarios
+            for s in seed_list
+        ]
+        sweep_jobs["thresholds"] = [
+            (
+                t,
+                job(
+                    snd,
+                    sc,
+                    s,
+                    threshold=None
+                    if stopping_default is not None and float(t) == float(stopping_default)
+                    else t,
+                    tolerate=True,
+                ),
+            )
+            for t in THRESHOLDS
+            for sc in scenarios
+            for s in seed_list
+        ]
+    if include_sweeps and active:
+        sweep_jobs["seeds"] = [
+            (None, job(n, sc, s)) for n in active for sc in scenarios for s in sweep_seeds
+        ]
+    for items in sweep_jobs.values():
+        jobs += [j for _, j in items]
+
+    results = run_jobs(jobs, ecfg=ecfg, ladder=ladder, workers=workers)
+    runs = [_ok(results[j.key]) for j in main]
 
     mis: MisspecifiedSection | None = None
-    if include_misspecified:
-        real = load_likelihood_spec()
-        perturbed = perturb_likelihoods(real, perturb_magnitude, perturb_seed)
-        unpinned = [unpin_acoustics(sc, real) for sc in scenarios]
-        nominal_runs: list[PolicyRun] = []
-        mis_runs: list[PolicyRun] = []
-        for policy in active.values():
-            nominal_runs.extend(run_policy(policy, unpinned, seed_list))
-            mis_runs.extend(run_policy(policy, unpinned, seed_list, sim_likelihoods=perturbed))
+    if include_misspecified and perturbed is not None:
         mis = misspecified_section(
             magnitude=perturb_magnitude,
             seed=perturb_seed,
             shift=table_shift(real, perturbed),
-            nominal_runs=nominal_runs,
-            misspecified_runs=mis_runs,
+            nominal_runs=[_ok(results[j.key]) for j in mis_jobs[0]],
+            misspecified_runs=[_ok(results[j.key]) for j in mis_jobs[1]],
             ladder_cfg=ladder,
         )
 
     llm_diff: LlmDiff | None = None
-    if include_llm_diff and factory is not None and PolicyName.SOUNDINGS in active:
-        llm_policy = factory(
-            planner="llm", fixture_store=fixture_store, violations_log=violations_log
+    llm_error: str | None = None
+    if llm_jobs:
+        llm_results = [results[j.key] for j in llm_jobs]
+        errors = sorted({r.error for r in llm_results if isinstance(r, JobError)})
+        if errors:
+            llm_error = errors[0]
+        else:
+            fallback_runs = [r for r in runs if r.policy is PolicyName.SOUNDINGS]
+            llm_diff = diff_planners(fallback_runs, [_ok(r) for r in llm_results])
+
+    sweeps: SweepsReport | None = None
+    if include_sweeps:
+        sweeps = _build_sweeps(
+            sweep_jobs,
+            results,
+            scenarios=scenarios,
+            seed_list=seed_list,
+            sweep_seeds=sweep_seeds,
+            perturb_seed=perturb_seed,
+            main_soundings=[r for r in runs if r.policy is PolicyName.SOUNDINGS],
+            ladder=ladder,
         )
-        fallback_runs = [r for r in runs if r.policy is PolicyName.SOUNDINGS]
-        llm_diff = diff_planners(fallback_runs, run_policy(llm_policy, scenarios, seed_list))
 
     args = {
         "suite": suite,
@@ -289,7 +456,9 @@ def run_campaign(
         "include_misspecified": include_misspecified,
         "include_llm_diff": include_llm_diff,
     }
-    return build_report(
+    if include_sweeps:
+        args["sweep_seeds"] = sorted(set(sweep_seeds))
+    report = build_report(
         suite=suite,
         seeds=seed_list,
         mode=mode,
@@ -301,4 +470,72 @@ def run_campaign(
         policies_pending=pending,
         misspecified=mis,
         llm_diff=llm_diff,
+        sweeps=sweeps,
     )
+    if llm_error is not None:
+        status = (
+            "LLM-planner arm not run: "
+            + llm_error
+            + " (under SOUNDINGS_CI a replay miss is an error, WORKFLOW 8)."
+        )
+        report = report.model_copy(
+            update={"llm": LlmSection(status=status, diff=None, sentence=NO_LLM_EFFECT_SENTENCE)}
+        )
+    return report
+
+
+def _build_sweeps(
+    sweep_jobs: Mapping[str, Sequence[tuple[Any, Job]]],
+    results: Mapping[tuple[str, str, int, str], JobResult],
+    *,
+    scenarios: Sequence[Scenario],
+    seed_list: Sequence[int],
+    sweep_seeds: Sequence[int],
+    perturb_seed: int,
+    main_soundings: Sequence[PolicyRun],
+    ladder: LadderConfig,
+) -> SweepsReport:
+    def runs_of(name: str) -> list[PolicyRun]:
+        return [
+            r for _, j in sweep_jobs.get(name, ()) if isinstance(r := results[j.key], PolicyRun)
+        ]
+
+    out = SweepsReport()
+    if "mis20" in sweep_jobs:
+        out = out.model_copy(
+            update={
+                "misspecified_20": misspecified_20(
+                    runs_of("mis20_nominal"),
+                    runs_of("mis20"),
+                    seeds=seed_list,
+                    perturb_seed=perturb_seed,
+                    ladder_cfg=ladder,
+                )
+            }
+        )
+    if "toggles" in sweep_jobs:
+        by_toggle: dict[str, dict[str, list[PolicyRun | str]]] = {NO_TOGGLE: {}}
+        for r in main_soundings:
+            by_toggle[NO_TOGGLE].setdefault(r.scenario_id, []).append(r)
+        for (toggle, sid), j in sweep_jobs["toggles"]:
+            res = results[j.key]
+            item: PolicyRun | str = res.error if isinstance(res, JobError) else res
+            by_toggle.setdefault(toggle, {}).setdefault(sid, []).append(item)
+        out = out.model_copy(
+            update={"toggles": toggle_section(by_toggle, scenarios, seeds=seed_list)}
+        )
+    if "thresholds" in sweep_jobs:
+        by_t: dict[float, list[PolicyRun]] = {}
+        for t, j in sweep_jobs["thresholds"]:
+            res = results[j.key]
+            if isinstance(res, PolicyRun):
+                by_t.setdefault(float(t), []).append(res)
+        out = out.model_copy(
+            update={"thresholds": threshold_section(by_t, seeds=seed_list, ladder_cfg=ladder)}
+        )
+        out = out.model_copy(update={"scale": scale_section(scale_pending_reason())})
+    if "seeds" in sweep_jobs:
+        out = out.model_copy(
+            update={"seeds": seed_section(runs_of("seeds"), seeds=sweep_seeds, ladder_cfg=ladder)}
+        )
+    return out
