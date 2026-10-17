@@ -21,7 +21,7 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 | 011 | sim + scenario catalog | PR open, auto-merge on green CI | wo/011-sim-and-scenario-catalog | [#3](https://github.com/kudratsingh/soundings/pull/3) | squash commit on main (see PR) | 273 passed |
 | 012 | evidence table + features | pending | wo/012-evidence-table-and-features | | | |
 | 020 | registry | PR open, auto-merge on green CI | wo/020-registry | [#4](https://github.com/kudratsingh/soundings/pull/4) | squash commit on main (see PR) | 330 passed (57 registry) |
-| 021 | challenge-response | pending | wo/021-challenge-response | | | |
+| 021 | challenge-response | PR open, auto-merge on green CI | wo/021-challenge-response | see PR (branch wo/021-challenge-response) | squash commit on main (see PR) | 395 passed (65 hail: unit 55, integration 10) |
 | 022 | matcher + ask rung | pending | wo/022-matcher-ask-rung | | | |
 | 030 | posterior | pending | wo/030-posterior | | | |
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |

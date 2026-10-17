@@ -121,7 +121,13 @@ ask (the `acoustic_hail` probe). Nothing above ask.
 - §2.6: `-k evidence_rows` and the honesty docstring.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see PR from branch `wo/021-challenge-response` · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0; full suite 395 passed after rebase on WO-020; hail 65 passed (unit `tests/test_hail.py` 55, integration `tests/test_hail_integration.py` 10); `-k config_agree` runs unskipped against WO-020's `config/registry.yaml` · STATE.md updated: yes (WO-021 row)
+
+- Every exit test above passes with `MODEL_MODE=replay`; the `soundings.llm` grep and the denylist grep print nothing.
+- Determinism: hailing every observed contact every 10 ticks on S01..S08 at loss 0.0 and 0.5 gives identical row-id and result hashes under `PYTHONHASHSEED=0` and `=1` (empty diff); seeds 3 and 4 differ at loss 0.5.
+- Code on main absorbed: false alarms are observed `c-NNNN` ids whose `contact_truth[...].gt_id` starts with `fa-` (there are no `fa-*` observed ids; `ContactId` is `^c-\d{4,6}$`). `HailSimulator(..., known=None, cfg=None)` default to `load_known_operators(scenario=scenario)` and `load_hail_config()`. The tick bucket uses `run.tick_s`.
+- Extras beyond the WO: `HONESTY_NOTE` constant (the docstring's first sentence, for the About panel), `HailSimulator.key(contact_id, tick)`, `KnownOperatorTable.from_entries`, module-level `loss_rng(seed, contact_id, sent_tick)` (the spy seam), `NO_REPLY_CONFIDENCE = 0.9`, `HAIL_SOURCE`.
+- No cut-line item was dropped.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Hail validity does not depend on filing status: a well-formed reply with a modem id is `valid` even for an unfiled contact (SPEC-SIM S04). The matcher judges filing.
