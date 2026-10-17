@@ -57,6 +57,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
 | 087 | bounded live mode (stage) | WO written | wo/087-bounded-live-mode | | | |
+| 092 | mentor brief | in review | wo/092-mentor-brief | | | see PR (test_mentor_brief 8) |
 
 ## Team
 | role | name | github | owns |
@@ -86,5 +87,6 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 None. See `docs/log/PAID-RUNS.md`.
 
 ## Mentor sessions
+- Brief for the 10:00 sessions (Doyle, Wettels): `docs/MENTOR-BRIEF.md` (WO-092).
 - Target pairings: William Doyle (AltaSea / Port of LA startup hub) for the second customer; Dr. Nick Wettels (retired submarine commander) to red-team contact behaviors and false-alarm sources; Alex Piatek (ResQVision) on what Navy trials look for; Ayush Kumar on agent design. Book the moment pairings post Saturday morning.
 - Questions to bring: (Doyle) do underwater work crews already notify the port, and who would own a registry; (Wettels) which of our eight scenarios is unrealistic, and what false alarm have we missed.
