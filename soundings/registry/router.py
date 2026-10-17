@@ -14,7 +14,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import AwareDatetime, BaseModel, ValidationError
 
-from soundings.registry.models import PlanRejected, PlanStatus, PlanView, RejectReason
+from soundings.registry.models import (
+    IN_FORCE,
+    ConflictView,
+    PlanRejected,
+    PlanStatus,
+    PlanView,
+    RejectReason,
+)
 from soundings.registry.store import RegistryStore, db_path_from_env
 
 STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
@@ -69,17 +76,20 @@ def create_plan(
         return JSONResponse(status_code=422, content={"detail": errors})
 
 
+# --- WO-081 begin: conflicts (status=conflicted; active means in force) ---
 @router.get("", response_model=list[PlanView])
 def list_plans(
     store: StoreDep,
-    status: Literal["active", "expired", "all"] = "active",
+    status: Literal["active", "conflicted", "expired", "all"] = "active",
     start_tick: Annotated[int | None, Query(ge=0)] = None,
     end_tick: Annotated[int | None, Query(ge=0)] = None,
     start_at: AwareDatetime | None = None,
     end_at: AwareDatetime | None = None,
 ) -> Any:
-    """Plans with ``status`` (default active; ``all`` for every plan), optionally limited to
-    those overlapping a tick range or a datetime range (not both)."""
+    """Plans with ``status`` (default active, meaning in force: active or conflicted;
+    ``conflicted`` for conflicted plans only; ``all`` for every plan), optionally limited
+    to those overlapping a tick range or a datetime range (not both). Every plan carries
+    its ``conflicts`` array."""
     tick_range = (start_tick, end_tick)
     time_range = (start_at, end_at)
     for name, pair in (("start_tick/end_tick", tick_range), ("start_at/end_at", time_range)):
@@ -87,7 +97,7 @@ def list_plans(
             raise HTTPException(status_code=422, detail=f"give both ends of {name}")
     if start_tick is not None and start_at is not None:
         raise HTTPException(status_code=422, detail="give a tick range or a datetime range")
-    include_expired = status != "active"
+    include_expired = status in ("expired", "all")
     try:
         if start_tick is not None and end_tick is not None:
             plans = store.overlapping_ticks(start_tick, end_tick, include_expired=include_expired)
@@ -97,9 +107,22 @@ def list_plans(
             plans = store.list(None if status == "all" else PlanStatus(status))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if status in ("active", "expired"):
+    if status == "active":
+        plans = [p for p in plans if p.status in IN_FORCE]
+    elif status in ("conflicted", "expired"):
         plans = [p for p in plans if p.status == PlanStatus(status)]
     return plans
+
+
+@router.get("/{plan_id}/conflicts", response_model=list[ConflictView])
+def plan_conflicts(store: StoreDep, plan_id: str) -> list[ConflictView]:
+    """The plan's conflicts alone, ordered by ``(other start_at, other_plan_id)``."""
+    if store.get(plan_id) is None:
+        raise HTTPException(status_code=404, detail=f"no plan {plan_id!r}")
+    return store.conflicts_of(plan_id)
+
+
+# --- WO-081 end ---
 
 
 @router.get("/zones", response_model=list[ZoneOut])

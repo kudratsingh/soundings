@@ -6,6 +6,9 @@ scenario file. Nothing here imports or is driven by a model (CLAUDE.md 2.2). The
 """
 
 from soundings.registry.models import (
+    IN_FORCE,
+    ConflictConfig,
+    ConflictView,
     PlanCreate,
     PlanRejected,
     PlanSource,
@@ -14,6 +17,7 @@ from soundings.registry.models import (
     RegistryConfig,
     RejectReason,
     datetime_to_tick,
+    load_conflict_config,
     load_registry_config,
     scenario_epoch,
     tick_to_datetime,
@@ -28,6 +32,9 @@ from soundings.registry.store import (
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    "IN_FORCE",
+    "ConflictConfig",
+    "ConflictView",
     "PlanCreate",
     "PlanRejected",
     "PlanSource",
@@ -38,6 +45,7 @@ __all__ = [
     "RejectReason",
     "datetime_to_tick",
     "db_path_from_env",
+    "load_conflict_config",
     "load_registry_config",
     "plan_views_from_scenario",
     "plans_from_scenario",

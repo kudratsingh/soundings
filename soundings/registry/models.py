@@ -18,7 +18,7 @@ import re
 from datetime import UTC, date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import (
@@ -48,6 +48,18 @@ _OFFSET_RE = re.compile(r"^([+-])(\d{2}):(\d{2})$")
 class PlanStatus(enum.StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"
+    CONFLICTED = "conflicted"  # WO-081: in force, overlaps another in-force plan
+
+
+# WO-081: the plans that count for the matcher and for conflict detection.
+IN_FORCE: frozenset[PlanStatus] = frozenset({PlanStatus.ACTIVE, PlanStatus.CONFLICTED})
+
+# WO-081 adapter for WO-080 part A: `soundings.schemas.enums.JobType` is not on main yet.
+# The registry keeps the job type as a validated string with the same literal values; when
+# WO-080 part A lands, swap this alias for `JobType` (a StrEnum with these values).
+JobTypeName = Literal["survey", "hull_cleaning", "pile_inspection", "dredge", "other"]
+JOB_TYPE_NAMES: tuple[str, ...] = ("survey", "hull_cleaning", "pile_inspection", "dredge", "other")
+DEFAULT_JOB_TYPE: JobTypeName = "other"
 
 
 class PlanSource(enum.StrEnum):
@@ -62,6 +74,7 @@ class RejectReason(enum.StrEnum):
     AREA_NOT_SECURITY_ZONE = "area_not_security_zone"
     WINDOW_MISSING = "window_missing"
     WINDOW_INVERTED = "window_inverted"
+    DEPTH_BAND_INVERTED = "depth_band_inverted"  # WO-081
     BAD_MODEM_ID = "bad_modem_id"
     DUPLICATE_PLAN_ID = "duplicate_plan_id"
     DENYLISTED_TEXT = "denylisted_text"
@@ -117,6 +130,52 @@ def _load_registry_config_cached(path: str) -> RegistryConfig:
 def load_registry_config(path: str | Path = REGISTRY_CONFIG_PATH) -> RegistryConfig:
     """Load the ``registry:`` block of ``config/registry.yaml`` (cached per path)."""
     return _load_registry_config_cached(str(Path(path).resolve()))
+
+
+# --- WO-081: conflict config ---------------------------------------------------------------
+
+
+class ConflictConfig(BaseModel):
+    """The top-level ``conflicts:`` block of ``config/registry.yaml`` (WO-081).
+
+    ``area_buffer_m`` widens every zone before the area test; a negative value shrinks it
+    (tests use that to switch detection off). ``depth_defaults_m`` gives the depth band of
+    a plan filed without one, per job type; the values are stress-test assumptions, not
+    survey data.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    area_buffer_m: float
+    depth_defaults_m: dict[JobTypeName, tuple[float, float]]
+
+    @field_validator("depth_defaults_m")
+    @classmethod
+    def _bands(
+        cls, v: dict[JobTypeName, tuple[float, float]]
+    ) -> dict[JobTypeName, tuple[float, float]]:
+        missing = sorted(set(JOB_TYPE_NAMES) - set(v))
+        if missing:
+            raise ValueError(f"depth_defaults_m lacks job types {missing}")
+        for job, (lo, hi) in sorted(v.items()):
+            if lo < 0 or lo > hi:
+                raise ValueError(f"depth band for {job} must satisfy 0 <= min <= max")
+        return v
+
+    def depth_band(self, job_type: str) -> tuple[float, float]:
+        lo, hi = self.depth_defaults_m[job_type]  # type: ignore[index]
+        return float(lo), float(hi)
+
+
+@lru_cache(maxsize=8)
+def _load_conflict_config_cached(path: str) -> ConflictConfig:
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return ConflictConfig.model_validate(data["conflicts"])
+
+
+def load_conflict_config(path: str | Path = REGISTRY_CONFIG_PATH) -> ConflictConfig:
+    """Load the ``conflicts:`` block of ``config/registry.yaml`` (cached per path)."""
+    return _load_conflict_config_cached(str(Path(path).resolve()))
 
 
 # --- time helpers ------------------------------------------------------------------------
@@ -193,11 +252,32 @@ class Plan(SQLModel, table=True):
     source: str = PlanSource.API.value
     created_at: datetime
     expired_at: datetime | None = None
+    # WO-081
+    job_type: str = DEFAULT_JOB_TYPE
+    depth_min_m: float | None = None
+    depth_max_m: float | None = None
+    tick_s: float | None = None
+
+
+class PlanConflict(SQLModel, table=True):
+    """One detected conflict, one row per direction (WO-081). Times are UTC instants."""
+
+    __tablename__ = "registry_conflict"
+
+    plan_id: str = SQLField(primary_key=True)
+    other_plan_id: str = SQLField(primary_key=True, index=True)
+    overlap_start: datetime
+    overlap_end: datetime
+    overlap_minutes: int
+    reasons: str  # comma-joined sorted ConflictReason values
+    resolved_by: str | None = None
+    detected_at: datetime
 
 
 # --- input and view models ---------------------------------------------------------------
 
 NonNegTick = Annotated[int, Field(ge=0)]
+DepthM = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 PlanIdText = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
 Text = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 CleanText = Annotated[FreeText, StringConstraints(min_length=1, max_length=200)]
@@ -225,11 +305,33 @@ class PlanDraft(BaseModel):
     contact_channel: Text
     source: PlanSource = PlanSource.API
     created_at: AwareDatetime | None = None
+    # WO-081: optional job type and depth band (both or neither; checked by the store)
+    job_type: JobTypeName = DEFAULT_JOB_TYPE
+    depth_min_m: DepthM | None = None
+    depth_max_m: DepthM | None = None
+    tick_s: Annotated[float, Field(gt=0)] | None = None
 
-    @field_validator("plan_id", "start_tick", "end_tick", "start_at", "end_at", mode="before")
+    @field_validator(
+        "plan_id",
+        "start_tick",
+        "end_tick",
+        "start_at",
+        "end_at",
+        "depth_min_m",
+        "depth_max_m",
+        "tick_s",
+        mode="before",
+    )
     @classmethod
     def _blank_is_none(cls, v: Any) -> Any:
         return None if isinstance(v, str) and v.strip() == "" else v
+
+    @field_validator("job_type", mode="before")
+    @classmethod
+    def _blank_job_type(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return DEFAULT_JOB_TYPE
+        return str(v.value) if isinstance(v, enum.Enum) else v
 
 
 class PlanCreate(PlanDraft):
@@ -242,6 +344,19 @@ class PlanCreate(PlanDraft):
     operator: CleanText
     vehicle: CleanText
     contact_channel: CleanText
+
+
+class ConflictView(BaseModel):
+    """One conflict as a plan sees it (WO-081). Times carry the plan's filed offset."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    other_plan_id: str
+    overlap_start: AwareDatetime
+    overlap_end: AwareDatetime
+    overlap_minutes: int
+    reasons: tuple[str, ...]
+    resolved_by: str | None = None
 
 
 class PlanView(BaseModel):
@@ -263,9 +378,15 @@ class PlanView(BaseModel):
     source: PlanSource = PlanSource.API
     created_at: AwareDatetime | None = None
     expired_at: AwareDatetime | None = None
+    # WO-081 (defaulted, after the existing fields)
+    job_type: JobTypeName = DEFAULT_JOB_TYPE
+    depth_min_m: float | None = None
+    depth_max_m: float | None = None
+    tick_s: float | None = None
+    conflicts: tuple[ConflictView, ...] = ()
 
     @classmethod
-    def from_row(cls, row: Plan) -> PlanView:
+    def from_row(cls, row: Plan, conflicts: tuple[ConflictView, ...] = ()) -> PlanView:
         return cls(
             plan_id=row.plan_id,
             operator=row.operator,
@@ -281,4 +402,9 @@ class PlanView(BaseModel):
             source=PlanSource(row.source),
             created_at=from_storage(row.created_at, 0),
             expired_at=None if row.expired_at is None else from_storage(row.expired_at, 0),
+            job_type=row.job_type,  # type: ignore[arg-type]
+            depth_min_m=row.depth_min_m,
+            depth_max_m=row.depth_max_m,
+            tick_s=row.tick_s,
+            conflicts=conflicts,
         )
