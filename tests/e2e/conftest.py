@@ -30,6 +30,18 @@ def _skip(reason: str) -> None:
     pytest.skip(reason)
 
 
+def _opt_in_check() -> None:
+    """Browser smokes are opt-in on a developer machine (DECISIONS.md 2026-10-17 07:15).
+
+    Run them with ``SOUNDINGS_E2E=1`` (or ``SOUNDINGS_E2E_REQUIRED=1``). CI has no cached
+    browser and skips them anyway; this keeps a shared, heavily loaded machine from
+    failing ``make check`` on wall-clock timeouts unrelated to the change under test.
+    """
+    if os.environ.get("SOUNDINGS_E2E") == "1" or os.environ.get("SOUNDINGS_E2E_REQUIRED") == "1":
+        return
+    pytest.skip("browser smoke is opt-in: set SOUNDINGS_E2E=1 to run it")
+
+
 def _cache_roots() -> list[Path]:
     env = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
     roots = [Path(env)] if env and env != "0" else []
@@ -60,6 +72,7 @@ def _free_port() -> int:
 
 @pytest.fixture(scope="session")
 def live_server() -> Iterator[str]:
+    _opt_in_check()
     if not (WEB_DIST / "index.html").is_file():
         _skip("web/dist is not built (run `pnpm -C web build`)")
     import uvicorn
@@ -89,6 +102,7 @@ def live_server() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def browser() -> Iterator[Any]:
+    _opt_in_check()
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:

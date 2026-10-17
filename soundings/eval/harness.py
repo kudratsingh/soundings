@@ -20,6 +20,7 @@ from typing import Any, Literal, Protocol
 
 import yaml
 
+from soundings.eval.families import FAMILIES, FamilyError, family_paths
 from soundings.eval.metrics import LlmDiff, diff_planners
 from soundings.eval.perturb import perturb_likelihoods, table_shift, unpin_acoustics
 from soundings.eval.policies import (
@@ -137,15 +138,24 @@ def _suite_entry(entry: Any, suite_dir: Path) -> Path:
 
 
 def resolve_suite(name: str, *, twists_root: Path | None = None) -> list[Path]:
-    """``catalog`` -> ``catalog_paths()``; ``twist0N`` -> ``twists/0N/suite.yaml`` (a list
-    of scenario paths, relative to that folder or the repo) if present, else
-    ``twists/0N/scenarios/*.yaml``. Sorted; unknown or empty suites raise ``SuiteError``."""
+    """``catalog`` -> ``catalog_paths()``; a family name (``soundings.eval.families``:
+    tuesday, harbor_night, lost_vehicle, busy, traps) -> that family's files;
+    ``twist0N`` -> ``twists/0N/suite.yaml`` (a list of scenario paths, relative to that
+    folder or the repo) if present, else ``twists/0N/scenarios/*.yaml``. Sorted; unknown
+    or empty suites raise ``SuiteError``."""
     if name == CATALOG_SUITE:
         paths = sorted(catalog_paths())
+    elif name in FAMILIES:
+        try:
+            paths = family_paths(name)
+        except FamilyError as exc:
+            raise SuiteError(str(exc)) from exc
     else:
         m = _TWIST.match(name)
         if m is None:
-            raise SuiteError(f"unknown suite {name!r} (use catalog or twist0N)")
+            raise SuiteError(
+                f"unknown suite {name!r} (use catalog, twist0N or a family: {', '.join(FAMILIES)})"
+            )
         root = TWISTS_ROOT if twists_root is None else Path(twists_root)
         folder = root / m.group(1)
         suite_file = folder / "suite.yaml"
