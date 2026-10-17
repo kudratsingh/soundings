@@ -126,7 +126,7 @@ PR: [#9](https://github.com/kudratsingh/soundings/pull/9) · Merged commit: squa
 - The agent may run the sign CLI and commit the real sha256 signature for 'Watch Commander (demo)'. The check is tamper-evident, not authenticated; label it so in the About text; keyed HMAC/PKI is a production step, out of scope.
 - Default headless approver in sim/catalog runs: the primary grants 60 s after the request (S05 stays at 1 interruption). Provide `denied` and `unreachable` options for the `approver_unreachable` toggle and tests.
 
-## Notes for downstream (relayed by the coordinator from the implementer, 2026-10-17 02:20 PT)
+## Notes for downstream (relayed by the coordinator from the implementer, 2026-10-16 23:25 PT)
 - `boundary_decision(action, inputs, table: BoundaryTable) -> BoundaryDecision(action, cell, verdict, reason, inputs_hash, granted_scope)`. `BoundaryTable.rows()` returns rung, action, yaml_cell and cell (for WO-060 `GET /api/boundary`). `load_boundary()` returns a BoundaryTable with `.criteria` (LadderCriteria); `load_criteria()` is a shortcut.
 - `scope_exceeded(inputs, criteria)`: BLOCK means exceeded; `exceeds_scope()` is the bool. Call it only while HOLDING with a requested scope in hand (a missing request also counts as exceeded).
 - `BoundaryGuards(standing, boundary, approver_status=None, *, epoch=None)`; pass `epoch=scenario_now(scenario, 0)` to re-check `valid_until` on every decision. `ApproverStatus.from_toggles(toggles)`; `ApproverScript.default()/.denied()/.unreachable()/.from_toggles()`; `SimulatedApprover(script, clock).request(cid, scope, channel, now)` (primary for `ui`, backup for `sms_sim`).
