@@ -150,4 +150,10 @@ None executed. The output feeds the ask-rung investigation and the hand-to-a-per
 - §2.5: the denylist grep.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see the WO-030 PR on GitHub (`feat(wo-030): hypothesis set, likelihood tables, naive-Bayes posterior`) · Merged commit: squash commit on main (see PR) · Test summary: `873 passed` (full suite; tests/test_posterior.py 43, test_likelihood_tables.py 8, test_posterior_catalog.py 13) · STATE.md updated: yes (WO-030 row)
+
+- Exit tests: all pass with `MODEL_MODE=replay`; `make check` exits 0. The S05 seed 11 CLI dump is byte-identical across two runs (sha256 `e93c2528…f0a4`, empty diff). The `soundings.llm` grep matches nothing (`canonical_json` comes from `soundings.canonical` on main); the denylist grep is empty.
+- Interface as implemented (all in `soundings.investigation.posterior`): the WO names plus `PRIOR_BASE`, `PROB_SUM_TOL`, `SKIP_*` reason constants, `DegenerateUpdateError` (raised by `Posterior.update` when every weight is 0; `score_contact` catches it and records the row), `applied_adjustments(cfg, hour, crit)`, `Posterior.from_weights/uniform/p/mass/ranked/rounded`, `LikelihoodTables.has`, `score_run_table(table, tables, prior_cfg)`. `conditioned_prior` returns a `Posterior`. `score_contact` reads `hour_of_day` and `zone_criticality` from the contact's latest rows. `PosteriorReport` also carries `contact_id`, `prior_adjustments`, `buckets` (feature -> bucket used) and `label`; its `to_dict()` is the posterior's `to_dict()` plus `contact_id, prior, prior_adjustments, used_row_ids, buckets, skipped, degenerate_row_ids`.
+- The CLI prints one canonical JSON document `{label, scenario, seed, contacts: [report...]}` (contacts sorted); `--ticks`, `--pol`, `--no-pol` as in the WO-012 CLI.
+- Deviations (DECISIONS 2026-10-16 23:40): the S05 catalog check uses the closing prefix (240 and 300 ticks) plus the merged WO-021 hail; the strict entropy-rise conflict pair is ordered tonal-then-drift (the WO's literal order is asserted on the margin collapse and entropy > 1.9 bits); the prior-sum error names `priors.base` with no hypothesis. No cut-line item was used.
+

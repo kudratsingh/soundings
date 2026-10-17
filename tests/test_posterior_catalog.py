@@ -131,3 +131,17 @@ def test_catalog_s05_closing_contact_is_uuv(ticks: int) -> None:
     assert report.prior_adjustments == ("night_hours", "critical_zone")
     assert report.posterior.top() is Hypothesis.UNAUTHORIZED_UUV, report.to_dict()
     assert report.posterior.threat_mass() >= 0.6
+
+
+def test_cli_dump_is_canonical_and_labeled(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    from soundings.investigation.posterior import main
+
+    assert main(["--scenario", "S08", "--seed", "19"]) == 0
+    text = capsys.readouterr().out
+    doc = json.loads(text)
+    assert doc["label"] == STRESS_TEST_LABEL and doc["scenario"] == "S08" and doc["seed"] == 19
+    ids = [c["contact_id"] for c in doc["contacts"]]
+    assert ids == sorted(ids) and ids
+    assert all(c["label"] == STRESS_TEST_LABEL for c in doc["contacts"])
