@@ -1,0 +1,389 @@
+{
+  "type": "FeatureCollection",
+  "name": "Port of Los Angeles (simplified for demonstration)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "main_channel",
+        "name": "Main Channel",
+        "criticality": 0.5,
+        "basin": "main_channel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.266,
+              33.715
+            ],
+            [
+              -118.266,
+              33.748
+            ],
+            [
+              -118.256,
+              33.748
+            ],
+            [
+              -118.256,
+              33.715
+            ],
+            [
+              -118.266,
+              33.715
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "inner_harbor_west",
+        "name": "Inner Harbor West",
+        "criticality": 0.4,
+        "basin": "inner_harbor_west"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.28,
+              33.737
+            ],
+            [
+              -118.28,
+              33.748
+            ],
+            [
+              -118.266,
+              33.748
+            ],
+            [
+              -118.266,
+              33.744
+            ],
+            [
+              -118.276,
+              33.744
+            ],
+            [
+              -118.276,
+              33.737
+            ],
+            [
+              -118.28,
+              33.737
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "inner_basin_research",
+        "name": "Inner Basin (research and maintenance)",
+        "criticality": 0.3,
+        "basin": "inner_harbor_west"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.276,
+              33.737
+            ],
+            [
+              -118.276,
+              33.744
+            ],
+            [
+              -118.266,
+              33.744
+            ],
+            [
+              -118.266,
+              33.737
+            ],
+            [
+              -118.276,
+              33.737
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "fuel_berths",
+        "name": "Fuel Berths",
+        "criticality": 0.9,
+        "basin": "inner_harbor_west"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.266,
+              33.741
+            ],
+            [
+              -118.266,
+              33.745
+            ],
+            [
+              -118.262,
+              33.745
+            ],
+            [
+              -118.262,
+              33.741
+            ],
+            [
+              -118.266,
+              33.741
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "pier_400_approach",
+        "name": "Pier 400 Approach",
+        "criticality": 0.6,
+        "basin": "outer_harbor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.256,
+              33.712
+            ],
+            [
+              -118.256,
+              33.73
+            ],
+            [
+              -118.238,
+              33.73
+            ],
+            [
+              -118.238,
+              33.712
+            ],
+            [
+              -118.256,
+              33.712
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "zone",
+        "zone_id": "vincent_thomas_bridge",
+        "name": "Vincent Thomas Bridge",
+        "criticality": 0.8,
+        "basin": "main_channel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -118.278,
+              33.748
+            ],
+            [
+              -118.278,
+              33.752
+            ],
+            [
+              -118.26,
+              33.752
+            ],
+            [
+              -118.26,
+              33.748
+            ],
+            [
+              -118.278,
+              33.748
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "asset",
+        "asset_id": "fuel_berth_1",
+        "name": "Fuel Berth 1",
+        "criticality": 0.9,
+        "asset_kind": "berth"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.2635,
+          33.7425
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "asset",
+        "asset_id": "fuel_berth_2",
+        "name": "Fuel Berth 2",
+        "criticality": 0.95,
+        "asset_kind": "berth"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.2655,
+          33.743
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "asset",
+        "asset_id": "pier_400_gate",
+        "name": "Pier 400 Gate",
+        "criticality": 0.7,
+        "asset_kind": "gate"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.248,
+          33.723
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "asset",
+        "asset_id": "vtb_piling_west",
+        "name": "Vincent Thomas Bridge Piling (west)",
+        "criticality": 0.8,
+        "asset_kind": "piling"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.2745,
+          33.7497
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "asset",
+        "asset_id": "vtb_piling_east",
+        "name": "Vincent Thomas Bridge Piling (east)",
+        "criticality": 0.8,
+        "asset_kind": "piling"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.2625,
+          33.7497
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "sensor_node",
+        "node_id": "hyd_1",
+        "name": "Hydrophone 1 (fuel berths)",
+        "range_m": 400.0,
+        "health": 1.0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.265,
+          33.741
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "sensor_node",
+        "node_id": "hyd_2",
+        "name": "Hydrophone 2 (bridge)",
+        "range_m": 400.0,
+        "health": 1.0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.271,
+          33.749
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "sensor_node",
+        "node_id": "hyd_3",
+        "name": "Hydrophone 3 (Pier 400)",
+        "range_m": 400.0,
+        "health": 1.0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.253,
+          33.722
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "kind": "sensor_node",
+        "node_id": "hyd_4",
+        "name": "Hydrophone 4 (main channel)",
+        "range_m": 400.0,
+        "health": 1.0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.262,
+          33.73
+        ]
+      }
+    }
+  ]
+}

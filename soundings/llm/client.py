@@ -26,9 +26,23 @@ import re
 from pathlib import Path
 from typing import Any
 
+from soundings.canonical import FLOAT_DECIMALS, _normalize, canonical_json
+
 log = logging.getLogger(__name__)
 
-FLOAT_DECIMALS = 6
+__all__ = [
+    "FLOAT_DECIMALS",
+    "FixtureStore",
+    "ModelClient",
+    "ModelMode",
+    "ModelOutput",
+    "ReplayMiss",
+    "canonical_json",
+    "fixture_key",
+    "in_ci",
+    "model_name_from_env",
+]
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "model_calls"
 _ROLE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -70,37 +84,6 @@ class ReplayMiss(LookupError):
         super().__init__(f"replay miss: role={role} key={key}")
         self.role = role
         self.key = key
-
-
-def _normalize(obj: Any) -> Any:
-    if isinstance(obj, bool) or obj is None or isinstance(obj, (int, str)):
-        return obj
-    if isinstance(obj, float):
-        if obj != obj or obj in (float("inf"), float("-inf")):
-            raise ValueError("canonical_json does not accept NaN or infinity")
-        rounded = round(obj, FLOAT_DECIMALS)
-        return 0.0 if rounded == 0.0 else rounded  # collapse -0.0
-    if isinstance(obj, dict):
-        out: dict[str, Any] = {}
-        for k, v in obj.items():
-            if not isinstance(k, str):
-                raise TypeError(f"canonical_json requires str keys, got {type(k).__name__}")
-            out[k] = _normalize(v)
-        return out
-    if isinstance(obj, (list, tuple)):
-        return [_normalize(v) for v in obj]
-    raise TypeError(f"canonical_json cannot encode {type(obj).__name__}")
-
-
-def canonical_json(obj: Any) -> str:
-    """Stable JSON: sorted keys, compact separators, floats rounded to 6 dp, ASCII only."""
-    return json.dumps(
-        _normalize(obj),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    )
 
 
 def fixture_key(role: str, inputs: Any) -> str:
