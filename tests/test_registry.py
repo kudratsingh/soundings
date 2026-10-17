@@ -377,6 +377,25 @@ REJECT_CASES: list[tuple[str, dict[str, Any], RejectReason]] = [
         RejectReason.DEPTH_BAND_INVERTED,
     ),
     ("depth_half_band", {"depth_min_m": 5.0}, RejectReason.DEPTH_BAND_INVERTED),
+    # WO-082: start bounds, checked after the depth band
+    (
+        "start_bounds_inverted",
+        {
+            "earliest_start_at": datetime(2026, 10, 17, 15, 0, tzinfo=PDT),
+            "latest_start_at": datetime(2026, 10, 17, 14, 0, tzinfo=PDT),
+        },
+        RejectReason.START_BOUNDS_INVALID,
+    ),
+    (
+        "start_after_latest",
+        {"latest_start_at": datetime(2026, 10, 17, 13, 0, tzinfo=PDT)},
+        RejectReason.START_BOUNDS_INVALID,
+    ),
+    (
+        "start_before_earliest",
+        {"earliest_start_at": datetime(2026, 10, 17, 14, 15, tzinfo=PDT)},
+        RejectReason.START_BOUNDS_INVALID,
+    ),
     ("bad_modem", {"modem_id": "4471"}, RejectReason.BAD_MODEM_ID),
     ("bad_modem_short", {"modem_id": "MOD-12"}, RejectReason.BAD_MODEM_ID),
     ("duplicate", {"plan_id": "P-EXISTING"}, RejectReason.DUPLICATE_PLAN_ID),

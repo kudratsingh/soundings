@@ -22,8 +22,19 @@ from soundings.registry.models import (
     scenario_epoch,
     tick_to_datetime,
 )
+from soundings.registry.slots import (  # WO-082
+    BindingConstraint,
+    PinReason,
+    PlanShift,
+    SlotConfig,
+    SlotProposal,
+    load_slot_config,
+    propose_slots,
+)
 from soundings.registry.store import (
     DEFAULT_DB_PATH,
+    ProposalNotAcceptable,  # WO-082
+    ProposalStale,  # WO-082
     RegistryStore,
     db_path_from_env,
     plan_views_from_scenario,
@@ -32,6 +43,17 @@ from soundings.registry.store import (
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    # --- WO-082 begin ---
+    "BindingConstraint",
+    "PinReason",
+    "PlanShift",
+    "ProposalNotAcceptable",
+    "ProposalStale",
+    "SlotConfig",
+    "SlotProposal",
+    "load_slot_config",
+    "propose_slots",
+    # --- WO-082 end ---
     "IN_FORCE",
     "ConflictConfig",
     "ConflictView",

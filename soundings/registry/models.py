@@ -75,6 +75,7 @@ class RejectReason(enum.StrEnum):
     WINDOW_MISSING = "window_missing"
     WINDOW_INVERTED = "window_inverted"
     DEPTH_BAND_INVERTED = "depth_band_inverted"  # WO-081
+    START_BOUNDS_INVALID = "start_bounds_invalid"  # WO-082: earliest > latest or start outside
     BAD_MODEM_ID = "bad_modem_id"
     DUPLICATE_PLAN_ID = "duplicate_plan_id"
     DENYLISTED_TEXT = "denylisted_text"
@@ -257,6 +258,10 @@ class Plan(SQLModel, table=True):
     depth_min_m: float | None = None
     depth_max_m: float | None = None
     tick_s: float | None = None
+    # --- WO-082: start bounds --- (UTC instants, shown in the start's filed offset)
+    earliest_start_at: datetime | None = None
+    latest_start_at: datetime | None = None
+    # --- WO-082 end ---
 
 
 class PlanConflict(SQLModel, table=True):
@@ -333,6 +338,17 @@ class PlanDraft(BaseModel):
             return DEFAULT_JOB_TYPE
         return str(v.value) if isinstance(v, enum.Enum) else v
 
+    # --- WO-082: start bounds --- (optional; the store checks them, START_BOUNDS_INVALID)
+    earliest_start_at: AwareDatetime | None = None
+    latest_start_at: AwareDatetime | None = None
+
+    @field_validator("earliest_start_at", "latest_start_at", mode="before")
+    @classmethod
+    def _blank_bound_is_none(cls, v: Any) -> Any:
+        return None if isinstance(v, str) and v.strip() == "" else v
+
+    # --- WO-082 end ---
+
 
 class PlanCreate(PlanDraft):
     """Validated input. ``operator``, ``vehicle`` and ``contact_channel`` are ``FreeText``.
@@ -384,6 +400,10 @@ class PlanView(BaseModel):
     depth_max_m: float | None = None
     tick_s: float | None = None
     conflicts: tuple[ConflictView, ...] = ()
+    # --- WO-082: start bounds --- (defaulted, after WO-081's fields)
+    earliest_start_at: AwareDatetime | None = None
+    latest_start_at: AwareDatetime | None = None
+    # --- WO-082 end ---
 
     @classmethod
     def from_row(cls, row: Plan, conflicts: tuple[ConflictView, ...] = ()) -> PlanView:
@@ -407,4 +427,17 @@ class PlanView(BaseModel):
             depth_max_m=row.depth_max_m,
             tick_s=row.tick_s,
             conflicts=conflicts,
+            # --- WO-082: start bounds ---
+            earliest_start_at=_bound_view(row.earliest_start_at, row.start_offset_min),
+            latest_start_at=_bound_view(row.latest_start_at, row.start_offset_min),
+            # --- WO-082 end ---
         )
+
+
+# --- WO-082: start bounds ---
+def _bound_view(stored: datetime | None, minutes: int) -> datetime | None:
+    """A stored start bound in the plan's filed start offset (None stays None)."""
+    return None if stored is None else from_storage(stored, minutes)
+
+
+# --- WO-082 end ---
