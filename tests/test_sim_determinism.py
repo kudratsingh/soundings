@@ -3,7 +3,8 @@
 The behavior and detection blocks, driven by one seeded generator split with
 ``SeedSequence.spawn`` in a fixed order, give identical arrays for the same seed. Every
 catalog scenario S01..S08 with seeds 1, 2, 3 gives the same ``track_hash`` across two
-runs; the CLI output does not depend on ``PYTHONHASHSEED``; and seeds 1 and 2 differ.
+runs; the CLI output does not depend on ``PYTHONHASHSEED``; seeds 1 and 2 differ; and a
+longer run reproduces a shorter run's ticks exactly (prefix stability).
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ from soundings.sim.detection import (
     sample_position_noise,
 )
 from soundings.sim.hashing import track_hash
-from soundings.sim.run import run_scenario
+from soundings.sim.run import run_scenario, truncate_run
 from soundings.sim.scenario import catalog_paths, resolve_scenario
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -175,3 +176,29 @@ def test_cli_output_independent_of_pythonhashseed() -> None:
     assert a == b
     lines = a.decode().splitlines()
     assert len(lines) == 121 and lines[-1].startswith("track_hash=")
+
+
+# --- prefix stability (coordinator addendum 2026-10-16 23:05) -------------------------
+
+
+def test_prefix_stable_s05_seed_11_600_vs_900() -> None:
+    sc = CATALOG["S05"]
+    short = run_scenario(sc, seed=11, ticks=600)
+    long = run_scenario(sc, seed=11, ticks=900)
+    assert long.n_ticks == 900
+    assert track_hash(truncate_run(long, 600)) == track_hash(short)
+    assert truncate_run(long, 600) == short
+
+
+@pytest.mark.parametrize("sid", sorted(CATALOG))
+def test_prefix_stable_every_catalog_scenario(sid: str) -> None:
+    sc = CATALOG[sid]
+    short = run_scenario(sc)
+    long = run_scenario(sc, ticks=sc.duration_ticks + 300)
+    assert truncate_run(long, sc.duration_ticks) == short
+
+
+def test_truncate_rejects_growth() -> None:
+    run = run_scenario(CATALOG["S04"], ticks=10)
+    with pytest.raises(ValueError):
+        truncate_run(run, 11)

@@ -135,3 +135,33 @@ def test_resolver_rejects_unknown_refs(tmp_path: Path) -> None:
     for ref in ("nope", "S99", "s04", str(tmp_path / "missing.yaml")):
         with pytest.raises(UnknownScenarioError):
             resolve_scenario(ref)
+
+
+def test_s05_time_to_critical_asset_below_300_s_by_tick_120() -> None:
+    """Coordinator addendum: at 1.0 m/s the S05 contact is under 300 s from the nearest
+    critical asset (criticality >= 0.7) by about tick 60-120, on its ground-truth path."""
+    from soundings.schemas.geo import to_local_m
+    from soundings.schemas.harbor import load_harbor
+    from soundings.sim.run import run_scenario
+
+    harbor = load_harbor()
+    sc = resolve_scenario("S05", harbor)
+    assert sc.contacts[0].behavior.speed_mps == 1.0
+    path = run_scenario(sc, harbor=harbor, ticks=200).truth_paths["gt-1"]
+    critical = [to_local_m(a.lat, a.lon) for a in harbor.assets if a.criticality >= 0.7]
+
+    def time_to_critical(k: int) -> float:
+        x0, y0 = to_local_m(path[k].lat, path[k].lon)
+        x1, y1 = to_local_m(path[k + 1].lat, path[k + 1].lon)
+        vx, vy = (x1 - x0) / sc.tick_s, (y1 - y0) / sc.tick_s
+        best = float("inf")
+        for cx, cy in critical:
+            dist = ((cx - x0) ** 2 + (cy - y0) ** 2) ** 0.5
+            closing = (vx * (cx - x0) + vy * (cy - y0)) / dist
+            if closing > 0:
+                best = min(best, dist / closing)
+        return best
+
+    assert time_to_critical(0) > 300.0
+    first = next(k for k in range(199) if time_to_critical(k) < 300.0)
+    assert 60 <= first <= 120, first

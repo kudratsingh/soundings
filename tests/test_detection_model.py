@@ -15,7 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from soundings.schemas.config import load_likelihood_spec
-from soundings.schemas.enums import Hypothesis
+from soundings.schemas.enums import FeatureName, Hypothesis
 from soundings.schemas.harbor import Harbor, load_harbor
 from soundings.schemas.scenario import AcousticSpec, scenario_from_data
 from soundings.sim.acoustics import (
@@ -401,3 +401,41 @@ def test_set_acoustics_used_as_is_and_draw_count_fixed() -> None:
     )
     sample_acoustic_truth(b, Hypothesis.BIOLOGIC, AcousticSpec(), spec, weights)
     assert a.random() == b.random()  # both consumed exactly three uniforms
+
+
+def test_run_scenario_likelihoods_override() -> None:
+    from soundings.sim.hashing import track_hash
+    from soundings.sim.scenario import resolve_scenario
+
+    spec = load_likelihood_spec()
+    sc = resolve_scenario("S05")
+    data = sc.model_dump(mode="json")
+    data["contacts"][0]["acoustic"] = {}  # every field sampled from the table
+    open_sc = scenario_from_data(data)
+    default = run_scenario(open_sc)
+    assert track_hash(run_scenario(open_sc, likelihoods=spec)) == track_hash(default)
+    # A perturbed table where a UUV never shows a tonal and always clicks.
+    tonal = spec.features[FeatureName.PROPELLER_TONAL_PRESENT]
+    clicks = spec.features[FeatureName.BREATHING_OR_CLICK_PRESENT]
+    uuv = Hypothesis.UNAUTHORIZED_UUV
+    perturbed = spec.model_copy(
+        update={
+            "features": {
+                **spec.features,
+                FeatureName.PROPELLER_TONAL_PRESENT: tonal.model_copy(
+                    update={"rows": {**tonal.rows, uuv: (1.0, 0.0)}}
+                ),
+                FeatureName.BREATHING_OR_CLICK_PRESENT: clicks.model_copy(
+                    update={"rows": {**clicks.rows, uuv: (0.0, 1.0)}}
+                ),
+            }
+        }
+    )
+    run = run_scenario(open_sc, likelihoods=perturbed)
+    real = [d for d in run.detections if not d.is_false_alarm]
+    assert real and all(not d.propeller_tonal_present for d in real)
+    assert all(d.breathing_or_click_present for d in real)
+    # Kinematics and detection are untouched by the acoustic table.
+    assert [(d.tick, d.lat, d.lon) for d in real] == [
+        (d.tick, d.lat, d.lon) for d in default.detections if not d.is_false_alarm
+    ]
