@@ -63,6 +63,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 092 | mentor brief | in review | wo/092-mentor-brief | | | see PR (test_mentor_brief 8) |
 | 091 | README for the review committee | in review | wo/091-readme-committee | | | README + docs/architecture.svg + 3 UI screenshots; fresh-clone `make setup && make demo` verified |
 | 042-fix | audit commit semantics (row coverage, write-failure rollback, idempotent re-delivery) | PR open (auto-merge on green) | fix/audit-commit-semantics | see PR | | tests/test_audit_semantics.py 14 new; full suite in PR |
+| fix | boundary (investigator cannot peek) + no-external-references | PR open (auto-merge on green) | fix/boundary-and-no-references | see PR | | tests/test_boundary.py (24) + tests/test_no_external_references.py (3); full suite in PR |
 
 ## Team
 | role | name | github | owns |
