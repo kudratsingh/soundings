@@ -1,0 +1,23 @@
+# Tuesday. A sea lion: erratic, shallow, clicking, partly carried by the current.
+id: S07
+name: Sea lion
+seed: 17
+duration_ticks: 600
+tick_s: 2
+ground_truth: BIOLOGIC
+hour_of_day: 11
+contacts:
+  - id: gt-1
+    start: {lat: 33.7320, lon: -118.2610, depth_m: 2}
+    behavior: {type: erratic, speed_mps: 1.0, drift_weight: 0.6}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: true}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: RESOLVED_BENIGN
+  top_hypothesis: BIOLOGIC
+  max_human_interruptions: 0
+notes: >-
+  Drift follows config/likelihoods.yaml (BIOLOGIC mostly low drift consistency) with
+  drift_weight 0.6; the SPEC-SIM section 3 phrase about high drift consistency is not
+  binding (DECISIONS.md 2026-10-16 22:25).

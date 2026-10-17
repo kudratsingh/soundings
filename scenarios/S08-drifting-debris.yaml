@@ -1,0 +1,19 @@
+# Tuesday. Something unpowered rides the ebb down the main channel.
+id: S08
+name: Drifting debris
+seed: 19
+duration_ticks: 600
+tick_s: 2
+ground_truth: DEBRIS_OR_DRIFT
+hour_of_day: 10
+contacts:
+  - id: gt-1
+    start: {lat: 33.7330, lon: -118.2620, depth_m: 1.5}
+    behavior: {type: drift, jitter_mps: 0.05}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HAZARD_NOTICE
+  top_hypothesis: DEBRIS_OR_DRIFT
+  max_human_interruptions: 0

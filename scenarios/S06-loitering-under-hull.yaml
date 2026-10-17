@@ -1,0 +1,18 @@
+# Harbor Night. A quiet orbit under a critical berth; nobody filed it and nobody answers.
+id: S06
+name: Loitering under a hull
+seed: 13
+duration_ticks: 600
+tick_s: 2
+ground_truth: UNAUTHORIZED_UUV
+hour_of_day: 2
+contacts:
+  - id: gt-1
+    start: {lat: 33.7425, lon: -118.2631, depth_m: 8}
+    behavior: {type: orbit, target_asset: fuel_berth_1, radius_m: 40, speed_mps: 0.6}
+    acoustic: {propeller_tonal: true, tonal_band: high, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HANDED_OFF
+  max_human_interruptions: 1
