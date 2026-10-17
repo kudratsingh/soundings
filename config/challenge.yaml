@@ -1,0 +1,10 @@
+# Simulated acoustic challenge-response (WO-021; docs/SPEC-INVESTIGATION.md section 5).
+# Loaded by soundings.challenge.hail.load_hail_config. Stress-test settings for this
+# demonstration, not a real modem protocol. Approved as a new config file in
+# docs/log/DECISIONS.md 2026-10-16 23:05.
+
+hail:
+  latency_s: 20                          # SPEC-INVESTIGATION section 5: acoustic_hail latency
+  cost_usd: 0.01                         # SPEC-INVESTIGATION section 5: acoustic_hail cost
+  reply_loss_prob: 0.0                   # acoustic-modem loss rate; 0.0 for the catalog, seeded when > 0
+  modem_id_pattern: "^MOD-[0-9]{4,6}$"   # must equal registry.modem_id_pattern in config/registry.yaml
