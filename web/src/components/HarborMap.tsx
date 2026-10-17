@@ -4,6 +4,7 @@ import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLaye
 import type { CircleMarker as LCircleMarker } from 'leaflet'
 import type { AboutInfo, HarborGeoJson } from '../api'
 import type { ContactView } from '../useRun'
+import type { SensorRangeRow } from '../events' // WO-089
 
 const CENTER: [number, number] = [33.736, -118.262]
 
@@ -16,7 +17,29 @@ interface Props {
   onSelect(contactId: string): void
   onMapClick?(lat: number, lon: number): void
   overlay?: React.ReactNode
+  // --- WO-089 begin: live passive-sonar range per node (shrinks when a vessel passes) ---
+  ranges?: Record<string, Pick<SensorRangeRow, 'effective_range_m' | 'nl_db'>>
+  // --- WO-089 end ---
 }
+
+// --- WO-089 begin: one ring per sensor node, radius from the live sensor_ranges ---
+function SensorRing({ nodeId, name, lat, lon, radius, nl }: { nodeId: string; name: string; lat: number; lon: number; radius: number; nl: number | null }) {
+  const ref = useRef<L.Circle | null>(null)
+  useEffect(() => {
+    const el = ref.current?.getElement()
+    if (el) {
+      el.setAttribute('data-testid', 'sensor-ring')
+      el.setAttribute('data-node', nodeId)
+      el.setAttribute('data-radius', radius.toFixed(1))
+    }
+  })
+  return (
+    <Circle ref={ref} center={[lat, lon]} radius={radius} pathOptions={{ color: '#0e7490', weight: 1, dashArray: '4 4', fillOpacity: 0.03 }}>
+      <Tooltip>{nl === null ? name : `${name}: range ${radius.toFixed(0)} m at NL ${nl.toFixed(1)} dB (simulated)`}</Tooltip>
+    </Circle>
+  )
+}
+// --- WO-089 end ---
 
 function ClickCatcher({ onMapClick }: { onMapClick?(lat: number, lon: number): void }) {
   useMapEvents({ click: (e) => onMapClick?.(e.latlng.lat, e.latlng.lng) })
@@ -52,7 +75,7 @@ function ringFor(coords: unknown): [number, number][] {
   return ring.map(([lon, lat]) => [lat, lon] as [number, number])
 }
 
-export default function HarborMap({ harbor, about, tilesOn, contacts, selected, onSelect, onMapClick, overlay }: Props) {
+export default function HarborMap({ harbor, about, tilesOn, contacts, selected, onSelect, onMapClick, overlay, ranges }: Props) {
   const features = harbor?.features ?? []
   const zones = features.filter((f) => f.properties.kind === 'zone')
   const assets = features.filter((f) => f.properties.kind === 'asset')
@@ -89,19 +112,24 @@ export default function HarborMap({ harbor, about, tilesOn, contacts, selected, 
             <Tooltip>{`${z.properties.name} (criticality ${z.properties.criticality})`}</Tooltip>
           </Polygon>
         ))}
+        {/* --- WO-089 begin: rings from the live sensor_ranges (harbor range_m until the first one) --- */}
         {nodes.map((n) => {
           const [lon, lat] = n.geometry.coordinates as number[]
+          const id = String(n.properties.node_id)
+          const live = ranges?.[id]
           return (
-            <Circle
-              key={String(n.properties.node_id)}
-              center={[lat, lon]}
-              radius={Number(n.properties.range_m)}
-              pathOptions={{ color: '#0e7490', weight: 1, dashArray: '4 4', fillOpacity: 0.03 }}
-            >
-              <Tooltip>{String(n.properties.name)}</Tooltip>
-            </Circle>
+            <SensorRing
+              key={id}
+              nodeId={id}
+              name={String(n.properties.name)}
+              lat={lat}
+              lon={lon}
+              radius={live ? live.effective_range_m : Number(n.properties.range_m)}
+              nl={live ? live.nl_db : null}
+            />
           )
         })}
+        {/* --- WO-089 end --- */}
         {assets.map((a) => {
           const [lon, lat] = a.geometry.coordinates as number[]
           return (

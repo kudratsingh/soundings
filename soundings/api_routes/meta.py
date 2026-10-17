@@ -47,6 +47,26 @@ DETECTION_ASSUMPTIONS = (
     "often with breathing or clicks",
 )
 
+# --- WO-089 begin: the passive-sonar model's assumptions (the default once part 1 lands) ---
+SONAR_ASSUMPTIONS = (
+    "detection probability is a logistic of the passive-sonar signal excess "
+    "SL - TL - NL - DT, times p_max and node health; every value is a demo value with its "
+    "source in config/physics.yaml (About -> Physics)",
+    "transmission loss TL = 20 log10(r) + alpha r; ambient noise NL rises with sea state "
+    "and with nearby vessel transits, so the map's sensor rings shrink when a vessel passes",
+    "nothing beyond max_range_factor x the effective range at base noise",
+    *DETECTION_ASSUMPTIONS[1:],
+)
+
+
+def detection_assumptions(params: object) -> list[str]:
+    """The assumption lines of whichever detection model ``config/sim.yaml`` selects."""
+    model = getattr(params, "model", "gaussian")
+    return list(SONAR_ASSUMPTIONS if model == "sonar_equation" else DETECTION_ASSUMPTIONS)
+
+
+# --- WO-089 end ---
+
 
 def scenario_ids() -> list[tuple[str, str]]:
     """(id, path) for every catalog file, sorted by id; never smoke or live files."""
@@ -107,13 +127,16 @@ def boundary() -> dict[str, Any]:
 @router.get("/api/about")
 def about() -> dict[str, Any]:
     ui = ui_config()
-    params = dataclasses.asdict(load_detection_params())
+    # --- WO-089 begin ---
+    loaded = load_detection_params()
+    params = dataclasses.asdict(loaded)
+    # --- WO-089 end ---
     return {
         "title": "About Soundings",
         "honesty": {
             "detection_heading": DETECTION_HEADING,
             "detection_params": params,
-            "detection_assumptions": list(DETECTION_ASSUMPTIONS),
+            "detection_assumptions": detection_assumptions(loaded),  # WO-089
             "probability_label": POSTERIOR_LABEL,
             "shared_tables_note": SHARED_TABLES_NOTE,
             "map_note": MAP_NOTE,

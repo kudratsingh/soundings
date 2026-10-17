@@ -11,6 +11,7 @@ import type {
   Rung,
   RunFinishedPayload,
   RunStartedPayload,
+  SensorRangeRow, // WO-089
   SitrepPayload,
   StreamEvent,
   TickContact,
@@ -55,6 +56,9 @@ export interface RunState {
   sitreps: (SitrepPayload & { tick: number })[]
   finished: RunFinishedPayload | null
   error: string | null
+  // --- WO-089 begin ---
+  sensorRanges: Record<string, SensorRangeRow>
+  // --- WO-089 end ---
 }
 
 export const initialRunState = (runId: string | null): RunState => ({
@@ -74,6 +78,9 @@ export const initialRunState = (runId: string | null): RunState => ({
   sitreps: [],
   finished: null,
   error: null,
+  // --- WO-089 begin ---
+  sensorRanges: {},
+  // --- WO-089 end ---
 })
 
 /** Fold a batch of events into a new state (pure: the input state is not mutated). */
@@ -144,6 +151,14 @@ export function reduceEvents(prev: RunState, events: StreamEvent[]): RunState {
       case 'error':
         s.error = e.payload.message
         break
+      // --- WO-089 begin: the latest ring per node (sent when a ring changes) ---
+      case 'sensor_ranges': {
+        const next: Record<string, SensorRangeRow> = {}
+        for (const r of e.payload.nodes) next[r.node_id] = r
+        s.sensorRanges = next
+        break
+      }
+      // --- WO-089 end ---
     }
   }
   return s
