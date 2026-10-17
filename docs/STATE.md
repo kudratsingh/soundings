@@ -31,7 +31,7 @@ Last updated: 2026-10-17 02:05 PT (Phases 0–1 complete; Phase 2 two-thirds; Ph
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
-| 041 | guards + standing orders | pending | wo/041-guards-standing-orders | | | |
+| 041 | guards + standing orders | PR open, auto-merge on green CI | wo/041-guards-standing-orders | (see PR) | squash commit on main (see PR) | 591 passed (141 WO-041: guards 95, standing orders 14, approval 22, integration 10) |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
 | 050 | baselines | pending | wo/050-baselines | | | |
