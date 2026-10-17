@@ -1,0 +1,19 @@
+# Operators whose acoustic modems the harbor recognises although no plan is filed
+# (WO-021; drives UNFILED_KNOWN_OPERATOR in the WO-022 matcher). Every entry is a
+# demonstration operator, not a real company. Loaded by
+# soundings.challenge.hail.load_known_operators; a scenario's own known_operators are
+# added at load time, and a modem id listed twice with different operators is an error.
+
+known_operators:
+  - modem_id: "MOD-2290"
+    operator: "Port Survey Co (demo)"
+    note: "S04 replying modem; unfiled survey work on weekday afternoons"
+  - modem_id: "MOD-6012"
+    operator: "Harbor Pilot Services (demo)"
+    note: "Pilot-boat hull inspection drone"
+  - modem_id: "MOD-7735"
+    operator: "Bay Water Quality Lab (demo)"
+    note: "Water-sampling glider, short daytime runs"
+  - modem_id: "MOD-81204"
+    operator: "Terminal Maintenance Group (demo)"
+    note: "Pier piling inspection vehicle"
