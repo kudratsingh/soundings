@@ -5,10 +5,15 @@ Shared-tables honesty note: the simulator samples acoustic features from the sam
 scorer. The Phase 5 eval adds runs where the sim draws from perturbed tables to show
 the scorer is not grading its own homework.
 
-Stage 1 (this file today) holds the per-tonal-band detector defaults
-(``cavitation_index``, ``broadband_level``) from ``config/sim.yaml`` and the
-``silent_after_tick`` modifier. Sampling unset fields from the likelihood rows is
-added once ``soundings.schemas.config.load_likelihood_spec`` exists.
+Per contact, a field set in the scenario's ``acoustic`` block is used as is; a field
+left ``None`` is sampled once from the contact's hypothesis row
+(``sample_acoustic_truth``). ``config/likelihoods.yaml`` has rows for
+``propeller_tonal_present`` and ``breathing_or_click_present`` but none for
+``tonal_band``; an unset band is ``none`` for a contact without a propeller tonal and is
+drawn from ``tonal_band_when_tonal`` in ``config/sim.yaml`` otherwise (a ``tonal_band``
+likelihood row, if one is added later, takes precedence). ``cavitation_index`` and
+``broadband_level`` are detector defaults keyed by tonal band (``acoustic_defaults``).
+The ``silent_after_tick`` modifier (``apply_silence``) turns everything to none.
 """
 
 from __future__ import annotations
@@ -16,6 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import numpy as np
+
+from soundings.schemas.config import LikelihoodSpec
+from soundings.schemas.enums import FeatureName, Hypothesis, TonalBand
+from soundings.schemas.scenario import AcousticSpec
+from soundings.schemas.track import AcousticReading
 from soundings.sim.detection import DEFAULT_SIM_CONFIG_PATH, load_sim_yaml
 
 TONAL_BANDS: tuple[str, ...] = ("none", "low", "mid", "high")
@@ -89,3 +100,89 @@ def apply_silence(
     if is_silent(tick, silent_after_tick):
         return replace(SILENT), False
     return acoustic, replies_to_hail
+
+
+# ---------------------------------------------------------------------------
+# Sampling unset fields from the likelihood tables
+# ---------------------------------------------------------------------------
+
+TONAL_WHEN_TONAL_BANDS: tuple[str, ...] = ("low", "mid", "high")
+
+
+def load_tonal_band_weights(path: Path | str = DEFAULT_SIM_CONFIG_PATH) -> dict[str, float]:
+    """``tonal_band_when_tonal`` from ``config/sim.yaml``: band weights for a tonal contact."""
+    block = load_sim_yaml(path).get("tonal_band_when_tonal")
+    if not isinstance(block, dict) or set(block) != set(TONAL_WHEN_TONAL_BANDS):
+        raise ValueError(f"tonal_band_when_tonal keys must be exactly {TONAL_WHEN_TONAL_BANDS}")
+    out: dict[str, float] = {}
+    for band in TONAL_WHEN_TONAL_BANDS:
+        w = block[band]
+        if isinstance(w, bool) or not isinstance(w, int | float) or w < 0:
+            raise ValueError(f"tonal_band_when_tonal.{band} must be a number >= 0")
+        out[band] = float(w)
+    if sum(out.values()) <= 0.0:
+        raise ValueError("tonal_band_when_tonal weights must not all be 0")
+    return out
+
+
+def _p_true(spec: LikelihoodSpec, feature: FeatureName, hypothesis: Hypothesis) -> float:
+    block = spec.features[feature]
+    return float(block.rows[hypothesis][block.buckets.index("true")])
+
+
+def _pick(names: tuple[str, ...], weights: tuple[float, ...], u: float) -> str:
+    """Inverse-CDF pick of a name with ``u`` in [0, 1); the last name absorbs rounding."""
+    total = sum(weights)
+    acc = 0.0
+    for name, w in zip(names, weights, strict=True):
+        acc += w / total
+        if u < acc:
+            return name
+    return names[-1]
+
+
+def sample_acoustic_truth(
+    rng: np.random.Generator,
+    hypothesis: Hypothesis,
+    acoustic: AcousticSpec,
+    likelihoods: LikelihoodSpec,
+    band_weights: dict[str, float],
+) -> AcousticTruth:
+    """Resolve a contact's acoustic truth. Always draws exactly three uniforms, in order
+    (tonal, band, biologic), so setting one field never shifts another field's draw."""
+    u_tonal, u_band, u_bio = (float(u) for u in rng.random(3))
+    if acoustic.propeller_tonal is not None:
+        tonal = acoustic.propeller_tonal
+    else:
+        p = _p_true(likelihoods, FeatureName.PROPELLER_TONAL_PRESENT, hypothesis)
+        tonal = u_tonal < p
+    if acoustic.tonal_band is not None:
+        band = str(acoustic.tonal_band.value)
+    elif FeatureName.TONAL_BAND in likelihoods.features:
+        block = likelihoods.features[FeatureName.TONAL_BAND]
+        band = _pick(block.buckets, block.rows[hypothesis], u_band)
+    elif not tonal:
+        band = "none"
+    else:
+        names = TONAL_WHEN_TONAL_BANDS
+        band = _pick(names, tuple(band_weights[b] for b in names), u_band)
+    if acoustic.biologic_signature is not None:
+        bio = acoustic.biologic_signature
+    else:
+        p = _p_true(likelihoods, FeatureName.BREATHING_OR_CLICK_PRESENT, hypothesis)
+        bio = u_bio < p
+    return AcousticTruth(propeller_tonal=tonal, tonal_band=band, biologic_signature=bio)
+
+
+def acoustic_reading(
+    truth: AcousticTruth, defaults: dict[str, AcousticDefaults]
+) -> AcousticReading:
+    """The detector's reading for a contact with this acoustic truth (6-dp floats)."""
+    d = defaults[truth.tonal_band]
+    return AcousticReading(
+        propeller_tonal_present=truth.propeller_tonal,
+        tonal_band=TonalBand(truth.tonal_band),
+        cavitation_index=round(d.cavitation_index, 6),
+        breathing_or_click_present=truth.biologic_signature,
+        broadband_level=round(d.broadband_level_db, 6),
+    )

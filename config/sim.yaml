@@ -26,3 +26,8 @@ acoustic_defaults:
   low: {cavitation_index: 0.1, broadband_level_db: 112.0}
   mid: {cavitation_index: 0.35, broadband_level_db: 122.0}
   high: {cavitation_index: 0.7, broadband_level_db: 132.0}
+
+# Tonal band for a contact whose tonal_band is unset but which has a propeller tonal
+# (config/likelihoods.yaml has no tonal_band row). Weights over low, mid, high.
+# Stand-in values; a contact without a propeller tonal gets band none.
+tonal_band_when_tonal: {low: 0.5, mid: 0.3, high: 0.2}
