@@ -36,8 +36,8 @@ GAUSSIAN_BASELINE: dict[str, str] = {
     "S03/5": "CLEARED_AT_ASK",
     "S04/1": "HANDED_OFF",
     "S04/2": "HANDED_OFF",
-    "S04/3": "HANDED_OFF",
-    "S04/7": "HANDED_OFF",
+    "S04/3": "RESOLVED_BENIGN",  # WO-094 (#60) carries resolved outcomes across re-acquisition
+    "S04/7": "RESOLVED_BENIGN",
     "S05/1": "HANDED_OFF",
     "S05/2": "HANDED_OFF",
     "S05/3": "HANDED_OFF",
@@ -62,7 +62,6 @@ _WHY = (
     "timeout less and the lineage ends on the scenario's expected state"
 )
 EXPLAINED: dict[str, tuple[str, str]] = {
-    "S04/7": ("RESOLVED_BENIGN", _WHY + " (the S04 xfail's re-acquired track no longer forms)"),
     "S04/2": ("RESOLVED_BENIGN", _WHY),
     "S08/1": ("HAZARD_NOTICE", _WHY),
 }
