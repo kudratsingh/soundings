@@ -34,6 +34,8 @@
    pair: --ink on --unknown
    pair: --chart-text on --chart-bg
    pair: --problem-text on --problem-bg
+   pair: --blunt on --surface
+   pair: --blunt on --raised
 */
 
 :root {
@@ -74,6 +76,10 @@
   /* errors */
   --problem-bg: #3b1212;
   --problem-text: #ffd7d7;
+
+  /* --- WO-086 begin: the counterfactual blunt-policy counter (red) --- */
+  --blunt: #ff6b6b;
+  /* --- WO-086 end --- */
 
   /* type */
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

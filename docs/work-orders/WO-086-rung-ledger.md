@@ -152,7 +152,17 @@ None changed. The panel displays outcomes at watch, ask, slow (advisories), hold
 - §2.6: `test_blunt_labeled_counterfactual`.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see STATE (`wo/086-rung-ledger`) · Merged commit: squash on merge · Test summary: tests/test_ledger.py 16 (1 BT-01 skip), tests/test_ledger_integration.py 4 (BT-01 and stepped-source cases skip until WO-080A / WO-061 land), tests/e2e/test_ledger_smoke.py 1 (opt-in) · STATE.md updated: yes (WO-086 row)
+
+Built (2026-10-17, no model calls, no new dependency):
+- `soundings/eval/policies.py` WO-086 block: `StateStep`, `LedgerBucket`, `LEDGER_BUCKET_OF_RUNG`, `contact_max_rung` (on `max_rung`), `rung_ledger`, `ledger_from_run`, `closure_contacts`, `closure_count`, `closure_episodes`. No existing count changed.
+- `soundings/stream/ledger.py`: `RungLedger`, `BluntCounter` (worker thread; `worker_hook` for the timing test; `closures_at`/`episodes_at`/`minutes_at`), `LedgerAnnotator` (`feed`, `annotate`, `flush`), `with_ledger`, `TICK_OVERLAYS`. `soundings/stream/projection.py`: `projection_series(track)` (one causal Kalman pass; entry i == `projection_view` of the first i+1 readings, tested).
+- Stream: `TickContact.projection` (optional), `LedgerPayload`/`BluntPayload`/`LedgerEvent` (`SCHEMA_VERSION` 1), schema JSON regenerated. `RunEngine.start` and `stream_events` start the blunt counter before the source builds its stream and annotate whatever the source returns, so every source (batch now, stepped later) carries ledger events.
+- A tick's ledger event waits behind that tick's overlays (`sensor_ranges`, `responder`), so WO-088/089's "overlay right after its tick" contract holds; a transition's ledger event follows it directly.
+- Blunt counter: one closure per covered contact (DECISIONS 06:37), distinct episodes as the secondary number, closure minutes as the sub-line. Track-hash mismatch or worker failure: one `error` event after `run_started`, `available: false`, the panel shows "unavailable".
+- Web: `RungLedger.tsx` (`LEDGER_LABELS`, `LEDGER_TOOLTIPS`, `BLUNT_TOOLTIP` with the `approval_assumed` text), `radar.ts` (`leaderEnd(lat, lon, ve, vn, s)`, `ellipseLatLngs`), leaders from WO-084's smoothed velocity when a projection is streamed, the projection ellipse for the selected case, `--blunt` token.
+
+Deviations: the stream on main is runner v1 through the batch source (no stepped/v3 source on main), so "the same run" in `test_matches_eval_harness` is runner v1 adapted with `assemble_run` (WO-051's soundings policy is not on main); runner v3's ladder log goes through `rung_ledger` in `test_runner_v3_buckets`. Ping: WO-062P's `sfx.ts` already sounds the hail, so no `ping.ts`/`PingToggle` and no ping smoke assertions. Radar styling, trails and leaders came with the design pass (#58).
 
 ## Notes for the implementer
 - **Bucket definition.** A contact sits in the bucket of its max rung so far, so it moves up as it climbs and the bucket total is monotone. "Cleared at ask" therefore also holds RESOLVED_BENIGN, HAZARD_NOTICE and LOST_VEHICLE terminals at ask. This matches `ContactOutcome.max_rung`, not the gt roll-up in `rung_histogram` (the stream carries no ground truth, so the ledger cannot drop false alarms).

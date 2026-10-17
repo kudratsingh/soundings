@@ -180,6 +180,45 @@
       "title": "ApprovalResultPayload",
       "type": "object"
     },
+    "BluntPayload": {
+      "additionalProperties": false,
+      "description": "Berth closures the bang baseline would have asked for on the same seeded contact\nstream (WO-050). Counterfactual: the approvals are assumed, nothing here happened.",
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "berth_closures": {
+          "minimum": 0,
+          "title": "Berth Closures",
+          "type": "integer"
+        },
+        "closure_minutes": {
+          "minimum": 0.0,
+          "title": "Closure Minutes",
+          "type": "number"
+        },
+        "episodes": {
+          "minimum": 0,
+          "title": "Episodes",
+          "type": "integer"
+        },
+        "label": {
+          "const": "counterfactual: bang baseline",
+          "default": "counterfactual: bang baseline",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "berth_closures",
+        "episodes",
+        "closure_minutes",
+        "available"
+      ],
+      "title": "BluntPayload",
+      "type": "object"
+    },
     "ErrorEvent": {
       "additionalProperties": false,
       "properties": {
@@ -532,6 +571,98 @@
       "title": "LadderState",
       "type": "string"
     },
+    "LedgerBucket": {
+      "description": "Where a contact sits on the rung ledger: the bucket of its max rung so far.",
+      "enum": [
+        "resolved_at_watch",
+        "cleared_at_ask",
+        "advisories",
+        "holds",
+        "handed_off"
+      ],
+      "title": "LedgerBucket",
+      "type": "string"
+    },
+    "LedgerEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/LedgerPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ledger",
+          "default": "ledger",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "LedgerEvent",
+      "type": "object"
+    },
+    "LedgerPayload": {
+      "additionalProperties": false,
+      "description": "Contacts per ledger bucket so far (each contact once, at its max rung) and the\nblunt counter. Display only: nothing reads it back into the ladder.",
+      "properties": {
+        "blunt": {
+          "$ref": "#/$defs/BluntPayload"
+        },
+        "contacts_seen": {
+          "minimum": 0,
+          "title": "Contacts Seen",
+          "type": "integer"
+        },
+        "counts": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/LedgerBucket"
+          },
+          "title": "Counts",
+          "type": "object"
+        }
+      },
+      "required": [
+        "counts",
+        "contacts_seen",
+        "blunt"
+      ],
+      "title": "LedgerPayload",
+      "type": "object"
+    },
     "LostVehicleNotice": {
       "additionalProperties": false,
       "description": "Sent to the plan's ``contact_channel``; the watch officer is not interrupted.",
@@ -808,6 +939,100 @@
       ],
       "title": "ProbeId",
       "type": "string"
+    },
+    "ProjectionEllipse": {
+      "additionalProperties": false,
+      "description": "Position uncertainty ellipse: semi-axes in metres, compass bearing of the major\naxis in [0, 180), and the probability ``p`` it encloses.",
+      "properties": {
+        "orientation_deg": {
+          "title": "Orientation Deg",
+          "type": "number"
+        },
+        "p": {
+          "title": "P",
+          "type": "number"
+        },
+        "semi_major_m": {
+          "title": "Semi Major M",
+          "type": "number"
+        },
+        "semi_minor_m": {
+          "title": "Semi Minor M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "semi_major_m",
+        "semi_minor_m",
+        "orientation_deg",
+        "p"
+      ],
+      "title": "ProjectionEllipse",
+      "type": "object"
+    },
+    "ProjectionView": {
+      "additionalProperties": false,
+      "description": "JSON-ready projected track of one contact at its last reading (for WO-086).",
+      "properties": {
+        "contact_id": {
+          "title": "Contact Id",
+          "type": "string"
+        },
+        "ellipse": {
+          "$ref": "#/$defs/ProjectionEllipse"
+        },
+        "heading_deg": {
+          "title": "Heading Deg",
+          "type": "number"
+        },
+        "lat": {
+          "title": "Lat",
+          "type": "number"
+        },
+        "lon": {
+          "title": "Lon",
+          "type": "number"
+        },
+        "proj_lat": {
+          "title": "Proj Lat",
+          "type": "number"
+        },
+        "proj_lon": {
+          "title": "Proj Lon",
+          "type": "number"
+        },
+        "speed_mps": {
+          "title": "Speed Mps",
+          "type": "number"
+        },
+        "tick": {
+          "title": "Tick",
+          "type": "integer"
+        },
+        "vx": {
+          "title": "Vx",
+          "type": "number"
+        },
+        "vy": {
+          "title": "Vy",
+          "type": "number"
+        }
+      },
+      "required": [
+        "contact_id",
+        "tick",
+        "lat",
+        "lon",
+        "vx",
+        "vy",
+        "speed_mps",
+        "heading_deg",
+        "proj_lat",
+        "proj_lon",
+        "ellipse"
+      ],
+      "title": "ProjectionView",
+      "type": "object"
     },
     "ResponderEvent": {
       "additionalProperties": false,
@@ -1537,6 +1762,17 @@
           "title": "Lon",
           "type": "number"
         },
+        "projection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "sensor_id": {
           "title": "Sensor Id",
           "type": "string"
@@ -1774,6 +2010,7 @@
       "approval_result": "#/$defs/ApprovalResultEvent",
       "error": "#/$defs/ErrorEvent",
       "evidence_row": "#/$defs/EvidenceRowEvent",
+      "ledger": "#/$defs/LedgerEvent",
       "posterior": "#/$defs/PosteriorEvent",
       "responder": "#/$defs/ResponderEvent",
       "run_finished": "#/$defs/RunFinished",
@@ -1825,6 +2062,9 @@
     },
     {
       "$ref": "#/$defs/ResponderEvent"
+    },
+    {
+      "$ref": "#/$defs/LedgerEvent"
     }
   ],
   "title": "SoundingsStreamEvent",
