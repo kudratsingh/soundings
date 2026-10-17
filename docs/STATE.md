@@ -35,6 +35,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
 | 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | | | 1189 passed (45 part A: test_audit 21, test_sitrep 24) |
+| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | | | 1268 passed after rebase on WO-032 part A (45 part A: test_audit 21, test_sitrep 24) |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
