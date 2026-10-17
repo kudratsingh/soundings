@@ -14,15 +14,14 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal, Protocol
 
 import numpy as np
-import yaml
 from numpy.typing import ArrayLike
 
+from soundings.investigation.evidence import EvidenceTable
 from soundings.investigation.velocity import (
     FIT_WINDOW_S,
     BoolArray,
@@ -32,9 +31,14 @@ from soundings.investigation.velocity import (
     fit_windows,
     wrap_deg,
 )
+from soundings.schemas.config import LikelihoodSpec, load_likelihood_spec
+from soundings.schemas.enums import EvidenceKind, FeatureName, TonalBand, TransitPattern, Unit
+from soundings.schemas.evidence import UNKNOWN, EvidenceRow, EvidenceValue
+from soundings.schemas.geo import from_local_m, to_local_m
+from soundings.schemas.harbor import Harbor, Zone
+from soundings.schemas.track import Track
 
 DECIMALS: Final = 6
-UNKNOWN: Final = "unknown"
 
 # --- windows and thresholds (WO-012 binding definitions) -----------------------------
 
@@ -69,14 +73,8 @@ MIN_LEG_S: Final = 30.0  # a leg must span this much window mid-time to count
 MAX_TURN_GAP_S: Final = 90.0  # max time between two legs for their turn to count
 STRAIGHT_PERSISTENCE: Final = 0.9
 
-TransitPatternName = Literal["straight", "lawnmower", "orbit", "random", "stationary"]
-TRANSIT_PATTERNS: Final[tuple[TransitPatternName, ...]] = (
-    "straight",
-    "lawnmower",
-    "orbit",
-    "random",
-    "stationary",
-)
+TRANSIT_PATTERNS: Final[tuple[str, ...]] = tuple(p.value for p in TransitPattern)
+"""The WO-010 ``TransitPattern`` values in vocabulary order (the bucket order)."""
 
 CurrentAt = Callable[[float, float, float], tuple[float, float]]
 """``current_at(x_m, y_m, t_s) -> (u_east_mps, v_north_mps)`` of the configured field."""
@@ -110,30 +108,35 @@ class BucketSpec:
                 raise ValueError("thresholds must be strictly increasing")
 
 
-BUCKETS: Final[dict[str, BucketSpec]] = {
-    "drift_consistency": BucketSpec(("low", "mid", "high"), (0.3, 0.7)),
-    "propeller_tonal_present": BucketSpec(("false", "true")),
-    "breathing_or_click_present": BucketSpec(("false", "true")),
-    "transit_pattern": BucketSpec(TRANSIT_PATTERNS),
-    "depth": BucketSpec(("surface", "shallow", "mid", "deep"), (1.0, 4.0, 10.0)),
-    "speed_over_ground": BucketSpec(("drift", "slow", "cruise", "fast"), (0.3, 0.8, 2.0)),
-    "ais_surface_correlation": BucketSpec(("none", "weak", "strong"), (0.3, 0.7)),
-    "registry_match": BucketSpec(("exact", "area_mismatch", "window_mismatch", "none")),
-    "hail_reply": BucketSpec(("valid", "invalid", "none", "timeout")),
-    "pattern_of_life_anomaly": BucketSpec(("normal", "unusual", "anomalous"), (0.5, 0.85)),
-    "loiter_score": BucketSpec(("low", "mid", "high"), (0.3, 0.7)),
+BUCKETS: Final[dict[FeatureName, BucketSpec]] = {
+    FeatureName.DRIFT_CONSISTENCY: BucketSpec(("low", "mid", "high"), (0.3, 0.7)),
+    FeatureName.PROPELLER_TONAL_PRESENT: BucketSpec(("false", "true")),
+    FeatureName.BREATHING_OR_CLICK_PRESENT: BucketSpec(("false", "true")),
+    FeatureName.TRANSIT_PATTERN: BucketSpec(TRANSIT_PATTERNS),
+    FeatureName.DEPTH: BucketSpec(("surface", "shallow", "mid", "deep"), (1.0, 4.0, 10.0)),
+    FeatureName.SPEED_OVER_GROUND: BucketSpec(("drift", "slow", "cruise", "fast"), (0.3, 0.8, 2.0)),
+    FeatureName.AIS_SURFACE_CORRELATION: BucketSpec(("none", "weak", "strong"), (0.3, 0.7)),
+    FeatureName.REGISTRY_MATCH: BucketSpec(("exact", "area_mismatch", "window_mismatch", "none")),
+    FeatureName.HAIL_REPLY: BucketSpec(("valid", "invalid", "none", "timeout")),
+    FeatureName.PATTERN_OF_LIFE_ANOMALY: BucketSpec(
+        ("normal", "unusual", "anomalous"), (0.5, 0.85)
+    ),
+    FeatureName.LOITER_SCORE: BucketSpec(("low", "mid", "high"), (0.3, 0.7)),
 }
 
 BOOL_BUCKETS: Final = ("false", "true")
 
 
-def bucketize(feature: str, value: bool | int | float | str) -> str | None:
+def bucketize(feature: str, value: EvidenceValue) -> str | None:
     """Map a feature value to its bucket name; ``"unknown"`` maps to None (skipped).
 
     Raises KeyError for a feature with no buckets and ValueError for a value that does
     not fit the feature's bucket kind.
     """
-    spec = BUCKETS[feature]
+    try:
+        spec = BUCKETS[FeatureName(feature)]
+    except ValueError as exc:  # not a feature name at all
+        raise KeyError(feature) from exc
     if isinstance(value, str) and value == UNKNOWN:
         return None
     if spec.names == BOOL_BUCKETS:
@@ -154,33 +157,17 @@ def bucketize(feature: str, value: bool | int | float | str) -> str | None:
     return spec.names[bisect_right(spec.thresholds, v)]
 
 
-DEFAULT_LIKELIHOODS_PATH: Final = (
-    Path(__file__).resolve().parent.parent.parent / "config" / "likelihoods.yaml"
-)
+def likelihood_bucket_specs(spec: LikelihoodSpec | None = None) -> dict[FeatureName, BucketSpec]:
+    """Bucket names and thresholds as the WO-010 loader reads ``config/likelihoods.yaml``.
 
-
-def _bucket_name(raw: object) -> str:
-    # PyYAML reads the bucket names `false` / `true` as booleans; they are strings here.
-    if isinstance(raw, bool):
-        return "true" if raw else "false"
-    return str(raw)
-
-
-def load_yaml_bucket_specs(path: Path = DEFAULT_LIKELIHOODS_PATH) -> dict[str, BucketSpec]:
-    """Bucket names and thresholds as written in ``config/likelihoods.yaml``.
-
-    Only used to check ``BUCKETS`` against the YAML (the scorer reads the YAML through
-    the WO-010 loader once it exists).
+    Used to check ``BUCKETS`` against the scorer's tables; the scorer itself reads the
+    YAML through ``load_likelihood_spec``.
     """
-    with path.open(encoding="utf-8") as fh:
-        doc = yaml.safe_load(fh)
-    out: dict[str, BucketSpec] = {}
-    for name, body in doc["features"].items():
-        names = tuple(_bucket_name(b) for b in body["buckets"])
-        raw_thresholds = body.get("thresholds")
-        thresholds = None if raw_thresholds is None else tuple(float(x) for x in raw_thresholds)
-        out[str(name)] = BucketSpec(names, thresholds)
-    return out
+    loaded = load_likelihood_spec() if spec is None else spec
+    return {
+        name: BucketSpec(tuple(body.buckets), body.thresholds)
+        for name, body in loaded.features.items()
+    }
 
 
 # --- feature catalog -------------------------------------------------------------------
@@ -221,7 +208,7 @@ class FeatureSpec:
     """
 
     group: FeatureGroup
-    unit: str
+    unit: Unit
     extractor: str
     min_points: int = 1
     min_span_s: float = 0.0
@@ -232,39 +219,41 @@ class FeatureSpec:
 
 _FEWER_THAN_3 = "fewer than 3 points"
 
-FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
+FEATURE_CATALOG: Final[dict[FeatureName, FeatureSpec]] = {
     # kinematic (SPEC-INVESTIGATION section 2, in section 2 order)
-    "speed_over_ground": FeatureSpec(
+    FeatureName.SPEED_OVER_GROUND: FeatureSpec(
         "kinematic",
-        "m/s",
+        Unit.M_PER_S,
         "speed_over_ground",
         2,
         MIN_SPEED_SPAN_S,
         INSUFFICIENT_POINTS,
         "fewer than 2 points, or a span under 4 s",
     ),
-    "speed_variance": FeatureSpec(
-        "kinematic", "m/s2", "speed_variance", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
+    FeatureName.SPEED_VARIANCE: FeatureSpec(
+        "kinematic", Unit.M_PER_S2, "speed_variance", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
     ),
-    "depth": FeatureSpec("kinematic", "m", "depth", 1, 0.0, INSUFFICIENT_POINTS, "no points"),
-    "depth_variance": FeatureSpec(
-        "kinematic", "m", "depth_variance", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
+    FeatureName.DEPTH: FeatureSpec(
+        "kinematic", Unit.M, "depth", 1, 0.0, INSUFFICIENT_POINTS, "no points"
     ),
-    "heading_persistence": FeatureSpec(
+    FeatureName.DEPTH_VARIANCE: FeatureSpec(
+        "kinematic", Unit.M, "depth_variance", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
+    ),
+    FeatureName.HEADING_PERSISTENCE: FeatureSpec(
         "kinematic",
-        "ratio",
+        Unit.RATIO,
         "heading_persistence",
         3,
         0.0,
         INSUFFICIENT_POINTS,
         "fewer than 3 fitted steps whose displacement is at least 2 sigma position noise",
     ),
-    "turn_rate": FeatureSpec(
-        "kinematic", "deg/s", "turn_rate", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
+    FeatureName.TURN_RATE: FeatureSpec(
+        "kinematic", Unit.DEG_PER_S, "turn_rate", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
     ),
-    "closing_rate_to_nearest_critical_asset": FeatureSpec(
+    FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET: FeatureSpec(
         "kinematic",
-        "m/s",
+        Unit.M_PER_S,
         "closing_to_asset",
         2,
         0.0,
@@ -272,9 +261,9 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "fewer than 2 points; no_critical_asset when no asset has criticality >= 0.7",
         (NO_CRITICAL_ASSET,),
     ),
-    "time_to_nearest_critical_asset": FeatureSpec(
+    FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET: FeatureSpec(
         "kinematic",
-        "s",
+        Unit.S,
         "closing_to_asset",
         2,
         0.0,
@@ -282,33 +271,33 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "fewer than 2 points; no_critical_asset when no asset has criticality >= 0.7",
         (NO_CRITICAL_ASSET,),
     ),
-    "dwell_time_in_zone": FeatureSpec(
+    FeatureName.DWELL_TIME_IN_ZONE: FeatureSpec(
         "kinematic",
-        "s",
+        Unit.S,
         "dwell_time_s",
         1,
         0.0,
         NO_SENSOR_COVERAGE,
         "the last point lies outside every zone",
     ),
-    "track_gap_ratio": FeatureSpec(
-        "kinematic", "ratio", "track_gap_ratio", 1, 0.0, INSUFFICIENT_POINTS, "no points"
+    FeatureName.TRACK_GAP_RATIO: FeatureSpec(
+        "kinematic", Unit.RATIO, "track_gap_ratio", 1, 0.0, INSUFFICIENT_POINTS, "no points"
     ),
-    "drift_consistency": FeatureSpec(
-        "kinematic", "ratio", "drift_consistency", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
+    FeatureName.DRIFT_CONSISTENCY: FeatureSpec(
+        "kinematic", Unit.RATIO, "drift_consistency", 3, 0.0, INSUFFICIENT_POINTS, _FEWER_THAN_3
     ),
-    "loiter_score": FeatureSpec(
+    FeatureName.LOITER_SCORE: FeatureSpec(
         "kinematic",
-        "ratio",
+        Unit.RATIO,
         "loiter_score",
         2,
         LOITER_WINDOW_S,
         INSUFFICIENT_POINTS,
         "a span under 300 s",
     ),
-    "transit_pattern": FeatureSpec(
+    FeatureName.TRANSIT_PATTERN: FeatureSpec(
         "kinematic",
-        "category",
+        Unit.CATEGORY,
         "classify_transit_pattern",
         10,
         MIN_PATTERN_SPAN_S,
@@ -316,45 +305,45 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "fewer than 10 points, or a span under 60 s",
     ),
     # acoustic (passthrough of TrackPoint.acoustic)
-    "propeller_tonal_present": FeatureSpec(
+    FeatureName.PROPELLER_TONAL_PRESENT: FeatureSpec(
         "acoustic",
-        "bool",
+        Unit.BOOL,
         "extract_acoustic",
         1,
         0.0,
         NOT_REPORTED_BY_DETECTOR,
         "the detector never reports the field",
     ),
-    "tonal_band": FeatureSpec(
+    FeatureName.TONAL_BAND: FeatureSpec(
         "acoustic",
-        "category",
+        Unit.CATEGORY,
         "extract_acoustic",
         1,
         0.0,
         NOT_REPORTED_BY_DETECTOR,
         "the detector never reports the field",
     ),
-    "cavitation_index": FeatureSpec(
+    FeatureName.CAVITATION_INDEX: FeatureSpec(
         "acoustic",
-        "ratio",
+        Unit.RATIO,
         "extract_acoustic",
         1,
         0.0,
         NOT_REPORTED_BY_DETECTOR,
         "the detector never reports the field",
     ),
-    "breathing_or_click_present": FeatureSpec(
+    FeatureName.BREATHING_OR_CLICK_PRESENT: FeatureSpec(
         "acoustic",
-        "bool",
+        Unit.BOOL,
         "extract_acoustic",
         1,
         0.0,
         NOT_REPORTED_BY_DETECTOR,
         "the detector never reports the field",
     ),
-    "broadband_level": FeatureSpec(
+    FeatureName.BROADBAND_LEVEL: FeatureSpec(
         "acoustic",
-        "dB",
+        Unit.DB,
         "extract_acoustic",
         1,
         0.0,
@@ -362,52 +351,58 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "the detector never reports the field",
     ),
     # registry / identity (Phase 2 placeholders)
-    "registry_match": FeatureSpec(
-        "registry", "category", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.REGISTRY_MATCH: FeatureSpec(
+        "registry", Unit.CATEGORY, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
-    "plan_id": FeatureSpec(
-        "registry", "id", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.PLAN_ID: FeatureSpec(
+        "registry", Unit.ID, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
-    "modem_id": FeatureSpec(
-        "registry", "id", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.MODEM_ID: FeatureSpec(
+        "registry", Unit.ID, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
-    "hail_sent_at": FeatureSpec(
-        "registry", "s", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.HAIL_SENT_AT: FeatureSpec(
+        "registry", Unit.S, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
-    "hail_reply": FeatureSpec(
-        "registry", "category", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.HAIL_REPLY: FeatureSpec(
+        "registry", Unit.CATEGORY, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
-    "operator_known": FeatureSpec(
-        "registry", "bool", PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
+    FeatureName.OPERATOR_KNOWN: FeatureSpec(
+        "registry", Unit.BOOL, PLACEHOLDER_PHASE2, 0, 0.0, PLACEHOLDER_PHASE2, "Phase 2"
     ),
     # context
-    "zone_id": FeatureSpec(
+    FeatureName.ZONE_ID: FeatureSpec(
         "context",
-        "id",
+        Unit.ID,
         "extract_context",
         1,
         0.0,
         NO_SENSOR_COVERAGE,
         "the last point lies outside every zone",
     ),
-    "zone_criticality": FeatureSpec(
+    FeatureName.ZONE_CRITICALITY: FeatureSpec(
         "context",
-        "ratio",
+        Unit.RATIO,
         "extract_context",
         1,
         0.0,
         NO_SENSOR_COVERAGE,
         "the last point lies outside every zone",
     ),
-    "nearest_asset_id": FeatureSpec(
-        "context", "id", "extract_context", 1, 0.0, INSUFFICIENT_POINTS, "no points"
-    ),
-    "hour_of_day": FeatureSpec(
-        "context", "hour", "extract_context", 0, 0.0, INSUFFICIENT_POINTS, "never"
-    ),
-    "pattern_of_life_anomaly": FeatureSpec(
+    FeatureName.NEAREST_ASSET_ID: FeatureSpec(
         "context",
-        "ratio",
+        Unit.ID,
+        "extract_context",
+        1,
+        0.0,
+        NO_CRITICAL_ASSET,
+        "the harbor map holds no asset at all",
+    ),
+    FeatureName.HOUR_OF_DAY: FeatureSpec(
+        "context", Unit.HOUR, "extract_context", 0, 0.0, INSUFFICIENT_POINTS, "never"
+    ),
+    FeatureName.PATTERN_OF_LIFE_ANOMALY: FeatureSpec(
+        "context",
+        Unit.RATIO,
         "anomaly_score",
         1,
         0.0,
@@ -415,27 +410,27 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "the zone/hour/weekday cell is empty; no_pol_table when no table is loaded",
         (NO_POL_TABLE,),
     ),
-    "ais_surface_correlation": FeatureSpec(
+    FeatureName.AIS_SURFACE_CORRELATION: FeatureSpec(
         "context",
-        "ratio",
+        Unit.RATIO,
         "extract_context",
         0,
         0.0,
         NO_AIS_FEED,
         "always in Phase 1: no surface feed is simulated",
     ),
-    "sensor_health": FeatureSpec(
+    FeatureName.SENSOR_HEALTH: FeatureSpec(
         "context",
-        "ratio",
+        Unit.RATIO,
         "extract_context",
         1,
         0.0,
         NO_SENSOR_COVERAGE,
         "no sensor node covers the contact",
     ),
-    "visibility_for_camera": FeatureSpec(
+    FeatureName.VISIBILITY_FOR_CAMERA: FeatureSpec(
         "context",
-        "ratio",
+        Unit.RATIO,
         "extract_context",
         0,
         0.0,
@@ -443,12 +438,12 @@ FEATURE_CATALOG: Final[dict[str, FeatureSpec]] = {
         "never (assumption row from the hour-of-day default)",
     ),
     # support (not scored)
-    "track_segment": FeatureSpec(
-        "support", "category", "track_segment", 1, 0.0, INSUFFICIENT_POINTS, "no points"
+    FeatureName.TRACK_SEGMENT: FeatureSpec(
+        "support", Unit.CATEGORY, "track_segment", 1, 0.0, INSUFFICIENT_POINTS, "no points"
     ),
 }
 
-MIN_POINTS: Final[dict[str, tuple[int, float]]] = {
+MIN_POINTS: Final[dict[FeatureName, tuple[int, float]]] = {
     name: (spec.min_points, spec.min_span_s) for name, spec in FEATURE_CATALOG.items()
 }
 """feature -> (minimum points, minimum span in seconds) below which it is unknown."""
@@ -456,7 +451,7 @@ MIN_POINTS: Final[dict[str, tuple[int, float]]] = {
 
 def has_min_points(feature: str, track: TrackArrays) -> bool:
     """True when ``track`` meets the feature's point and span minimum."""
-    points, span = MIN_POINTS[feature]
+    points, span = MIN_POINTS[FeatureName(feature)]
     return len(track) >= points and (span <= 0.0 or track.span_s >= span)
 
 
@@ -822,7 +817,7 @@ def transit_stats(track: TrackArrays) -> TransitStats:
     )
 
 
-def classify_transit_pattern(track: TrackArrays) -> TransitPatternName | None:
+def classify_transit_pattern(track: TrackArrays) -> TransitPattern | None:
     """straight / lawnmower / orbit / random / stationary over the last 600 s.
 
     Rules, in order: mean speed < 0.1 m/s is ``stationary``; |cumulative signed turn|
@@ -836,48 +831,709 @@ def classify_transit_pattern(track: TrackArrays) -> TransitPatternName | None:
         return None
     stats = transit_stats(window)
     if stats.mean_speed_mps < STATIONARY_SPEED_MPS:
-        return "stationary"
+        return TransitPattern.STATIONARY
     if (
         abs(stats.cumulative_turn_deg) >= ORBIT_MIN_TURN_DEG
         and stats.turn_sign_fraction >= ORBIT_SIGN_FRACTION
     ):
-        return "orbit"
+        return TransitPattern.ORBIT
     if stats.reversals >= LAWNMOWER_MIN_REVERSALS:
-        return "lawnmower"
+        return TransitPattern.LAWNMOWER
     if stats.persistence is not None and stats.persistence >= STRAIGHT_PERSISTENCE:
-        return "straight"
-    return "random"
+        return TransitPattern.STRAIGHT
+    return TransitPattern.RANDOM
+
+
+# --- evidence rows from observed tracks ------------------------------------------------
+#
+# Everything below reads a WO-010 ``Track`` (observed readings only), the harbor map, the
+# scenario clock and the configured current field. Nothing here can reach the
+# simulator's hidden state: ``build_evidence`` takes ``run.tracks`` and ``run.tick_s``.
+
+KINEMATIC_FEATURES: Final[tuple[FeatureName, ...]] = tuple(
+    name for name, spec in FEATURE_CATALOG.items() if spec.group == "kinematic"
+)
+ACOUSTIC_FEATURES: Final[tuple[FeatureName, ...]] = tuple(
+    name for name, spec in FEATURE_CATALOG.items() if spec.group == "acoustic"
+)
+REGISTRY_FEATURES: Final[tuple[FeatureName, ...]] = tuple(
+    name for name, spec in FEATURE_CATALOG.items() if spec.group == "registry"
+)
+
+# Sources of rows that are not unknown.
+SOURCE_TRACKER: Final = "tracker"
+SOURCE_HARBOR_MAP: Final = "harbor_map"
+SOURCE_SCENARIO_CLOCK: Final = "scenario_clock"
+SOURCE_CURRENT_FIELD: Final = "config:current_field"
+SOURCE_POL_TABLE: Final = "data:pol_table"
+SOURCE_DEFAULT_WEEKDAY: Final = "default:weekday"
+SOURCE_DEFAULT_VISIBILITY: Final = "default:hour_of_day"
+ACOUSTIC_SOURCE_PREFIX: Final = "acoustic_detector:"
+SENSOR_SOURCE_PREFIX: Final = "sensor:"
+EXTRACTOR_SOURCE_PREFIX: Final = "extractor:"
+
+# Assumption rows (WO-012 "Kinds"): the configured value, exactly. Their uncertainty is
+# stated in ``assumes``; ``confidence`` (SPEC-INV 9.10) is about reading quality, so an
+# assumption row carries 1.0 and does not drag down the rows derived from it.
+ASSUMPTION_CONFIDENCE: Final = 1.0
+CLOCK_CONFIDENCE: Final = 1.0  # hour_of_day comes from the scenario clock
+SENSOR_HEALTH_CONFIDENCE: Final = 1.0  # the node's configured health, read from the map
+UNKNOWN_CONFIDENCE: Final = 0.0
+
+WEEKDAYS: Final[tuple[str, ...]] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DEFAULT_WEEKDAY: Final = "sat"  # the demo day (Sat 17 Oct 2026); scenarios carry none
+DAYLIGHT_START_HOUR: Final = 6  # visibility default: 06:00 <= hour < 19:00 is daylight
+DAYLIGHT_END_HOUR: Final = 19
+VISIBILITY_DAYLIGHT: Final = 0.8
+VISIBILITY_DARK: Final = 0.2
+
+CURRENT_FIELD_ASSUMES: Final = "current field is the configured default; no live gauge"
+VISIBILITY_ASSUMES: Final = "visibility from hour-of-day default; no visibility sensor"
+WEEKDAY_ASSUMES: Final = f"weekday is the default ({DEFAULT_WEEKDAY}); scenarios carry no weekday"
+
+SegmentName = Literal["kinematic", "pattern", "full"]
+SEGMENT_WINDOWS_S: Final[dict[SegmentName, float | None]] = {
+    "full": None,  # dwell_time_in_zone, track_gap_ratio
+    "pattern": PATTERN_WINDOW_S,  # drift_consistency, loiter_score, transit_pattern
+    "kinematic": KIN_WINDOW_S,  # speed, depth, heading, turn, closing
+}
+FEATURE_SEGMENT: Final[dict[FeatureName, SegmentName]] = {
+    FeatureName.SPEED_OVER_GROUND: "kinematic",
+    FeatureName.SPEED_VARIANCE: "kinematic",
+    FeatureName.DEPTH: "kinematic",
+    FeatureName.DEPTH_VARIANCE: "kinematic",
+    FeatureName.HEADING_PERSISTENCE: "kinematic",
+    FeatureName.TURN_RATE: "kinematic",
+    FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET: "kinematic",
+    FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET: "kinematic",
+    FeatureName.DWELL_TIME_IN_ZONE: "full",
+    FeatureName.TRACK_GAP_RATIO: "full",
+    FeatureName.DRIFT_CONSISTENCY: "pattern",
+    FeatureName.LOITER_SCORE: "pattern",
+    FeatureName.TRANSIT_PATTERN: "pattern",
+}
+"""Which ``track_segment`` row each kinematic row derives from."""
+
+POL_INPUT_FEATURES: Final[tuple[FeatureName, ...]] = (
+    FeatureName.SPEED_OVER_GROUND,
+    FeatureName.DEPTH,
+    FeatureName.DWELL_TIME_IN_ZONE,
+    FeatureName.TRANSIT_PATTERN,
+)
+"""The SPEC-INV section 4 feature vector scored against a pattern-of-life cell."""
+
+
+class PolBaseline(Protocol):
+    """What ``build_evidence`` needs from a pattern-of-life table (WO-012 ``pol.py``)."""
+
+    @property
+    def seed(self) -> int: ...
+
+    def anomaly(
+        self, zone_id: str, hour: int, weekday: str, observed: Mapping[str, EvidenceValue]
+    ) -> float | None:
+        """Anomaly in [0, 1] of ``observed`` in the cell, or None when the cell is empty."""
+        ...
+
+
+class ObservedRun(Protocol):
+    """The two fields of a WO-011 ``SimRun`` the evidence table may read."""
+
+    @property
+    def tracks(self) -> Mapping[str, Track]: ...
+
+    @property
+    def tick_s(self) -> float: ...
+
+
+class _VectorField(Protocol):
+    def vector_at(self, lat: float, lon: float, tide_phase: Any) -> tuple[float, float]: ...
+
+
+def pol_assumes(seed: int) -> str:
+    """The ``assumes`` text of a ``pol_baseline`` row."""
+    return f"pattern of life is a simulated normal month (seed {seed}); not observed history"
+
+
+def hour_at(hour_of_day: float, t_s: float) -> int:
+    """Whole clock hour (0-23) at ``t_s`` seconds after a scenario starting at ``hour_of_day``."""
+    return int(math.floor(hour_of_day + t_s / 3600.0)) % 24
+
+
+def visibility_default(hour: int) -> float:
+    """The hour-of-day visibility default (an assumption, never a reading)."""
+    return (
+        VISIBILITY_DAYLIGHT if DAYLIGHT_START_HOUR <= hour < DAYLIGHT_END_HOUR else VISIBILITY_DARK
+    )
+
+
+def current_at_from_field(
+    vector_at: Callable[[float, float, Any], tuple[float, float]],
+    tide_phase_for_hour: Callable[[int], Any],
+    *,
+    hour_of_day: float,
+) -> CurrentAt:
+    """Wrap a lat/lon/tide-phase current lookup as a local-metre ``CurrentAt``.
+
+    The tide phase is read at the clock hour of each queried time (``hour_at``).
+    """
+
+    def current_at(x_m: float, y_m: float, t_s: float) -> tuple[float, float]:
+        lat, lon = from_local_m(x_m, y_m)
+        u, v = vector_at(lat, lon, tide_phase_for_hour(hour_at(hour_of_day, t_s)))
+        return float(u), float(v)
+
+    return current_at
+
+
+def track_arrays(track: Track) -> TrackArrays:
+    """A WO-010 ``Track`` as feature-ready columns: seconds, local metres, reported sigma."""
+    xy = [to_local_m(p.lat, p.lon) for p in track.points]
+    return TrackArrays.from_columns(
+        [p.tick * track.tick_s for p in track.points],
+        [x for x, _ in xy],
+        [y for _, y in xy],
+        [p.depth_m for p in track.points],
+        [p.confidence for p in track.points],
+        [p.sigma_m for p in track.points],
+    )
+
+
+def _row_value(value: EvidenceValue | TransitPattern) -> EvidenceValue:
+    if isinstance(value, TransitPattern):
+        return value.value
+    if isinstance(value, float):
+        return _r6(value)
+    return value
+
+
+def _fact(
+    track: Track,
+    feature: FeatureName,
+    value: EvidenceValue,
+    *,
+    source: str,
+    confidence: float,
+    t: int | None = None,
+    unit: Unit | None = None,
+) -> EvidenceRow:
+    return EvidenceRow(
+        contact_id=track.contact_id,
+        t=track.points[-1].tick if t is None else t,
+        feature=feature,
+        value=_row_value(value),
+        unit=FEATURE_CATALOG[feature].unit if unit is None else unit,
+        source=source,
+        confidence=_r6(confidence),
+        kind=EvidenceKind.FACT,
+        probe_id=None,
+    )
+
+
+def _unknown_fact(track: Track, feature: FeatureName, reason: str) -> EvidenceRow:
+    return _fact(track, feature, UNKNOWN, source=reason, confidence=UNKNOWN_CONFIDENCE)
+
+
+def _assumption(
+    track: Track,
+    feature: FeatureName,
+    value: EvidenceValue,
+    *,
+    unit: Unit,
+    source: str,
+    assumes: str,
+) -> EvidenceRow:
+    return EvidenceRow(
+        contact_id=track.contact_id,
+        t=track.points[-1].tick,
+        feature=feature,
+        value=_row_value(value),
+        unit=unit,
+        source=source,
+        confidence=ASSUMPTION_CONFIDENCE,
+        kind=EvidenceKind.ASSUMPTION,
+        probe_id=None,
+        assumes=assumes,
+    )
+
+
+def _row_confidence(row: EvidenceRow) -> float:
+    return row.confidence if isinstance(row.confidence, float) else 0.0
+
+
+def _derived(
+    track: Track,
+    feature: FeatureName,
+    value: EvidenceValue | TransitPattern | None,
+    sources: Sequence[EvidenceRow],
+    *,
+    unknown_reason: str,
+) -> EvidenceRow:
+    """A derived row; ``value=None`` writes ``unknown`` with ``unknown_reason`` as source.
+
+    A known value's confidence is the minimum of its sources' (the table's ceiling).
+    """
+    spec = FEATURE_CATALOG[feature]
+    ids = tuple(dict.fromkeys(s.row_id for s in sources))
+    known = value is not None
+    return EvidenceRow(
+        contact_id=track.contact_id,
+        t=track.points[-1].tick,
+        feature=feature,
+        value=_row_value(value) if value is not None else UNKNOWN,
+        unit=spec.unit,
+        source=f"{EXTRACTOR_SOURCE_PREFIX}{spec.extractor}" if known else unknown_reason,
+        confidence=min(_row_confidence(s) for s in sources) if known else UNKNOWN_CONFIDENCE,
+        kind=EvidenceKind.DERIVED,
+        probe_id=None,
+        derived_from=ids,
+    )
+
+
+def track_segments(track: Track) -> dict[SegmentName, EvidenceRow]:
+    """The ``track_segment`` fact rows the kinematic rows derive from.
+
+    One row per window in ``SEGMENT_WINDOWS_S``; its value names the ticks and reading
+    count it covers and its confidence is the minimum reading confidence in it (WO-012
+    "Confidence"). Windows holding the same readings share one identical row.
+    """
+    arrays = track_arrays(track)
+    out: dict[SegmentName, EvidenceRow] = {}
+    for name, window_s in SEGMENT_WINDOWS_S.items():
+        n = len(arrays) if window_s is None else len(arrays.tail(window_s))
+        points = track.points[len(track.points) - n :]
+        out[name] = _fact(
+            track,
+            FeatureName.TRACK_SEGMENT,
+            f"ticks={points[0].tick}..{points[-1].tick};readings={n}",
+            source=SOURCE_TRACKER,
+            confidence=min(p.confidence for p in points),
+        )
+    return out
+
+
+def current_field_row(track: Track, current_at: CurrentAt) -> EvidenceRow:
+    """The ``current_field`` assumption: configured current speed at the last reading."""
+    last = track.points[-1]
+    x, y = to_local_m(last.lat, last.lon)
+    u, v = current_at(x, y, last.tick * track.tick_s)
+    return _assumption(
+        track,
+        FeatureName.CURRENT_FIELD,
+        math.hypot(u, v),
+        unit=Unit.M_PER_S,
+        source=SOURCE_CURRENT_FIELD,
+        assumes=CURRENT_FIELD_ASSUMES,
+    )
+
+
+def weekday_row(track: Track) -> EvidenceRow:
+    """The ``weekday`` assumption (``DEFAULT_WEEKDAY``)."""
+    return _assumption(
+        track,
+        FeatureName.WEEKDAY,
+        DEFAULT_WEEKDAY,
+        unit=Unit.CATEGORY,
+        source=SOURCE_DEFAULT_WEEKDAY,
+        assumes=WEEKDAY_ASSUMES,
+    )
+
+
+def pol_baseline_row(track: Track, pol: PolBaseline) -> EvidenceRow:
+    """The ``pol_baseline`` assumption naming the simulated month's seed."""
+    return _assumption(
+        track,
+        FeatureName.POL_BASELINE,
+        f"normal_month:seed={pol.seed}",
+        unit=Unit.ID,
+        source=SOURCE_POL_TABLE,
+        assumes=pol_assumes(pol.seed),
+    )
+
+
+def extract_kinematics(
+    track: Track,
+    harbor: Harbor,
+    current_at: CurrentAt,
+    *,
+    segments: Mapping[SegmentName, EvidenceRow],
+    current_row: EvidenceRow,
+) -> list[EvidenceRow]:
+    """One derived row per kinematic catalog feature, in catalog order.
+
+    Each derives from the ``track_segment`` row of its window (``FEATURE_SEGMENT``);
+    ``drift_consistency`` also derives from ``current_row``.
+    """
+    arrays = track_arrays(track)
+    last = track.points[-1]
+    values: dict[FeatureName, EvidenceValue | TransitPattern | None] = {
+        FeatureName.SPEED_OVER_GROUND: speed_over_ground(arrays),
+        FeatureName.SPEED_VARIANCE: speed_variance(arrays),
+        FeatureName.DEPTH: depth(arrays),
+        FeatureName.DEPTH_VARIANCE: depth_variance(arrays),
+        FeatureName.HEADING_PERSISTENCE: heading_persistence(arrays),
+        FeatureName.TURN_RATE: turn_rate(arrays),
+        FeatureName.TRACK_GAP_RATIO: track.gap_ratio,
+        FeatureName.DRIFT_CONSISTENCY: drift_consistency(arrays, current_at),
+        FeatureName.TRANSIT_PATTERN: classify_transit_pattern(arrays),
+    }
+    reasons: dict[FeatureName, str] = {}
+
+    asset = harbor.nearest_asset(last.lat, last.lon, CRITICAL_ASSET_MIN)
+    closing = None
+    if asset is None:
+        reasons[FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET] = NO_CRITICAL_ASSET
+        reasons[FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET] = NO_CRITICAL_ASSET
+    else:
+        closing = closing_to_asset(arrays, *to_local_m(asset.lat, asset.lon))
+    values[FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET] = (
+        None if closing is None else closing[0]
+    )
+    values[FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET] = None if closing is None else closing[1]
+
+    zone = harbor.zone_at(last.lat, last.lon)
+    values[FeatureName.DWELL_TIME_IN_ZONE] = (
+        None if zone is None else dwell_time_s(arrays.t_s, _inside(track, zone))
+    )
+
+    assets = sorted(harbor.assets, key=lambda a: a.asset_id)
+    values[FeatureName.LOITER_SCORE] = loiter_score(
+        arrays, [to_local_m(a.lat, a.lon) for a in assets]
+    )
+
+    rows: list[EvidenceRow] = []
+    for feature in KINEMATIC_FEATURES:
+        sources = [segments[FEATURE_SEGMENT[feature]]]
+        if feature is FeatureName.DRIFT_CONSISTENCY:
+            sources.append(current_row)
+        reason = reasons.get(feature, FEATURE_CATALOG[feature].unknown_source)
+        rows.append(_derived(track, feature, values[feature], sources, unknown_reason=reason))
+    return rows
+
+
+def _inside(track: Track, zone: Zone) -> list[bool]:
+    return [zone.contains(p.lat, p.lon) for p in track.points]
+
+
+def extract_acoustic(track: Track) -> list[EvidenceRow]:
+    """Passthrough of every reading's acoustic fields as fact rows, in catalog order.
+
+    Each reported field of each reading becomes a row at the reading's tick with
+    ``source="acoustic_detector:<sensor_id>"`` and the reading's confidence. A field no
+    reading reports becomes one ``unknown`` row (``not_reported_by_detector``).
+    """
+    rows: list[EvidenceRow] = []
+    for feature in ACOUSTIC_FEATURES:
+        reported = False
+        for point in track.points:
+            raw = getattr(point.acoustic, feature.value)
+            if isinstance(raw, str) and raw == UNKNOWN:
+                continue
+            value: EvidenceValue
+            if isinstance(raw, bool):
+                value = raw
+            elif isinstance(raw, TonalBand):
+                value = raw.value
+            else:
+                value = float(raw)
+            rows.append(
+                _fact(
+                    track,
+                    feature,
+                    value,
+                    source=f"{ACOUSTIC_SOURCE_PREFIX}{point.sensor_id}",
+                    confidence=point.confidence,
+                    t=point.tick,
+                )
+            )
+            reported = True
+        if not reported:
+            rows.append(_unknown_fact(track, feature, NOT_REPORTED_BY_DETECTOR))
+    return rows
+
+
+def extract_registry_placeholders(track: Track) -> list[EvidenceRow]:
+    """Registry/identity features as ``unknown`` facts (``placeholder:phase2``)."""
+    return [_unknown_fact(track, feature, PLACEHOLDER_PHASE2) for feature in REGISTRY_FEATURES]
+
+
+def covering_nodes(track: Track, harbor: Harbor) -> list[str]:
+    """Sensor nodes covering the contact, sorted: nodes that reported it in the last
+    ``KIN_WINDOW_S``, plus nodes whose ``range_m`` reaches its last reading."""
+    last = track.points[-1]
+    t_cut = (last.tick * track.tick_s) - KIN_WINDOW_S
+    known = {n.node_id for n in harbor.sensor_nodes}
+    ids = {p.sensor_id for p in track.points if p.tick * track.tick_s >= t_cut} & known
+    for node in harbor.sensor_nodes:
+        x, y = to_local_m(last.lat, last.lon)
+        nx, ny = to_local_m(node.lat, node.lon)
+        if math.hypot(x - nx, y - ny) <= node.range_m:
+            ids.add(node.node_id)
+    return sorted(ids)
+
+
+def extract_context(track: Track, harbor: Harbor, *, hour_of_day: float) -> list[EvidenceRow]:
+    """Context rows except ``pattern_of_life_anomaly``, in catalog order.
+
+    ``zone_id``, ``zone_criticality``, ``nearest_asset_id`` and ``hour_of_day`` are facts
+    at the last reading; ``ais_surface_correlation`` is ``unknown`` (``no_ais_feed``);
+    one ``sensor_health`` fact per covering node; ``visibility_for_camera`` is an
+    assumption from the hour-of-day default.
+    """
+    last = track.points[-1]
+    hour = hour_at(hour_of_day, last.tick * track.tick_s)
+    rows: list[EvidenceRow] = []
+    zone = harbor.zone_at(last.lat, last.lon)
+    if zone is None:
+        rows.append(_unknown_fact(track, FeatureName.ZONE_ID, NO_SENSOR_COVERAGE))
+        rows.append(_unknown_fact(track, FeatureName.ZONE_CRITICALITY, NO_SENSOR_COVERAGE))
+    else:
+        conf = last.confidence
+        rows.append(
+            _fact(
+                track, FeatureName.ZONE_ID, zone.zone_id, source=SOURCE_HARBOR_MAP, confidence=conf
+            )
+        )
+        rows.append(
+            _fact(
+                track,
+                FeatureName.ZONE_CRITICALITY,
+                zone.criticality,
+                source=SOURCE_HARBOR_MAP,
+                confidence=conf,
+            )
+        )
+    asset = harbor.nearest_asset(last.lat, last.lon)
+    if asset is None:
+        rows.append(_unknown_fact(track, FeatureName.NEAREST_ASSET_ID, NO_CRITICAL_ASSET))
+    else:
+        rows.append(
+            _fact(
+                track,
+                FeatureName.NEAREST_ASSET_ID,
+                asset.asset_id,
+                source=SOURCE_HARBOR_MAP,
+                confidence=last.confidence,
+            )
+        )
+    rows.append(
+        _fact(
+            track,
+            FeatureName.HOUR_OF_DAY,
+            hour,
+            source=SOURCE_SCENARIO_CLOCK,
+            confidence=CLOCK_CONFIDENCE,
+        )
+    )
+    rows.append(_unknown_fact(track, FeatureName.AIS_SURFACE_CORRELATION, NO_AIS_FEED))
+    nodes = covering_nodes(track, harbor)
+    if not nodes:
+        rows.append(_unknown_fact(track, FeatureName.SENSOR_HEALTH, NO_SENSOR_COVERAGE))
+    for node_id in nodes:
+        rows.append(
+            _fact(
+                track,
+                FeatureName.SENSOR_HEALTH,
+                harbor.node(node_id).health,
+                source=f"{SENSOR_SOURCE_PREFIX}{node_id}",
+                confidence=SENSOR_HEALTH_CONFIDENCE,
+            )
+        )
+    rows.append(
+        _assumption(
+            track,
+            FeatureName.VISIBILITY_FOR_CAMERA,
+            visibility_default(hour),
+            unit=FEATURE_CATALOG[FeatureName.VISIBILITY_FOR_CAMERA].unit,
+            source=SOURCE_DEFAULT_VISIBILITY,
+            assumes=VISIBILITY_ASSUMES,
+        )
+    )
+    return rows
+
+
+def extract_pattern_of_life(
+    track: Track,
+    rows_by_feature: Mapping[FeatureName, Sequence[EvidenceRow]],
+    *,
+    weekday: EvidenceRow,
+    pol: PolBaseline | None,
+    pol_row: EvidenceRow | None,
+) -> EvidenceRow:
+    """``pattern_of_life_anomaly``, derived from zone, hour, weekday, the section 4
+    feature vector and (when a table is loaded) ``pol_baseline``.
+
+    ``pol=None`` gives ``unknown`` (``no_pol_table``); an empty cell, or a contact in no
+    zone, gives ``unknown`` (``pol_cell_empty``).
+    """
+    feature = FeatureName.PATTERN_OF_LIFE_ANOMALY
+    zone_row = rows_by_feature[FeatureName.ZONE_ID][0]
+    hour_row = rows_by_feature[FeatureName.HOUR_OF_DAY][0]
+    inputs = [rows_by_feature[f][0] for f in POL_INPUT_FEATURES]
+    context = [zone_row, hour_row, weekday]
+    if pol is None or pol_row is None:
+        return _derived(track, feature, None, [*context, *inputs], unknown_reason=NO_POL_TABLE)
+    known = [r for r in inputs if not (isinstance(r.value, str) and r.value == UNKNOWN)]
+    if isinstance(zone_row.value, str) and zone_row.value == UNKNOWN:
+        score = None
+    else:
+        observed = {r.feature.value: r.value for r in known}
+        hour = hour_row.value
+        if not isinstance(hour, int) or isinstance(hour, bool):
+            raise TypeError("hour_of_day row must hold an int")
+        score = pol.anomaly(str(zone_row.value), hour, str(weekday.value), observed)
+    if score is None:
+        return _derived(
+            track, feature, None, [*context, *inputs, pol_row], unknown_reason=POL_CELL_EMPTY
+        )
+    return _derived(
+        track,
+        feature,
+        min(max(float(score), 0.0), 1.0),
+        [*context, *known, pol_row],
+        unknown_reason=POL_CELL_EMPTY,
+    )
+
+
+def contact_evidence(
+    track: Track,
+    harbor: Harbor,
+    current_at: CurrentAt,
+    pol: PolBaseline | None,
+    *,
+    hour_of_day: float,
+) -> list[EvidenceRow]:
+    """One extraction pass at the contact's last tick, as rows in append order.
+
+    Order: the assumption rows other rows cite (``current_field``, ``weekday``,
+    ``pol_baseline``), then the ``track_segment`` facts, then every other catalog
+    feature in catalog order. Every catalog feature gets at least one row.
+    """
+    current_row = current_field_row(track, current_at)
+    week_row = weekday_row(track)
+    pol_row = None if pol is None else pol_baseline_row(track, pol)
+    segments = track_segments(track)
+
+    by_feature: dict[FeatureName, list[EvidenceRow]] = {}
+    produced = (
+        extract_kinematics(track, harbor, current_at, segments=segments, current_row=current_row)
+        + extract_acoustic(track)
+        + extract_registry_placeholders(track)
+        + extract_context(track, harbor, hour_of_day=hour_of_day)
+    )
+    for row in produced:
+        by_feature.setdefault(row.feature, []).append(row)
+    by_feature[FeatureName.PATTERN_OF_LIFE_ANOMALY] = [
+        extract_pattern_of_life(track, by_feature, weekday=week_row, pol=pol, pol_row=pol_row)
+    ]
+
+    ordered: list[EvidenceRow] = [current_row, week_row]
+    if pol_row is not None:
+        ordered.append(pol_row)
+    ordered.extend(dict.fromkeys(segments.values()))  # identical windows share one row
+    for feature in FEATURE_CATALOG:
+        if feature is FeatureName.TRACK_SEGMENT:
+            continue
+        rows = by_feature.get(feature)
+        if not rows:
+            raise RuntimeError(f"catalog gap: no row for {feature.value}")  # never silent
+        ordered.extend(rows)
+    return ordered
+
+
+def build_evidence(
+    run: ObservedRun,
+    harbor: Harbor,
+    current_field: CurrentAt | _VectorField,
+    pol: PolBaseline | None = None,
+    *,
+    hour_of_day: float,
+    tide_phase_for_hour: Callable[[int], Any] | None = None,
+) -> EvidenceTable:
+    """The evidence table of a run, from its observed tracks only.
+
+    Reads ``run.tracks`` and ``run.tick_s`` and nothing else. Contacts go in sorted id
+    order. ``current_field`` is either a ``CurrentAt`` callable in local metres or an
+    object with ``vector_at(lat, lon, tide_phase)``; the latter needs
+    ``tide_phase_for_hour``. ``pol=None`` makes ``pattern_of_life_anomaly`` unknown with
+    source ``no_pol_table``.
+    """
+    if hasattr(current_field, "vector_at"):
+        if tide_phase_for_hour is None:
+            raise TypeError("a current field object needs tide_phase_for_hour")
+        current_at = current_at_from_field(
+            current_field.vector_at, tide_phase_for_hour, hour_of_day=hour_of_day
+        )
+    elif callable(current_field):
+        current_at = current_field
+    else:
+        raise TypeError("current_field must be a CurrentAt callable or have vector_at")
+    table = EvidenceTable()
+    for contact_id in sorted(run.tracks):
+        track = run.tracks[contact_id]
+        if track.contact_id != contact_id:
+            raise ValueError(f"run.tracks[{contact_id!r}] holds {track.contact_id!r}")
+        if not math.isclose(track.tick_s, run.tick_s, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(f"{contact_id}: track tick_s differs from run.tick_s")
+        table.extend(contact_evidence(track, harbor, current_at, pol, hour_of_day=hour_of_day))
+    return table
 
 
 __all__ = [
+    "ACOUSTIC_FEATURES",
     "BUCKETS",
     "BucketSpec",
     "CurrentAt",
+    "DEFAULT_WEEKDAY",
     "FEATURE_CATALOG",
+    "FEATURE_SEGMENT",
     "FIT_WINDOW_S",
     "FeatureSpec",
+    "KINEMATIC_FEATURES",
     "MIN_POINTS",
     "NOT_CLOSING_S",
+    "ObservedRun",
+    "PolBaseline",
+    "REGISTRY_FEATURES",
     "TRANSIT_PATTERNS",
     "TrackArrays",
-    "TransitPatternName",
     "TransitStats",
+    "UNKNOWN",
+    "UNKNOWN_SOURCES",
+    "WEEKDAYS",
     "bucketize",
+    "build_evidence",
     "classify_transit_pattern",
     "closing_to_asset",
+    "contact_evidence",
+    "covering_nodes",
+    "current_at_from_field",
+    "current_field_row",
     "depth",
     "depth_variance",
     "drift_consistency",
     "dwell_time_s",
+    "extract_acoustic",
+    "extract_context",
+    "extract_kinematics",
+    "extract_pattern_of_life",
+    "extract_registry_placeholders",
     "has_min_points",
     "heading_persistence",
-    "load_yaml_bucket_specs",
+    "hour_at",
+    "likelihood_bucket_specs",
     "loiter_score",
     "nearest_point_index",
+    "pol_assumes",
+    "pol_baseline_row",
     "speed_over_ground",
     "speed_variance",
+    "track_arrays",
     "track_confidence",
     "track_gap_ratio",
+    "track_segments",
     "transit_stats",
     "turn_rate",
+    "visibility_default",
+    "weekday_row",
 ]

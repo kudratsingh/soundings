@@ -15,6 +15,8 @@ from synthetic_tracks import TICK_S, make_track, orbit, stationary, straight
 
 from soundings.investigation import features as F
 from soundings.investigation.velocity import TrackArrays, fit_windows, wrap_deg
+from soundings.schemas.config import load_likelihood_spec
+from soundings.schemas.enums import FeatureName, Unit
 
 # SPEC-INVESTIGATION section 2, in section 2 order (32 features).
 SPEC_FEATURES: tuple[str, ...] = (
@@ -63,15 +65,16 @@ def line(n: int, *, tick_s: float = TICK_S, speed: float = 1.0, conf: float = 0.
 
 
 def test_buckets_match_yaml() -> None:
-    yaml_specs = F.load_yaml_bucket_specs()
-    assert set(F.BUCKETS) == set(yaml_specs)
-    for feature, spec in yaml_specs.items():
-        assert F.BUCKETS[feature].names == spec.names, feature
-        assert F.BUCKETS[feature].thresholds == spec.thresholds, feature
+    spec = load_likelihood_spec()
+    assert set(F.BUCKETS) == set(spec.features)
+    for feature, body in spec.features.items():
+        assert F.BUCKETS[feature].names == tuple(body.buckets), feature
+        assert F.BUCKETS[feature].thresholds == body.thresholds, feature
+    assert F.likelihood_bucket_specs(spec) == F.BUCKETS
 
 
 def test_buckets_match_yaml_booleans_are_strings() -> None:
-    yaml_specs = F.load_yaml_bucket_specs()
+    yaml_specs = F.likelihood_bucket_specs(load_likelihood_spec())
     for feature in ("propeller_tonal_present", "breathing_or_click_present"):
         assert yaml_specs[feature].names == ("false", "true")
         assert all(isinstance(n, str) for n in yaml_specs[feature].names)
@@ -79,7 +82,7 @@ def test_buckets_match_yaml_booleans_are_strings() -> None:
 
 def _boundary_cases() -> list[tuple[str, float, str]]:
     cases: list[tuple[str, float, str]] = []
-    for feature, spec in sorted(F.load_yaml_bucket_specs().items()):
+    for feature, spec in sorted(F.likelihood_bucket_specs(load_likelihood_spec()).items()):
         if spec.thresholds is None:
             continue
         for k, t in enumerate(spec.thresholds):
@@ -103,7 +106,7 @@ def test_buckets_match_yaml_left_closed_example() -> None:
 
 
 def test_buckets_match_yaml_every_bucket_reachable() -> None:
-    for feature, spec in sorted(F.load_yaml_bucket_specs().items()):
+    for feature, spec in sorted(F.likelihood_bucket_specs(load_likelihood_spec()).items()):
         if spec.thresholds is None:
             for name in spec.names:
                 value: bool | str = (name == "true") if spec.names == ("false", "true") else name
@@ -154,11 +157,19 @@ def test_bucket_spec_validates() -> None:
 
 
 def test_catalog_covers_likelihoods() -> None:
-    for feature in F.load_yaml_bucket_specs():
+    for feature in load_likelihood_spec().features:
         assert feature in F.FEATURE_CATALOG, feature
         assert F.FEATURE_CATALOG[feature].extractor, feature
     for feature in ("registry_match", "hail_reply"):
-        assert F.FEATURE_CATALOG[feature].extractor == F.PLACEHOLDER_PHASE2
+        assert F.FEATURE_CATALOG[FeatureName(feature)].extractor == F.PLACEHOLDER_PHASE2
+
+
+def test_catalog_covers_likelihoods_keys_are_wo010_names() -> None:
+    assert all(isinstance(k, FeatureName) for k in F.FEATURE_CATALOG)
+    assert all(isinstance(s.unit, Unit) for s in F.FEATURE_CATALOG.values())
+    assert all(isinstance(k, FeatureName) for k in F.BUCKETS)
+    spec_order = [f for f in FeatureName if f.value in SPEC_FEATURES]
+    assert list(F.FEATURE_CATALOG)[: len(spec_order)] == spec_order
 
 
 def test_catalog_covers_likelihoods_and_every_spec_feature_in_order() -> None:
