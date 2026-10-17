@@ -40,6 +40,7 @@ from soundings.stream.events import (
     ApprovalResultEvent,
     EvidenceRowEvent,
     EvidenceRowPayload,
+    ResponderEvent,  # WO-088
     RunFinished,
     RunFinishedPayload,
     RungEvent,
@@ -58,6 +59,15 @@ from soundings.stream.events import (
     TransitionEvent,
     TransitionPayload,
 )
+
+# --- WO-088 begin ---
+from soundings.stream.responder import (
+    ResponderSnapshotLike,
+    responder_payloads,
+    responder_snapshots,
+)
+
+# --- WO-088 end ---
 
 
 def sensor_range_events_at(sim: object, n_ticks: int) -> dict[int, SensorRangesPayload]:
@@ -116,6 +126,9 @@ def batch_events(
     speed: float,
     toggles: Sequence[ToggleName] = (),
     source: str = "batch",
+    # --- WO-088 begin ---
+    responder: Sequence[ResponderSnapshotLike] | None = None,
+    # --- WO-088 end ---
 ) -> list[StreamEvent]:
     """The WO-060 event stream of one finished runner v1 result, in delivery order.
 
@@ -123,6 +136,9 @@ def batch_events(
     order, then the transitions in ``seq`` order, each followed by a ``rung`` event when the
     contact's rung changed and by a ``sitrep`` event for a LOST_VEHICLE notice. A row a
     transition cites is always sent before the transition (CLAUDE.md 2.6).
+
+    WO-088: when ``responder`` snapshots are given, a ``responder`` event follows each
+    ``tick`` event that has one (state, position, battery, standoff, last 60 trail points).
     """
     sim = result.sim
     tick_s = float(sim.tick_s)
@@ -197,6 +213,9 @@ def batch_events(
             )
         )
 
+    # --- WO-088 begin ---
+    responder_at = responder_payloads(responder) if responder else {}
+    # --- WO-088 end ---
     for tick in range(last_tick + 1):
         events.append(
             TickEvent.model_validate(
@@ -209,6 +228,12 @@ def batch_events(
                 SensorRangesEvent.model_validate({**stamp(tick), "payload": ranges_at[tick]})
             )
         # --- WO-089 end ---
+        # --- WO-088 begin ---
+        if tick in responder_at:
+            events.append(
+                ResponderEvent.model_validate({**stamp(tick), "payload": responder_at[tick]})
+            )
+        # --- WO-088 end ---
         for row in rows_at.get(tick, []):
             send_row(row, tick)
         for t in transitions_at.get(tick, []):
@@ -329,6 +354,9 @@ class BatchReplaySource:
                 run_id=self.req.run_id,
                 speed=self.req.speed,
                 toggles=self.req.toggles,
+                # --- WO-088 begin ---
+                responder=responder_snapshots(result, self.req.scenario),
+                # --- WO-088 end ---
             )
         return self._events
 

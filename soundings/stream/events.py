@@ -234,6 +234,45 @@ class SensorRangesEvent(EventEnvelope):
 
 
 # --- WO-089 end ---
+# --- WO-088 begin ---
+ResponderStateName = Literal["DOCKED", "TRANSIT", "ON_STATION", "RETURNING"]
+"""The responder's states (``soundings.sim.responder.ResponderState`` names)."""
+
+
+class ResponderTrailPoint(_Model):
+    tick: Annotated[int, Field(ge=0)]
+    lat: float
+    lon: float
+
+
+class ResponderPayload(_Model):
+    """The harbor's responder at this tick (CLAUDE.md section 8 A2): a mobile probe that is
+    dispatched to look, holds station at standoff and returns to dock. Display only: no
+    field here can dispatch, position or recall it."""
+
+    id: str
+    state: ResponderStateName
+    lat: float
+    lon: float
+    heading_deg: float
+    speed_mps: float
+    battery_min: float
+    battery_capacity_min: float
+    standoff_m: float
+    target_contact_id: str | None = None
+    distance_to_target_m: float | None = None
+    dispatched: bool = False
+    """True on the tick a dispatch to look begins (the UI's dispatch sound cue)."""
+    trail: list[ResponderTrailPoint]
+    """The last ``TRAIL_POINTS`` positions, oldest first, ending at this tick."""
+
+
+class ResponderEvent(EventEnvelope):
+    type: Literal["responder"] = "responder"
+    payload: ResponderPayload
+
+
+# --- WO-088 end ---
 
 
 StreamEvent = Annotated[
@@ -248,7 +287,10 @@ StreamEvent = Annotated[
     | SitrepEvent
     | RunFinished
     | ErrorEvent
-    | SensorRangesEvent,  # WO-089
+    | SensorRangesEvent  # WO-089
+    # --- WO-088 begin ---
+    | ResponderEvent,
+    # --- WO-088 end ---
     Field(discriminator="type"),
 ]
 
@@ -265,6 +307,9 @@ EVENT_TYPES: tuple[str, ...] = (
     "run_finished",
     "error",
     "sensor_ranges",  # WO-089
+    # --- WO-088 begin ---
+    "responder",
+    # --- WO-088 end ---
 )
 
 STREAM_ADAPTER: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
@@ -302,6 +347,9 @@ __all__ = [
     "PosteriorEvent",
     "RunFinished",
     "RunStarted",
+    "ResponderEvent",
+    "ResponderPayload",
+    "ResponderTrailPoint",
     "RungEvent",
     "SensorRangeRow",  # WO-089
     "SensorRangesEvent",  # WO-089

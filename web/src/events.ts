@@ -189,6 +189,32 @@ export interface SensorRangesPayload {
   nodes: SensorRangeRow[]
 }
 // --- WO-089 end ---
+// --- WO-088 begin ---
+export type ResponderStateName = 'DOCKED' | 'TRANSIT' | 'ON_STATION' | 'RETURNING'
+
+export interface ResponderTrailPoint {
+  tick: number
+  lat: number
+  lon: number
+}
+
+/** The harbor's responder: a probe dispatched to look, held at standoff (display only). */
+export interface ResponderPayload {
+  id: string
+  state: ResponderStateName
+  lat: number
+  lon: number
+  heading_deg: number
+  speed_mps: number
+  battery_min: number
+  battery_capacity_min: number
+  standoff_m: number
+  target_contact_id: string | null
+  distance_to_target_m: number | null
+  dispatched: boolean
+  trail: ResponderTrailPoint[]
+}
+// --- WO-088 end ---
 
 interface Envelope<T extends string, P> {
   v: 1
@@ -213,6 +239,9 @@ export type StreamEvent =
   | Envelope<'run_finished', RunFinishedPayload>
   | Envelope<'error', { message: string }>
   | Envelope<'sensor_ranges', SensorRangesPayload> // WO-089
+  // --- WO-088 begin ---
+  | Envelope<'responder', ResponderPayload>
+// --- WO-088 end ---
 
 export const RUNG_LABEL: Record<Rung, string> = {
   watch: 'watch',
