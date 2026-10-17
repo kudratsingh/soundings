@@ -36,9 +36,11 @@ jobs:
 
       - name: No external references (names of the owner's other projects must not appear)
         run: |
-          if grep -rniE "incident[- _]?commander|incident[- _]?platform|audit-ws|arxiv|research[- ]agent" . \
-               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.mypy_cache \
-               --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache --exclude-dir=dist --exclude=ci.yml; then
+          # The pattern is assembled from pieces so this file never contains the names.
+          t1="inci""dent[- _]?comm""ander"; t2="inci""dent[- _]?plat""form"; t3="aud""it-""ws"; t4="arx""iv"; t5="rese""arch[- ]ag""ent"
+          pat="$t1|$t2|$t3|$t4|$t5"
+          if grep -rniE "$pat" . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.mypy_cache \
+               --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache --exclude-dir=dist; then
             echo "external reference found; see tests/test_no_external_references.py"; exit 1; fi
 
       - name: Tests (replay only)
