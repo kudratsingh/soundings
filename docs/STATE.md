@@ -51,6 +51,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
 | 062 | demo runner | part A + presenter mode merged; recording (part B) pending | wo/062a-demo-runner-core; wo/062p-presenter-mode | #21; WO-062P see branch PR | 39c22eb (part A) | part A 53; WO-062P: test_demo_script 29, test_presenter_api 5, test_sfx 12, e2e presenter smoke 1 |
 | 080 | Busy Tuesday scenario BT-01 | part A merged (#33); part B (tick skipping, runtime, determinism) in PR | wo/080-busy-tuesday-b | #33 + part B PR | see #33 | part A 56 tests; part B +28 tick-skipping, +6 BT-01, +3 rules; BT-01 33.7 s headless |
+| 080 | Busy Tuesday scenario BT-01 | part A in PR (schema, vessel_transit + AIS feed, generator, BT-01, grading); part B next | wo/080-busy-tuesday | see branch PR | | part A: 56 new tests (vessel 28, generate 13, busy_tuesday 6, rules 9) |
 | 081 | conflict detection at filing | PR open (auto-merge on green); JobType via local adapter until WO-080 part A | wo/081-conflict-detection | see branch PR | | 1546 passed, 1 skipped (52 WO-081 tests) |
 | 082 | slot proposal (CP-SAT) | PR open (auto-merge on green) | wo/082-slot-proposal | see PR | | 1823 passed, 2 skipped (38 WO-082 tests: test_slots 20, test_slots_api 12, test_slots_integration 2, e2e 1, +3 START_BOUNDS_INVALID reject cases) |
 | 083 | separation advisories (CPA/TCPA) | PR open (auto-merge) | wo/083-separation-advisories | see PR | | make check green; 25 WO-083 tests (BT-01 cases skip until WO-080 part A merges) |
