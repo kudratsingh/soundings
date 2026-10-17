@@ -34,6 +34,14 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.add_api_route("/registry", registry_page, methods=["GET"], include_in_schema=False)
     # --- WO-020 end ---
 
+    # --- WO-060 begin: runs and meta (before the web/dist mount) ---
+    from soundings.api_routes.meta import router as meta_router
+    from soundings.api_routes.runs import router as runs_router
+
+    application.include_router(meta_router)
+    application.include_router(runs_router)
+    # --- WO-060 end ---
+
     if web_dist.is_dir():
         application.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
 
