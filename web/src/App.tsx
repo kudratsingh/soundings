@@ -73,6 +73,9 @@ function useParams() {
       speed: p.get('speed') ?? '',
       tilesOn: p.get('tiles') !== 'off',
       mapStyle: (p.get('style') === 'chart' ? 'chart' : 'radar') as MapStyle,
+      // --- WO-060B begin: run-start toggles (?toggles=network_down,approver_unreachable) ---
+      toggles: (p.get('toggles') ?? '').split(',').filter(Boolean),
+      // --- WO-060B end ---
     }
   }, [])
 }
@@ -115,7 +118,7 @@ function App() {
   const begin = (scenario: string, seed: number | null, speed: number | null) => {
     setPicked(null)
     setHighlight(null)
-    startRun(scenario, seed, speed)
+    startRun(scenario, seed, speed, params.toggles) // WO-060B: toggles from the URL
       .then((r) => {
         setRunId(r.run_id)
         const q = new URLSearchParams(window.location.search)
@@ -135,9 +138,17 @@ function App() {
     fetchModelMode()
       .then(setModel)
       .catch(() => setModel(null)) // the badge falls back to "model: replay"
+    // --- WO-060B begin: the badge follows the model path as calls happen (never overclaims) ---
+    const poll = window.setInterval(() => {
+      fetchModelMode()
+        .then(setModel)
+        .catch(() => setModel(null))
+    }, 5000)
+    // --- WO-060B end ---
     if (params.scenario) {
       begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
     }
+    return () => window.clearInterval(poll) // WO-060B
   }, [])
 
   const tickS = run.started?.tick_s ?? 2

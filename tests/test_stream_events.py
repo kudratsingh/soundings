@@ -96,6 +96,47 @@ def _sample(s02: list[StreamEvent]) -> dict[str, StreamEvent]:
         ),
     )
     # --- WO-088 end ---
+    # --- WO-060B begin: the runner v3 types ---
+    out["investigation_step"] = ev.InvestigationStepEvent(
+        **env,
+        payload=ev.InvestigationStepPayload(
+            contact_id="c-0001",
+            case_id="c-0001#1",
+            probe_id="drift_check",
+            source="deterministic",
+            why="largest expected information gain per cost",
+            reason="chosen",
+            sent_tick=2,
+            landed_tick=2,
+            row_ids=["r1"],
+        ),
+    )
+    out["recommendation"] = ev.RecommendationEvent(
+        **env,
+        payload=ev.RecommendationPayload(
+            contact_id="c-0001",
+            case_id="c-0001#1",
+            outcome="HANDOFF",
+            recommended_rung=Rung.HAND_TO_PERSON,
+            stop_clause="C_THREAT",
+            threat_mass=0.7,
+            benign_mass=0.2,
+            top=Hypothesis.UNAUTHORIZED_UUV,
+            uncertain=False,
+        ),
+    )
+    out["ladder_action"] = ev.LadderActionEvent(
+        **env,
+        payload=ev.LadderActionPayload(
+            contact_id="c-0001",
+            state=LadderState.HOLDING,
+            action="start_hold",
+            scope={"action": "hold_one_gate_or_berth", "asset_id": "fuel_berth_1"},
+            clause="standing_orders.hold.hold_one_gate_or_berth",
+            signed_by="Watch Commander (demo)",
+        ),
+    )
+    # --- WO-060B end ---
     return out
 
 
