@@ -35,6 +35,7 @@ from soundings.eval.sweeps import (
     SWEEP_COLUMNS,
     WALL_TIME_NOTE,
     SweepsReport,
+    render_ablation,
     render_sweeps,
 )
 from soundings.schemas import LadderConfig, LadderState, Rung, Scenario
@@ -693,7 +694,11 @@ def render_markdown(report: EvalReport) -> str:
     out.append(f"- differing contacts: {len(llm.diff.differences) if llm.diff else 0}")
     out.append("")
     out.append(llm.sentence)
-    if llm.diff is None or llm.diff.stats.fixture_hits == 0:
+    ablation = report.sweeps.ablation if report.sweeps is not None else None
+    if ablation is not None:
+        out.append("")
+        out.extend(render_ablation(ablation))
+    elif llm.diff is None or llm.diff.stats.fixture_hits == 0:
         out.append("")
         out.append(BOTH_FALLBACK_SENTENCE)
     if llm.diff is not None and llm.diff.differences:

@@ -560,9 +560,14 @@ def test_sweeps_sections(make_eval: tuple[float, Path]) -> None:
     for policy in PolicyName:
         for col in REPORT_COLUMNS["outcomes"][1:]:
             assert (policy, col) in metrics, (policy, col)
-    # 3: the LLM section is honest until the fixtures exist
-    assert NO_LLM_EFFECT_SENTENCE in md
-    assert "both planner paths are the deterministic fallback" in md
+    # 3: the planner ablation (WO-093 entry point) populates the LLM section
+    assert sw.ablation is not None and sw.ablation.rows, sw.ablation
+    assert {r.planner for r in sw.ablation.rows} == {"llm", "deterministic", "random"}
+    llm_tables = [cols for sec, cols in tables if sec == "Where the LLM layer added nothing"]
+    assert REPORT_COLUMNS["ablation"] in llm_tables
+    assert sw.ablation.sentence and sw.ablation.sentence in md
+    assert all(r.missed_threats == 0 for r in sw.ablation.rows)
+    assert NO_LLM_EFFECT_SENTENCE in md or report.llm.diff is not None
 
 
 @LOCAL_ONLY

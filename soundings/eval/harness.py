@@ -52,6 +52,7 @@ from soundings.eval.sweeps import (
     THRESHOLDS,
     TOGGLES,
     SweepsReport,
+    ablation_section,
     misspecified_20,
     scale_pending_reason,
     scale_section,
@@ -534,6 +535,7 @@ def _build_sweeps(
             update={"thresholds": threshold_section(by_t, seeds=seed_list, ladder_cfg=ladder)}
         )
         out = out.model_copy(update={"scale": scale_section(scale_pending_reason())})
+    out = out.model_copy(update={"ablation": ablation_section()})
     if "seeds" in sweep_jobs:
         out = out.model_copy(
             update={"seeds": seed_section(runs_of("seeds"), seeds=sweep_seeds, ladder_cfg=ladder)}

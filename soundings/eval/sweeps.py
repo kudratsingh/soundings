@@ -16,8 +16,11 @@ nothing here runs a scenario. Every table carries its seeds and a one-line metho
   WO-080 generator are on main (the reason is stated in the report).
 * 2e ``seeds``: the catalog over seeds 1-20, every outcome metric as mean and min-max over
   the per-seed values.
-* 3 ablation: ``ablation_hook()`` returns ``soundings.eval.ablation.ablation_table`` once
-  WO-093 lands; until then the LLM section is written from planner stats.
+* 3 ablation: ``ablation_section()`` runs WO-093's ``soundings.eval.ablation.run_ablation``
+  (LLM vs deterministic vs seeded random probe order on S04-S08 and BT-01 when present) and
+  the report prints its table and sentence in "Where the LLM layer added nothing"; when the
+  module is absent or the run cannot complete, the section says why and that both planner
+  paths are the fallback.
 
 Deterministic: sorted iteration, 6-dp rounding, no clock reads. The PNG is written with
 fixed metadata.
@@ -29,7 +32,7 @@ import importlib
 import importlib.util
 import math
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from statistics import fmean
 from typing import Any
@@ -127,6 +130,15 @@ SCALE_COLUMNS: tuple[str, ...] = (
     "cleared_at_ask_pct",
 )
 SEED_COLUMNS: tuple[str, ...] = ("policy", "metric", "mean", "min", "max", "seeds")
+ABLATION_COLUMNS: tuple[str, ...] = (
+    "planner",
+    "scenario",
+    "probes",
+    "s_seen_to_handled",
+    "missed_threats",
+    "interruptions",
+    "llm_picks",
+)
 
 SWEEP_COLUMNS: dict[str, tuple[str, ...]] = {
     "misspecified_20": MIS20_COLUMNS,
@@ -134,6 +146,7 @@ SWEEP_COLUMNS: dict[str, tuple[str, ...]] = {
     "thresholds": THRESHOLD_COLUMNS,
     "scale": SCALE_COLUMNS,
     "seeds": SEED_COLUMNS,
+    "ablation": ABLATION_COLUMNS,
 }
 
 
@@ -228,6 +241,7 @@ class SweepsReport(StrictModel):
     thresholds: ThresholdSection | None = None
     scale: ScaleSection | None = None
     seeds: SeedSection | None = None
+    ablation: AblationSection | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -508,16 +522,79 @@ def seed_section(
 # ---------------------------------------------------------------------------
 
 
-AblationTable = Callable[..., Any]
+ABLATION_SCENARIOS = "S04-S08,BT-01"
 
 
-def ablation_hook() -> AblationTable | None:
-    """``soundings.eval.ablation.ablation_table`` when WO-093 has landed, else None."""
+class AblationRowOut(StrictModel):
+    planner: str
+    scenario: str
+    probes: int
+    s_seen_to_handled: float | None
+    missed_threats: int
+    interruptions: int
+    llm_picks: int
+
+
+class AblationSection(StrictModel):
+    status: str
+    method: str
+    sentence: str
+    pending: tuple[str, ...]
+    rows: tuple[AblationRowOut, ...]
+
+
+def ablation_section() -> AblationSection | None:
+    """WO-093's planner ablation as a report section (None when the module is absent)."""
     if importlib.util.find_spec(ABLATION_MODULE) is None:
         return None
     module = importlib.import_module(ABLATION_MODULE)
-    fn = getattr(module, ABLATION_FUNCTION, None)
-    return fn if callable(fn) else None
+    method = str(getattr(module, "METHOD", "")).removeprefix("method: ")
+    try:
+        ids, pending = module.expand_scenarios(ABLATION_SCENARIOS)
+        rep = module.run_ablation(scenarios=ids, pending=pending)
+        sentence = str(module.ablation_sentence(rep))
+    except Exception as exc:  # e.g. a replay miss under SOUNDINGS_CI (WORKFLOW 8)
+        return AblationSection(
+            status=f"not run: {type(exc).__name__} ({str(exc)[:120]})",
+            method=method,
+            sentence=BOTH_FALLBACK_SENTENCE,
+            pending=(),
+            rows=(),
+        )
+    rows = tuple(
+        AblationRowOut(
+            planner=r.planner,
+            scenario=r.scenario,
+            probes=r.probes,
+            s_seen_to_handled=r.s_seen_to_handled,
+            missed_threats=r.missed_threats,
+            interruptions=r.interruptions,
+            llm_picks=r.llm_choices,
+        )
+        for r in rep.rows
+    )
+    return AblationSection(
+        status=f"ran {len(rows)} runs; llm fixture hits {rep.llm_fixture_hits}",
+        method=method,
+        sentence=sentence,
+        pending=tuple(rep.pending),
+        rows=rows,
+    )
+
+
+def render_ablation(section: AblationSection) -> list[str]:
+    out = ["Planner ablation (LLM vs deterministic vs random probe order):", ""]
+    out += [f"Method: {section.method}. {WALL_TIME_NOTE}", "", f"Status: {section.status}", ""]
+    if section.pending:
+        out += [f"Pending (not on this checkout): {', '.join(section.pending)}", ""]
+    if section.rows:
+        out += _table(
+            ABLATION_COLUMNS,
+            [[_fmt(getattr(r, c)) for c in ABLATION_COLUMNS] for r in section.rows],
+        )
+        out.append("")
+    out.append(section.sentence)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -645,3 +722,6 @@ def write_threshold_png(section: ThresholdSection, path: Path) -> Path:
     fig.savefig(path, format="png", metadata={"Software": None})
     plt.close(fig)
     return path
+
+
+SweepsReport.model_rebuild()
