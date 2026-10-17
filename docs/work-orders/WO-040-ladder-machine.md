@@ -108,7 +108,11 @@ watch, ask (the evidence guards), slow and hold (states and rows exist; nothing 
 - §2.5: `test_vocabulary_clean` and the grep.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: [#6](https://github.com/kudratsingh/soundings/pull/6) · Merged commit: squash commit on main (see PR #6) · Test summary: `450 passed` after merging main (385 before) (full suite; ladder/clock files 55 tests incl. 2,000-example property test) · STATE.md updated: yes
+
+- Events `timer(hold_limit|slow_limit)`, `scope_exceeded`, `handoff_complete` are in `EventKind` (SPEC-LADDER §2 already carries the 23:05 addition line on main, so no spec edit was needed).
+- Exit tests: all pass, including `-k pythonhashseed` (subprocess hashes under PYTHONHASHSEED 0 and 1 identical; in-process chain heads equal) and the denylist grep (empty). Nothing from the cut line was dropped.
+- Beyond the WO text (DECISIONS.md 01:40): HOLDING `timer ∨ scope_exceeded` is two rows; `RUNG_OF_STATE[s] is None` means "keep the incoming rung" (AWAITING_APPROVAL, RESOLVED_DEPARTED, FAILED); a slow or hold permit without a bounded `granted_scope` never climbs; `GuardContext.active_holds` counts other contacts only; a timer is consumed by the transition its event fires and stays pending otherwise; `LadderListener` receives `checkpoint=None` for a guard-blocked step; one `TickClock` lives in `soundings/clock.py` and `soundings/sim/clock.py` re-exports it (WO-011's `t_s` kept).
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Events `timer`, `scope_exceeded`, `handoff_complete` are confirmed additions to SPEC-LADDER §2 (record them in the WO's Done section and in the spec via a one-line docs edit in this PR).
