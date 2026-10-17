@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from soundings.schemas.geo import to_local_m
 from soundings.sim.clock import TickClock
 from soundings.sim.current import (
     DEFAULT_CURRENT_FIELD_PATH,
@@ -60,7 +61,9 @@ def test_local_sampler_matches_latlon_lookup() -> None:
     sampler = field.sampler("slack")
     # The local origin (0, 0) is lat 33.74, lon -118.265.
     assert sampler(0.0, 0.0) == field.vector_at(33.74, -118.265, "slack")
-    assert sampler(0.0, 1113.2) == field.vector_at(33.75, -118.265, "slack")
+    for lat, lon in ((33.752, -118.265), (33.718, -118.231), (33.776, -118.299)):
+        x, y = to_local_m(lat, lon)
+        assert sampler(x, y) == field.vector_at(lat, lon, "slack")
 
 
 def test_tide_phase_for_hour() -> None:

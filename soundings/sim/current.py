@@ -6,14 +6,13 @@ hour-of-day to tide-phase table. ``CurrentField.vector_at`` is a nearest-cell lo
 with no interpolation; ties go to the lower (southern / western) cell, so the result
 never depends on float noise at a boundary in an order-dependent way.
 
-The sim integrates positions in local metres. Until ``soundings.schemas.geo`` lands,
-this module carries a private equirectangular conversion about the same fixed origin
-WO-010 specifies (33.74, -118.265); ``vector_at_local`` uses it.
+The sim integrates positions in local metres through ``soundings.schemas.geo``
+(``to_local_m`` / ``from_local_m`` about the fixed harbor origin); ``vector_at_local``
+converts back to lat/lon for the lookup.
 """
 
 from __future__ import annotations
 
-import math
 from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -23,32 +22,17 @@ from typing import Any, Literal, cast
 
 import yaml
 
+from soundings.schemas.geo import from_local_m
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CURRENT_FIELD_PATH = REPO_ROOT / "config" / "current_field.yaml"
 
 TidePhase = Literal["flood", "ebb", "slack"]
 TIDE_PHASES: tuple[TidePhase, ...] = ("flood", "ebb", "slack")
 
-# Local tangent-plane origin; matches WO-010 soundings.schemas.geo (stage 2 switches to it).
-_ORIGIN_LAT = 33.74
-_ORIGIN_LON = -118.265
-_M_PER_DEG_LAT = 111_320.0
-
 Vector = tuple[float, float]
 CurrentSampler = Callable[[float, float], Vector]
 """(x_m, y_m) in local metres -> (u, v) in m/s. What behaviors consume."""
-
-
-def _m_per_deg_lon() -> float:
-    return _M_PER_DEG_LAT * math.cos(math.radians(_ORIGIN_LAT))
-
-
-def _local_to_latlon(x_m: float, y_m: float) -> tuple[float, float]:
-    return _ORIGIN_LAT + y_m / _M_PER_DEG_LAT, _ORIGIN_LON + x_m / _m_per_deg_lon()
-
-
-def _latlon_to_local(lat: float, lon: float) -> tuple[float, float]:
-    return (lon - _ORIGIN_LON) * _m_per_deg_lon(), (lat - _ORIGIN_LAT) * _M_PER_DEG_LAT
 
 
 def _nearest_index(axis: Sequence[float], value: float) -> int:
@@ -93,7 +77,7 @@ class CurrentField:
 
     def vector_at_local(self, x_m: float, y_m: float, tide_phase: TidePhase) -> Vector:
         """``vector_at`` for a position in local metres about the harbor origin."""
-        lat, lon = _local_to_latlon(x_m, y_m)
+        lat, lon = from_local_m(x_m, y_m)
         return self.vector_at(lat, lon, tide_phase)
 
     def sampler(self, tide_phase: TidePhase) -> CurrentSampler:
