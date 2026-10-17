@@ -1,0 +1,159 @@
+{
+  "inputs": {
+    "allowlist": [
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 0.0,
+        "probe_id": "registry_lookup",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 0.0,
+        "probe_id": "kinematics_profile",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 0.0,
+        "probe_id": "drift_check",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 0.0,
+        "probe_id": "pattern_of_life_check",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 1.0,
+        "probe_id": "ais_surface_correlate",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 2.0,
+        "probe_id": "acoustic_feature_read",
+        "rung_required": "watch"
+      },
+      {
+        "cost_usd": 0.01,
+        "interruption": 0,
+        "latency_s": 20.0,
+        "probe_id": "acoustic_hail",
+        "rung_required": "ask"
+      },
+      {
+        "cost_usd": 0.05,
+        "interruption": 0,
+        "latency_s": 30.0,
+        "probe_id": "camera_cue",
+        "rung_required": "ask"
+      },
+      {
+        "cost_usd": 0.1,
+        "interruption": 0,
+        "latency_s": 60.0,
+        "probe_id": "second_sensor_dwell",
+        "rung_required": "ask"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 0,
+        "latency_s": 120.0,
+        "probe_id": "ask_operator_by_phone",
+        "rung_required": "ask"
+      },
+      {
+        "cost_usd": 0.0,
+        "interruption": 1,
+        "latency_s": 60.0,
+        "probe_id": "request_watch_officer_look",
+        "rung_required": "ask"
+      }
+    ],
+    "already_run": [
+      "acoustic_feature_read",
+      "ais_surface_correlate",
+      "drift_check",
+      "kinematics_profile",
+      "pattern_of_life_check",
+      "registry_lookup"
+    ],
+    "asset_context": {
+      "nearest_asset_id": "fuel_berth_1",
+      "time_to_nearest_critical_asset_s": 390.0,
+      "zone_criticality": 0.9
+    },
+    "current_rung": "ask",
+    "evidence": [
+      {
+        "confidence": 0.8,
+        "feature": "speed_over_ground",
+        "kind": "fact",
+        "value": 1.3
+      },
+      {
+        "confidence": 0.7,
+        "feature": "propeller_tonal_present",
+        "kind": "fact",
+        "value": true
+      },
+      {
+        "confidence": 0.9,
+        "feature": "registry_match",
+        "kind": "fact",
+        "value": "none"
+      }
+    ],
+    "posterior": {
+      "benign_mass": 0.097561,
+      "entropy_bits": 1.819944,
+      "label": "stress-test estimate",
+      "posterior": {
+        "BIOLOGIC": 0.02439,
+        "DEBRIS_OR_DRIFT": 0.02439,
+        "FILED_OFF_PLAN": 0.365854,
+        "FILED_ON_PLAN": 0.02439,
+        "SURFACE_VESSEL_AIS_OFF": 0.02439,
+        "UNAUTHORIZED_DIVER": 0.02439,
+        "UNAUTHORIZED_UUV": 0.487805,
+        "UNFILED_KNOWN_OPERATOR": 0.02439
+      },
+      "threat_mass": 0.512195,
+      "top": "UNAUTHORIZED_UUV",
+      "top2_margin": 0.121951
+    },
+    "prompt_version": "p3.1",
+    "remaining_budget": {
+      "interruptions": 1,
+      "paid_probes": 2,
+      "probes": 4
+    },
+    "role": "probe_planner"
+  },
+  "key": "c39074ce630ce84161f549d4265203a9923bbd31077858925d1b06ebefc2f4f2",
+  "output": {
+    "hypotheses_to_discriminate": [
+      "UNAUTHORIZED_UUV",
+      "FILED_OFF_PLAN"
+    ],
+    "next_probe": "acoustic_hail",
+    "question_for_human": null,
+    "tool_use": {
+      "input": {
+        "contact_id": "c-0001"
+      },
+      "name": "acoustic_hail"
+    },
+    "why": "Send the hail now."
+  },
+  "role": "probe_planner"
+}
