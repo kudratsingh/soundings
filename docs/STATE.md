@@ -44,7 +44,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | merged (part A #18, 77e5b48; part B #37) | wo/042b-sitrep-writer-handoff (part B) | #37 | squash on merge | 1734 passed after rebase (part B: test_sitrep +17, test_audit +4) |
-| 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
+| 043 | watch after handoff | merged (part A #26; part B runner v3, approvals path, catalog verifier) | wo/043b-runner-v3 | #26, part B PR | part A 8fee1bb; part B squash | part B: test_runner_v3 20, test_catalog_expected 11 (S04 strict xfail), +9 in driver/watch tests |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | part A merged (#24); part B1 (archives, families, grader, traps TR-01..04) merged 2026-10-17 08:11 PDT; rest of part B (soundings policy, sweeps) pending | wo/051b1-eval-archives-traps (part B1) | see PR | squash on merge | 1824 passed, 2 skipped before rebase (part B1: 39 new in test_eval_archive/families/grader/traps) |
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
