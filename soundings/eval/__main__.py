@@ -20,7 +20,9 @@ client.
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -35,6 +37,7 @@ from soundings.eval.archive import (
     write_archive,
 )
 from soundings.eval.harness import (
+    CATALOG_SUITE,
     SeedsError,
     SuiteError,
     default_out,
@@ -43,8 +46,10 @@ from soundings.eval.harness import (
     resolve_suite,
     run_campaign,
 )
+from soundings.eval.jobs import eval_workers
 from soundings.eval.policies import EvalConfig, load_eval_config
-from soundings.eval.report import render_markdown
+from soundings.eval.report import EvalReport, render_markdown
+from soundings.eval.sweeps import TIMING_FILE, write_threshold_png
 from soundings.eval.traps import (
     TRAP_MANIFEST,
     render_trap_markdown,
@@ -87,8 +92,16 @@ def main(
     stamp: Annotated[
         str | None, typer.Option("--stamp", help="archive stamp YYYYMMDDTHHMMSSZ (UTC)")
     ] = None,
+    sweeps: Annotated[
+        bool | None,
+        typer.Option(
+            "--sweeps/--no-sweeps",
+            help="addendum sweeps 2a-2e and the planner ablation (default: on for catalog)",
+        ),
+    ] = None,
 ) -> None:
     cfg = load_eval_config()
+    sweeps = (suite == CATALOG_SUITE) if sweeps is None else sweeps
     try:
         run_stamp = check_stamp(stamp) if stamp is not None else utc_stamp()
         seed_tuple = parse_seeds(seeds) if seeds is not None else tuple(sorted(set(cfg.eval.seeds)))
@@ -119,6 +132,7 @@ def main(
             )
             inputs = [TRAP_MANIFEST, *trap_paths()]
         else:
+            started = time.monotonic()  # wall time for timing.json only, never the report
             report = run_campaign(
                 suite,
                 seed_tuple,
@@ -129,7 +143,9 @@ def main(
                 violations_log=out_dir / "violations.md",
                 mode=mode,
                 eval_cfg=cfg,
+                include_sweeps=sweeps,
             )
+            wall_s = round(time.monotonic() - started, 1)
             md, js, inputs_hash = (
                 render_markdown(report),
                 canonical_json(report) + "\n",
@@ -141,6 +157,7 @@ def main(
                 perturb_seed=pseed,
                 include_misspecified=misspecified,
                 include_llm_diff=llm_diff,
+                include_sweeps=sweeps,
             )
     except (SeedsError, SuiteError, StampError) as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -163,6 +180,24 @@ def main(
         raise typer.Exit(EXIT_ARCHIVE_EXISTS) from exc
     typer.echo(f"archived {archived.folder}")
     typer.echo(f"wrote {archived.latest_md} and {archived.latest_json}")
+    if suite != TRAPS_SUITE:
+        write_side_files(report, out_dir, wall_s)
+
+
+def write_side_files(report: EvalReport, out_dir: Path, wall_s: float) -> None:
+    """The threshold PNG (deterministic) and ``timing.json`` (wall time; the one
+    non-deterministic output, kept out of the report)."""
+    sw = report.sweeps
+    if sw is not None and sw.thresholds is not None and sw.thresholds.rows:
+        png = write_threshold_png(sw.thresholds, out_dir / sw.thresholds.png)
+        typer.echo(f"wrote {png}")
+    timing = {
+        "wall_time_s": wall_s,
+        "workers": eval_workers(),
+        "note": "wall time of run_campaign in this process; not part of the report",
+    }
+    (out_dir / TIMING_FILE).write_text(json.dumps(timing, sort_keys=True) + "\n", encoding="utf-8")
+    typer.echo(f"wall time: {wall_s} s ({TIMING_FILE})")
 
 
 def config_snapshot(cfg: EvalConfig, args: dict[str, object]) -> dict[str, object]:
