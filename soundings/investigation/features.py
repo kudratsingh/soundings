@@ -1331,8 +1331,54 @@ def covering_nodes(track: Track, harbor: Harbor) -> list[str]:
     return sorted(ids)
 
 
-def extract_context(track: Track, harbor: Harbor, *, hour_of_day: float) -> list[EvidenceRow]:
+# --- WO-080: AIS surface correlation ---
+AIS_CORRELATION_RADIUS_M: Final = 50.0
+AIS_CORRELATION_WINDOW_S: Final = 10.0
+SOURCE_SIM_AIS: Final = "sim:ais"
+AIS_CONFIDENCE: Final = 1.0
+
+
+class AisReportLike(Protocol):
+    """One AIS-style surface report (``soundings.sim.types.AisReport`` satisfies it)."""
+
+    @property
+    def lat(self) -> float: ...
+    @property
+    def lon(self) -> float: ...
+    @property
+    def t_s(self) -> float: ...
+
+
+def ais_surface_correlation(track: Track, ais: Mapping[str, Sequence[AisReportLike]]) -> float:
+    """1.0 if any report lies within 50 m and 10 s of the track's last reading, else 0.0."""
+    last = track.points[-1]
+    t = last.tick * track.tick_s
+    x, y = to_local_m(last.lat, last.lon)
+    for key in sorted(ais):
+        for rep in ais[key]:
+            if abs(rep.t_s - t) > AIS_CORRELATION_WINDOW_S:
+                continue
+            rx, ry = to_local_m(rep.lat, rep.lon)
+            if math.hypot(rx - x, ry - y) <= AIS_CORRELATION_RADIUS_M:
+                return 1.0
+    return 0.0
+
+
+# --- end WO-080 ---
+
+
+def extract_context(
+    track: Track,
+    harbor: Harbor,
+    *,
+    hour_of_day: float,
+    ais: Mapping[str, Sequence[AisReportLike]] | None = None,
+) -> list[EvidenceRow]:
     """Context rows except ``pattern_of_life_anomaly``, in catalog order.
+
+    With an ``ais`` feed (WO-080), ``ais_surface_correlation`` is a ``sim:ais`` fact
+    (1.0 if a report lies within 50 m and 10 s of the last reading, else 0.0); without
+    one it stays ``unknown`` (``no_ais_feed``), so catalog evidence is unchanged.
 
     ``zone_id``, ``zone_criticality``, ``nearest_asset_id`` and ``hour_of_day`` are facts
     at the last reading; ``ais_surface_correlation`` is ``unknown`` (``no_ais_feed``);
@@ -1384,7 +1430,18 @@ def extract_context(track: Track, harbor: Harbor, *, hour_of_day: float) -> list
             confidence=CLOCK_CONFIDENCE,
         )
     )
-    rows.append(_unknown_fact(track, FeatureName.AIS_SURFACE_CORRELATION, NO_AIS_FEED))
+    if ais is None:
+        rows.append(_unknown_fact(track, FeatureName.AIS_SURFACE_CORRELATION, NO_AIS_FEED))
+    else:
+        rows.append(
+            _fact(
+                track,
+                FeatureName.AIS_SURFACE_CORRELATION,
+                ais_surface_correlation(track, ais),
+                source=SOURCE_SIM_AIS,
+                confidence=AIS_CONFIDENCE,
+            )
+        )
     nodes = covering_nodes(track, harbor)
     if not nodes:
         rows.append(_unknown_fact(track, FeatureName.SENSOR_HEALTH, NO_SENSOR_COVERAGE))

@@ -51,6 +51,7 @@ from soundings.sim.acoustics import (
     load_tonal_band_weights,
     sample_acoustic_truth,
 )
+from soundings.sim.ais import AisConfig, ais_reports, load_ais_config
 from soundings.sim.behaviors import (
     BehaviorParams,
     Drift,
@@ -61,6 +62,8 @@ from soundings.sim.behaviors import (
     Orbit,
     Stationary,
     Transit,
+    VesselTransit,
+    heading_of,
     make_lawnmower,
     simulate_path,
 )
@@ -86,7 +89,7 @@ from soundings.sim.toggles import (
     surge_contacts,
     toggle_report,
 )
-from soundings.sim.types import ContactTruth, Detection, SimRun, TruthPoint
+from soundings.sim.types import AisReport, ContactTruth, Detection, SimRun, TruthPoint
 
 DEFAULT_SPEED_MPS = 1.0
 DEFAULT_LANE_SPACING_M = 50.0
@@ -105,6 +108,7 @@ class SimConfig:
     likelihoods: LikelihoodSpec
     acoustic_defaults: dict[str, AcousticDefaults]
     band_weights: dict[str, float]
+    ais: AisConfig = AisConfig()
 
 
 @lru_cache(maxsize=1)
@@ -115,6 +119,7 @@ def default_config() -> SimConfig:
         likelihoods=load_likelihood_spec(),
         acoustic_defaults=load_acoustic_defaults(),
         band_weights=load_tonal_band_weights(),
+        ais=load_ais_config(),
     )
 
 
@@ -215,11 +220,26 @@ def behavior_params(contact: ScenarioContact, scenario: Scenario, harbor: Harbor
         )
     if b.type is BehaviorType.STATIONARY:
         return Stationary(anchor_x_m=x0, anchor_y_m=y0, jitter_mps=jitter)
+    if b.type is BehaviorType.VESSEL_TRANSIT:  # WO-080
+        assert b.waypoint is not None  # BehaviorSpec guarantees it
+        return VesselTransit(
+            waypoints=((x0, y0), to_local_m(b.waypoint.lat, b.waypoint.lon)), speed_mps=speed
+        )
     raise ValueError(f"unknown behavior {b.type}")
 
 
 def _start_state(contact: ScenarioContact) -> KinState:
     x0, y0 = to_local_m(contact.start.lat, contact.start.lon)
+    b = contact.behavior
+    if b.type is BehaviorType.VESSEL_TRANSIT and b.waypoint is not None:  # WO-080: under way
+        wx, wy = to_local_m(b.waypoint.lat, b.waypoint.lon)
+        return KinState(
+            x_m=x0,
+            y_m=y0,
+            depth_m=0.0,
+            heading_rad=heading_of(wx - x0, wy - y0, 0.0),
+            speed_mps=b.speed_mps if b.speed_mps is not None else 0.0,
+        )
     heading = contact.behavior.heading_deg
     return KinState(
         x_m=x0,
@@ -457,9 +477,17 @@ def run_scenario(
         surge = surge_contacts(
             scenario.toggles, h, _default_priors(), np.random.default_rng(ss_toggles)
         )
-    entries: list[tuple[ScenarioContact, int, Hypothesis]] = [
-        (c, 0, scenario.ground_truth) for c in scenario.contacts
-    ] + [(s.contact, s.at_tick, s.hypothesis) for s in surge]
+    # WO-080: a scenario contact enters at ``start_tick``, leaves at ``end_tick`` and may
+    # carry its own hypothesis; surge contacts keep ``at_tick``.
+    entries: list[tuple[ScenarioContact, int, int, Hypothesis]] = [
+        (
+            c,
+            c.start_tick,
+            min(c.end_tick if c.end_tick is not None else n_ticks, n_ticks),
+            c.hypothesis or scenario.ground_truth,
+        )
+        for c in scenario.contacts
+    ] + [(s.contact, s.at_tick, n_ticks, s.hypothesis) for s in surge]
     entries.sort(key=lambda e: e[0].id)
     contact_streams = ss_contacts.spawn(len(entries))
     acoustic_streams = ss_acoustics.spawn(len(entries))
@@ -467,7 +495,8 @@ def run_scenario(
     truths: list[_Truth] = []
     paths: dict[str, np.ndarray] = {}
     readings: dict[str, list[_Reading]] = {}
-    for (contact, first_tick, hyp), css, ass in zip(
+    vessel_ids: list[str] = []
+    for (contact, first_tick, end_tick, hyp), css, ass in zip(
         entries, contact_streams, acoustic_streams, strict=True
     ):
         acoustic = sample_acoustic_truth(
@@ -490,13 +519,16 @@ def run_scenario(
         path = simulate_path(
             truth.behavior,
             truth.start,
-            max(n_ticks - first_tick, 0),
+            max(end_tick - first_tick, 0),
             dt_s=tick_s,
             current=sampler,
             rng=np.random.default_rng(kin_ss),
         )
         truths.append(truth)
         paths[truth.gt_id] = path
+        if contact.behavior.type is BehaviorType.VESSEL_TRANSIT:
+            vessel_ids.append(truth.gt_id)  # surface: never detected, AIS feed only
+            continue
         readings[truth.gt_id] = _detect_contact(
             truth, path, nodes, node_xy, dropouts, p, np.random.default_rng(det_ss)
         )
@@ -591,6 +623,9 @@ def run_scenario(
     truth_paths = {
         gt_id: _truth_points(paths[gt_id], by_gt[gt_id].first_tick) for gt_id in sorted(paths)
     }
+    ais_tracks: dict[str, tuple[AisReport, ...]] = {
+        vid: ais_reports(vid, truth_paths[vid], tick_s, cfg.ais) for vid in sorted(vessel_ids)
+    }
     return SimRun(
         scenario_id=scenario.id,
         seed=run_seed,
@@ -601,6 +636,7 @@ def run_scenario(
         contact_truth=contact_truth,
         truth_paths=truth_paths,
         toggle_report=toggle_report(scenario.toggles, [s.contact.id for s in surge]),
+        ais_tracks={k: v for k, v in ais_tracks.items() if v},
     )
 
 
@@ -632,6 +668,11 @@ def truncate_run(run: SimRun, n_ticks: int) -> SimRun:
         detections=[d for d in run.detections if d.tick < n_ticks],
         contact_truth={c: t for c, t in run.contact_truth.items() if c in tracks},
         truth_paths=truth_paths,
+        ais_tracks={
+            k: reports
+            for k in sorted(run.ais_tracks)
+            if (reports := tuple(r for r in run.ais_tracks[k] if r.tick < n_ticks))
+        },
     )
 
 

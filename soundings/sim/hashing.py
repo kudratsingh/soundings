@@ -15,8 +15,12 @@ from soundings.sim.types import SimRun
 
 
 def track_hash_payload(run: SimRun) -> dict[str, Any]:
-    """The exact structure ``track_hash`` hashes."""
-    return {
+    """The exact structure ``track_hash`` hashes.
+
+    ``ais_tracks`` (WO-080) is added only when the run has a vessel feed, so runs without
+    vessels (S01..S08) hash exactly as before.
+    """
+    payload: dict[str, Any] = {
         "scenario_id": run.scenario_id,
         "seed": run.seed,
         "tick_s": run.tick_s,
@@ -25,6 +29,9 @@ def track_hash_payload(run: SimRun) -> dict[str, Any]:
         "detections": sorted(run.detections, key=lambda d: (d.tick, d.observed_contact_id)),
         "contact_truth": {cid: run.contact_truth[cid] for cid in sorted(run.contact_truth)},
     }
+    if run.ais_tracks:
+        payload["ais_tracks"] = {k: list(run.ais_tracks[k]) for k in sorted(run.ais_tracks)}
+    return payload
 
 
 def track_hash(run: SimRun) -> str:

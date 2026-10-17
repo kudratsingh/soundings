@@ -164,7 +164,7 @@ def test_other_enum_members_exact() -> None:
         "reacquired_from",
     ]
     assert [f.value for f in FeatureName][:3] == ["speed_over_ground", "speed_variance", "depth"]
-    assert len(ProbeId) == 11 and len(ToggleName) == 9 and len(BehaviorType) == 7
+    assert len(ProbeId) == 11 and len(ToggleName) == 9 and len(BehaviorType) == 8
     assert [t.value for t in TonalBand] == ["none", "low", "mid", "high"]
     assert [u.value for u in Unit] == [
         "m", "m/s", "m/s2", "deg/s", "s", "ratio", "bool", "category", "id", "hour", "dB",

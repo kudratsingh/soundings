@@ -27,12 +27,19 @@ from soundings.schemas._base import (
     from_file_data,
 )
 from soundings.schemas.denylist import FreeText
-from soundings.schemas.enums import BehaviorType, Hypothesis, LadderState, ToggleName, TonalBand
+from soundings.schemas.enums import (
+    BehaviorType,
+    Hypothesis,
+    JobType,
+    LadderState,
+    ToggleName,
+    TonalBand,
+)
 from soundings.schemas.harbor import Harbor, load_harbor
 
 DEFAULT_SCENARIO_ROOT: Path = REPO_ROOT / "scenarios"
 
-ScenarioId = Annotated[str, StringConstraints(pattern=r"^(S\d{2}|smoke|L-\d{8}T\d{6})$")]
+ScenarioId = Annotated[str, StringConstraints(pattern=r"^(S\d{2}|BT-\d{2}|smoke|L-\d{8}T\d{6})$")]
 TruthContactId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]*$")]
 """Ground-truth contact ids, for example ``gt-1`` (observed ids are ``c-NNNN``)."""
 
@@ -56,6 +63,7 @@ class RegistryPlan(StrictModel):
     area: HarborId
     window: PlanWindow
     contact: FreeText
+    job_type: JobType | None = None  # WO-080: set on every generated BT plan
 
 
 class KnownOperator(StrictModel):
@@ -74,6 +82,11 @@ class StartPoint(StrictModel):
 class Waypoint(StrictModel):
     lat: Lat
     lon: Lon
+
+
+VESSEL_SPEED_MIN_MPS = 3.0
+VESSEL_SPEED_MAX_MPS = 6.0
+"""WO-080: a surface vessel transit runs at 3-6 m/s."""
 
 
 class BehaviorSpec(StrictModel):
@@ -106,6 +119,28 @@ class BehaviorSpec(StrictModel):
         elif t is BehaviorType.LAWNMOWER_THEN_DRIFT:
             if self.fault_tick is None:
                 raise ValueError("lawnmower_then_drift needs fault_tick")
+        elif t is BehaviorType.VESSEL_TRANSIT:
+            if self.waypoint is None:
+                raise ValueError("vessel_transit needs waypoint (the exit point)")
+            if self.speed_mps is None or not (
+                VESSEL_SPEED_MIN_MPS <= self.speed_mps <= VESSEL_SPEED_MAX_MPS
+            ):
+                raise ValueError(
+                    f"vessel_transit speed_mps must be in [{VESSEL_SPEED_MIN_MPS}, "
+                    f"{VESSEL_SPEED_MAX_MPS}]"
+                )
+            others = (
+                self.target_asset,
+                self.area,
+                self.radius_m,
+                self.lane_spacing_m,
+                self.heading_deg,
+                self.fault_tick,
+                self.jitter_mps,
+                self.drift_weight,
+            )
+            if any(v is not None for v in others):
+                raise ValueError("vessel_transit takes only waypoint and speed_mps")
         return self
 
 
@@ -137,6 +172,18 @@ class ScenarioContact(StrictModel):
     behavior: BehaviorSpec
     acoustic: AcousticSpec = Field(default_factory=AcousticSpec)
     registry: ContactRegistrySpec
+    # --- WO-080: contacts that enter/leave the water mid-run; per-contact truth ---
+    start_tick: NonNegInt = 0
+    end_tick: NonNegInt | None = None
+    hypothesis: Hypothesis | None = None
+
+    @model_validator(mode="after")
+    def _wo080_checks(self) -> ScenarioContact:
+        if self.end_tick is not None and self.end_tick <= self.start_tick:
+            raise ValueError(f"contact {self.id}: end_tick must be > start_tick")
+        if self.behavior.type is BehaviorType.VESSEL_TRANSIT and self.start.depth_m != 0.0:
+            raise ValueError(f"contact {self.id}: vessel_transit starts at depth 0")
+        return self
 
 
 class Toggle(StrictModel):
@@ -156,6 +203,14 @@ class Toggle(StrictModel):
         return data
 
 
+class ExpectedContact(StrictModel):
+    """WO-080: the expected end of one ground-truth contact's lineage."""
+
+    id: TruthContactId
+    terminal_state: LadderState
+    max_interruptions: NonNegInt | None = None
+
+
 class Expected(StrictModel):
     terminal_state: LadderState
     passes_through: tuple[LadderState, ...] = ()
@@ -165,6 +220,7 @@ class Expected(StrictModel):
     max_probes: NonNegInt | None = None
     sitrep_has_search_box: StrictBool | None = None
     search_box_contains_truth: StrictBool | None = None
+    contacts: tuple[ExpectedContact, ...] = ()  # WO-080
 
 
 class Scenario(StrictModel):
@@ -204,6 +260,13 @@ class Scenario(StrictModel):
                 raise ValueError(f"contact {c.id}: fault_tick must be < duration_ticks")
             if b.type is BehaviorType.LAWNMOWER_THEN_DRIFT and b.area is None and not reg.plan_id:
                 raise ValueError(f"contact {c.id}: lawnmower_then_drift needs area or a plan")
+            if c.start_tick >= self.duration_ticks:
+                raise ValueError(f"contact {c.id}: start_tick must be < duration_ticks")
+            if c.end_tick is not None and c.end_tick > self.duration_ticks:
+                raise ValueError(f"contact {c.id}: end_tick must be <= duration_ticks")
+        for ec in self.expected.contacts:
+            if ec.id not in contact_ids:
+                raise ValueError(f"expected.contacts: unknown contact id {ec.id}")
         for toggle in self.toggles:
             if toggle.contact_id is not None and toggle.contact_id not in contact_ids:
                 raise ValueError(f"toggle {toggle.name}: unknown contact_id {toggle.contact_id}")
