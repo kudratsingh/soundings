@@ -42,7 +42,8 @@ def test_no_fixtures_llm_equals_deterministic(
     assert "method:" in table
 
 
-def test_random_arm_is_seeded_and_guarded(tmp_path: Path) -> None:
+def test_random_arm_is_seeded_and_guarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SOUNDINGS_CI", raising=False)  # the random arm leaves writer misses
     out = []
     for i in range(2):
         path = tmp_path / f"a{i}.json"
@@ -96,9 +97,12 @@ def test_sentence_reports_differences() -> None:
     assert "added nothing measurable" in ab.ablation_sentence(same)
 
 
-def test_replay_only() -> None:
+def test_replay_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SOUNDINGS_CI", raising=False)
     assert ab.main(["--mode", "record", "--scenarios", "S04"]) == ab.EXIT_REFUSED
     assert ab.main(["--mode", "live", "--scenarios", "S04"]) == ab.EXIT_REFUSED
+    monkeypatch.setenv("SOUNDINGS_CI", "1")  # in CI a miss raises: the CLI reports it, exit 1
+    assert ab.main(["--planners", "llm", "--scenarios", "S07"]) == 1
     with pytest.raises(ValueError, match="replay"):
         ab.run_ablation(("llm",), ("S04",), mode="record")
     with pytest.raises(ValueError, match="unknown planner"):

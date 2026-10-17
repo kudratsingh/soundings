@@ -43,7 +43,7 @@ from typing import Any, Final
 
 from soundings.canonical import round6
 from soundings.eval.policies import THREAT_HYPOTHESES
-from soundings.llm.client import FixtureStore, ModelMode, ModelOutput
+from soundings.llm.client import FixtureStore, ModelMode, ModelOutput, ReplayMiss
 from soundings.llm.fixtures import BT01_ID, CapturingStore, bt01_path, quiet_replay_misses
 from soundings.llm.roles import ROLE_PROBE_PLANNER
 from soundings.schemas import LadderState, Rung
@@ -363,6 +363,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = run_ablation(
                 planners, scenarios, mode=args.mode, fixture_root=args.fixture_root, pending=pending
             )
+    except ReplayMiss as exc:  # under SOUNDINGS_CI a replay miss raises (WORKFLOW 8)
+        print(f"ablation needs SOUNDINGS_CI unset for missing fixtures ({exc})", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
