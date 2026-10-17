@@ -11,12 +11,27 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from synthetic_tracks import TICK_S, make_track, orbit, stationary, straight
+from synthetic_tracks import (
+    FUEL_BERTHS_XY,
+    OUTSIDE_ZONES_XY,
+    TICK_S,
+    calm,
+    line_track,
+    make_track,
+    orbit,
+    stationary,
+    straight,
+    to_track,
+)
 
 from soundings.investigation import features as F
 from soundings.investigation.velocity import TrackArrays, fit_windows, wrap_deg
 from soundings.schemas.config import load_likelihood_spec
-from soundings.schemas.enums import FeatureName, Unit
+from soundings.schemas.enums import EvidenceKind, FeatureName, Unit
+from soundings.schemas.evidence import UNKNOWN, EvidenceRow
+from soundings.schemas.geo import to_local_m
+from soundings.schemas.harbor import Harbor, load_harbor
+from soundings.schemas.track import Track
 
 # SPEC-INVESTIGATION section 2, in section 2 order (32 features).
 SPEC_FEATURES: tuple[str, ...] = (
@@ -566,3 +581,187 @@ def test_track_arrays_validate_and_are_read_only() -> None:
     with pytest.raises(ValueError):
         TrackArrays.from_columns([0.0, 2.0], [0, 0], [0], [1, 1], [0.5, 0.5])
     assert len(track.tail(4.0)) == 3
+
+
+# --- Track-based rules (WO-010 Track + Harbor in, evidence rows out) ---------------
+
+HARBOR = load_harbor()
+KIN = set(F.KINEMATIC_FEATURES)
+
+
+def _rows(track: Track, harbor: Harbor = HARBOR) -> dict[FeatureName, list[EvidenceRow]]:
+    out: dict[FeatureName, list[EvidenceRow]] = {}
+    for row in F.contact_evidence(track, harbor, calm, None, hour_of_day=10):
+        out.setdefault(row.feature, []).append(row)
+    return out
+
+
+def _one(rows: dict[FeatureName, list[EvidenceRow]], feature: FeatureName) -> EvidenceRow:
+    assert len(rows[feature]) == 1, feature
+    return rows[feature][0]
+
+
+# points -> kinematic features with a value (the rest are unknown: insufficient_points).
+# Noise-free 1 m/s line at 2 s ticks, heading east in main_channel toward no asset
+# ahead; the nearest critical asset lies north-west, so closing is computed, not None.
+TRACK_UNKNOWN_TABLE: dict[int, set[FeatureName]] = {
+    1: {FeatureName.DEPTH, FeatureName.TRACK_GAP_RATIO, FeatureName.DWELL_TIME_IN_ZONE},
+    2: {
+        FeatureName.DEPTH,
+        FeatureName.TRACK_GAP_RATIO,
+        FeatureName.DWELL_TIME_IN_ZONE,
+        FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET,
+        FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET,
+    },
+}
+TRACK_UNKNOWN_TABLE[3] = TRACK_UNKNOWN_TABLE[2] | {
+    FeatureName.SPEED_OVER_GROUND,
+    FeatureName.SPEED_VARIANCE,
+    FeatureName.DEPTH_VARIANCE,
+    FeatureName.TURN_RATE,
+    FeatureName.DRIFT_CONSISTENCY,
+}
+TRACK_UNKNOWN_TABLE[9] = TRACK_UNKNOWN_TABLE[3] | {FeatureName.HEADING_PERSISTENCE}
+TRACK_UNKNOWN_TABLE[10] = set(TRACK_UNKNOWN_TABLE[9])  # span 18 s < 60 s: no pattern
+
+
+@pytest.mark.parametrize("n", sorted(TRACK_UNKNOWN_TABLE))
+def test_unknown_rules_track_by_point_count(n: int) -> None:
+    rows = _rows(line_track(n))
+    for feature in F.KINEMATIC_FEATURES:
+        row = _one(rows, feature)
+        assert row.kind is EvidenceKind.DERIVED
+        if feature in TRACK_UNKNOWN_TABLE[n]:
+            assert row.value != UNKNOWN, (n, feature)
+            assert row.source == f"extractor:{F.FEATURE_CATALOG[feature].extractor}"
+        else:
+            assert row.value == UNKNOWN, (n, feature, row.value)
+            assert row.source == F.INSUFFICIENT_POINTS, (n, feature)
+            assert row.confidence == 0.0
+        assert row.unit == F.FEATURE_CATALOG[feature].unit
+
+
+def test_unknown_rules_track_ten_points_over_a_minute_has_a_pattern() -> None:
+    t = np.array([0, 2, 4, 6, 8, 10, 12, 14, 16, 60], dtype=np.float64)
+    track = to_track(make_track(t, t * 1.0, np.zeros_like(t)))
+    assert _one(_rows(track), FeatureName.TRANSIT_PATTERN).value == "straight"
+    nine = to_track(make_track(t[:9], t[:9] * 1.0, np.zeros(9)))
+    assert _one(_rows(nine), FeatureName.TRANSIT_PATTERN).value == UNKNOWN
+
+
+def test_unknown_rules_track_loiter_needs_300_s() -> None:
+    short = to_track(stationary(duration_s=298.0, sigma_m=0.0), origin_xy=FUEL_BERTHS_XY)
+    full = to_track(stationary(duration_s=300.0, sigma_m=0.0), origin_xy=FUEL_BERTHS_XY)
+    assert _one(_rows(short), FeatureName.LOITER_SCORE).value == UNKNOWN
+    assert _one(_rows(full), FeatureName.LOITER_SCORE).value == 1.0
+
+
+def test_unknown_rules_track_last_point_outside_every_zone() -> None:
+    rows = _rows(line_track(40, origin_xy=OUTSIDE_ZONES_XY))
+    for feature in (
+        FeatureName.ZONE_ID,
+        FeatureName.ZONE_CRITICALITY,
+        FeatureName.DWELL_TIME_IN_ZONE,
+    ):
+        row = _one(rows, feature)
+        assert row.value == UNKNOWN and row.source == F.NO_SENSOR_COVERAGE, feature
+    # the rest of the context still resolves
+    assert _one(rows, FeatureName.NEAREST_ASSET_ID).value != UNKNOWN
+
+
+def test_unknown_rules_track_zone_rows_inside_a_zone() -> None:
+    rows = _rows(line_track(40, origin_xy=FUEL_BERTHS_XY, heading_deg=0.0, speed=0.2))
+    assert _one(rows, FeatureName.ZONE_ID).value == "fuel_berths"  # highest criticality
+    assert _one(rows, FeatureName.ZONE_CRITICALITY).value == 0.9
+    assert _one(rows, FeatureName.DWELL_TIME_IN_ZONE).value == 78.0
+
+
+def test_unknown_rules_track_no_critical_asset() -> None:
+    low = tuple(a.model_copy(update={"criticality": 0.5}) for a in HARBOR.assets)
+    harbor = Harbor(
+        name=HARBOR.name, zones=HARBOR.zones, assets=low, sensor_nodes=HARBOR.sensor_nodes
+    )
+    rows = _rows(line_track(40), harbor)
+    for feature in (
+        FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET,
+        FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET,
+    ):
+        row = _one(rows, feature)
+        assert row.value == UNKNOWN and row.source == F.NO_CRITICAL_ASSET, feature
+    assert _one(rows, FeatureName.NEAREST_ASSET_ID).value != UNKNOWN  # any criticality
+    empty = Harbor(name=HARBOR.name, zones=HARBOR.zones, assets=(), sensor_nodes=())
+    rows = _rows(line_track(40), empty)
+    assert _one(rows, FeatureName.NEAREST_ASSET_ID).source == F.NO_CRITICAL_ASSET
+    assert _one(rows, FeatureName.LOITER_SCORE).value == UNKNOWN  # span 78 s < 300 s
+    assert _one(rows, FeatureName.SENSOR_HEALTH).source == F.NO_SENSOR_COVERAGE
+
+
+def test_unknown_rules_track_receding_contact_is_not_closing() -> None:
+    # starts 150 m south of fuel_berth_1 and heads south: the nearest critical asset
+    # stays fuel_berth_1 and the range grows
+    rows = _rows(line_track(60, heading_deg=180.0, origin_xy=(138.7, 128.0)))
+    closing = _one(rows, FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET)
+    time_to = _one(rows, FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET)
+    assert isinstance(closing.value, float) and closing.value < 0.0
+    assert time_to.value == F.NOT_CLOSING_S == 1e9
+
+
+def test_unknown_rules_track_approaching_contact_closes() -> None:
+    # 600 m south of fuel_berth_1, heading north straight at it
+    start = (FUEL_BERTHS_XY[0] + 48.0, FUEL_BERTHS_XY[1] - 600.0)
+    rows = _rows(line_track(60, heading_deg=0.0, origin_xy=start))
+    closing = _one(rows, FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET)
+    time_to = _one(rows, FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET)
+    assert isinstance(closing.value, float) and closing.value > 0.9
+    assert isinstance(time_to.value, float) and 0.0 < time_to.value < 1000.0
+
+
+def test_unknown_rules_track_kinematic_confidence_is_min_point_confidence() -> None:
+    n = 400  # 798 s: the 120 s, 600 s and full windows hold different readings
+    conf = np.full(n, 0.9)
+    conf[10] = 0.2  # only in the full window
+    conf[150] = 0.5  # in the 600 s window, not the 120 s one
+    conf[-5] = 0.7  # in every window
+    rows = _rows(line_track(n, confidence=conf))
+    expected = {"full": 0.2, "pattern": 0.5, "kinematic": 0.7}
+    segments = {r.row_id: r for r in rows[FeatureName.TRACK_SEGMENT]}
+    assert sorted(r.confidence for r in segments.values()) == [0.2, 0.5, 0.7]  # type: ignore[type-var]
+    for feature in F.KINEMATIC_FEATURES:
+        row = _one(rows, feature)
+        source = segments[row.derived_from[0]]
+        assert source.confidence == expected[F.FEATURE_SEGMENT[feature]], feature
+        if row.value != UNKNOWN:
+            assert row.confidence == source.confidence, feature
+
+
+def test_unknown_rules_track_short_track_shares_one_segment_row() -> None:
+    rows = _rows(line_track(5))
+    assert len(rows[FeatureName.TRACK_SEGMENT]) == 1
+    assert rows[FeatureName.TRACK_SEGMENT][0].value == "ticks=0..4;readings=5"
+
+
+def test_unknown_rules_track_gap_ratio_is_wo010_gap_ratio() -> None:
+    t = np.array([0.0, 2.0, 4.0, 12.0, 14.0])
+    track = to_track(make_track(t, t, np.zeros_like(t)), gaps=[(3, 5)])
+    assert _one(_rows(track), FeatureName.TRACK_GAP_RATIO).value == track.gap_ratio == 0.375
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_velocity_fit_track_survives_reading_noise(seed: int) -> None:
+    clean = straight(speed=1.0, heading_deg=60.0, duration_s=600.0)
+    noisy = make_track(clean.t_s, clean.x_m, clean.y_m, sigma_m=15.0, seed=seed)
+    rows = _rows(to_track(noisy, sigma_m=15.0, origin_xy=(100.0, -2500.0)))
+    speed = _one(rows, FeatureName.SPEED_OVER_GROUND).value
+    persistence = _one(rows, FeatureName.HEADING_PERSISTENCE).value
+    assert isinstance(speed, float) and abs(speed - 1.0) <= 0.1, speed
+    assert isinstance(persistence, float) and persistence >= 0.9, persistence
+    assert _one(rows, FeatureName.TRANSIT_PATTERN).value == "straight"
+
+
+def test_velocity_fit_track_arrays_use_ticks_metres_and_sigma() -> None:
+    track = line_track(5, sigma_m=12.0)
+    arrays = F.track_arrays(track)
+    assert list(arrays.t_s) == [0.0, 2.0, 4.0, 6.0, 8.0]
+    assert arrays.sigma_m is not None and set(arrays.sigma_m) == {12.0}
+    x0, y0 = to_local_m(track.points[0].lat, track.points[0].lon)
+    assert (float(arrays.x_m[0]), float(arrays.y_m[0])) == (x0, y0)
