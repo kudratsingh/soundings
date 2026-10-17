@@ -193,5 +193,5 @@ def test_eviction_and_lookup() -> None:
         engine.approve(b.run_id, "req-1", "primary")
     with pytest.raises(UnsupportedOption):
         engine.start("S01", 1, toggles=[ToggleName.SENSOR_DROPOUT])
-    with pytest.raises(UnsupportedOption):
-        engine.start("S01", 1, source="stepped")
+    with pytest.raises(UnsupportedOption):  # WO-061 registers "stepped"; any unknown name
+        engine.start("S01", 1, source="no-such-source")

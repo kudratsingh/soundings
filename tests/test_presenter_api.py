@@ -63,8 +63,7 @@ def test_presenter_log_round_trip(client: TestClient) -> None:
     assert a["t_s"] == 0.0 and a["t_s"] <= b["t_s"] <= c["t_s"]
     assert datetime.fromisoformat(a["wall"]).tzinfo is not None
     assert a["pending"] == []
-    assert b["pending"] == [
-        "action file_plan_qr pending WO-061",
+    assert b["pending"] == [  # file_plan_qr shipped with WO-061
         "action propose_slot pending WO-082",
         "action vessel_advisory pending WO-083",
     ]

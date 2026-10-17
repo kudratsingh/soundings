@@ -60,6 +60,20 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.include_router(physics_router)
     # --- WO-089 end ---
 
+    # --- WO-061: inject and approve ---
+    from soundings.api_routes.approve import router as approve_router
+    from soundings.api_routes.inject import router as inject_router
+
+    application.include_router(approve_router)
+    application.include_router(inject_router)
+    # --- WO-061 end ---
+
+    # --- WO-061 QR ---
+    from soundings.api_routes.qr import router as qr_router
+
+    application.include_router(qr_router)
+    # --- WO-061 QR end ---
+
     if web_dist.is_dir():
         application.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
 

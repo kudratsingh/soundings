@@ -346,7 +346,13 @@ def toggle_section(
     seeds: Sequence[int],
 ) -> ToggleSection:
     """``runs_by_toggle[toggle][scenario_id]`` = runs (or an error string) per seed."""
-    expected = {sc.id: sc.expected.terminal_state.value for sc in scenarios}
+    # --- WO-061 begin: a judge-injected live scenario (L-) has no expected terminal ---
+    expected = {
+        sc.id: sc.expected.terminal_state.value
+        for sc in scenarios
+        if sc.expected.terminal_state is not None
+    }
+    # --- WO-061 end ---
     rows: list[ToggleRow] = []
     for toggle in [NO_TOGGLE, *(t.value for t in TOGGLES)]:
         by_sc = runs_by_toggle.get(toggle)

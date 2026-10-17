@@ -254,7 +254,9 @@ def test_actions_and_pending_notes() -> None:
     script = DemoScript.load(SCRIPT)
     assert script.steps[0].pending == ()
     assert script.steps[5].pending == ("action rung_ledger_eval pending WO-086",)
-    assert len(script.steps[2].pending) == 3
+    assert len(script.steps[2].pending) == 2  # file_plan_qr shipped with WO-061
+    assert pending_note(ActionName.FILE_PLAN_QR) is None
+    assert pending_note(ActionName.JUDGE_DROPS_ROGUE) is None
 
 
 def test_action_step_shapes() -> None:

@@ -37,6 +37,14 @@ import ResponderLayer from './components/ResponderLayer'
 // --- WO-086 begin ---
 import RungLedger from './components/RungLedger'
 // --- WO-086 end ---
+// --- WO-061 begin: judge panel, approval path, plans from the registry ---
+import type { HarborFeature, QrInfo } from './api'
+import { fetchQrInfo, postInject, startRunOn } from './api'
+import JudgePanel, { JudgePin } from './components/JudgePanel'
+import PlanLayer from './components/PlanLayer'
+import ProposalCard from './components/ProposalCard'
+import { usePlans } from './usePlans'
+// --- WO-061 end ---
 
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
@@ -76,6 +84,10 @@ function useParams() {
       // --- WO-060B begin: run-start toggles (?toggles=network_down,approver_unreachable) ---
       toggles: (p.get('toggles') ?? '').split(',').filter(Boolean),
       // --- WO-060B end ---
+      // --- WO-061 begin: ?source=stepped (a person approves) and ?judge=1 ---
+      source: p.get('source') ?? '',
+      judge: p.get('judge') === '1',
+      // --- WO-061 end ---
     }
   }, [])
 }
@@ -118,7 +130,8 @@ function App() {
   const begin = (scenario: string, seed: number | null, speed: number | null) => {
     setPicked(null)
     setHighlight(null)
-    startRun(scenario, seed, speed, params.toggles) // WO-060B: toggles from the URL
+    // WO-060B: toggles from the URL; WO-061: ?source= picks the run source (stepped: a person approves)
+    ;(params.source ? startRunOn(params.source, scenario, seed, speed, params.toggles) : startRun(scenario, seed, speed, params.toggles))
       .then((r) => {
         setRunId(r.run_id)
         const q = new URLSearchParams(window.location.search)
@@ -195,8 +208,54 @@ function App() {
   const activeRung: Rung = summary?.rung ?? 'watch'
   const speed = run.started ? run.started.speed : null
 
+  // --- WO-061 begin: judge panel state, plans, QR info, presenter actions ---
+  const [judgeOpen, setJudgeOpen] = useState(false)
+  // The Judge tab shows with ?judge=1 (or once a presenter action opens the panel).
+  const [judgeTab, setJudgeTab] = useState(params.judge)
+  const [placing, setPlacing] = useState(false)
+  const [pin, setPin] = useState<[number, number] | null>(null)
+  const [qr, setQr] = useState<QrInfo | null>(null)
+  const [personRuns, setPersonRuns] = useState<Set<string>>(new Set())
+  const plans = usePlans()
+  useEffect(() => {
+    fetchQrInfo()
+      .then(setQr)
+      .catch(() => setQr(null))
+  }, [])
+  const followRun = (id: string, personApproves: boolean) => {
+    setPicked(null)
+    setHighlight(null)
+    if (personApproves) setPersonRuns((s) => new Set([...s, id]))
+    setRunId(id)
+  }
+  useEffect(() => {
+    if (params.source === 'stepped' && runId) setPersonRuns((s) => (s.has(runId) ? s : new Set([...s, runId])))
+  }, [runId])
+  // Presenter actions (WO-062P shot list): file_plan_qr opens the panel on its QR code;
+  // judge_drops_rogue places a contact closing on the fuel berth and follows its run.
+  useEffect(() => {
+    const onAction = (e: Event) => {
+      const action = (e as CustomEvent<{ action: string }>).detail?.action
+      if (action === 'file_plan_qr') {
+        setJudgeTab(true)
+        setJudgeOpen(true)
+      }
+      if (action === 'judge_drops_rogue') {
+        const berth = harbor?.features.find((f: HarborFeature) => f.properties.asset_id === 'fuel_berth_2')
+        const at = berth?.geometry.coordinates as number[] | undefined
+        if (!at) return
+        postInject({ lat: Number((at[1] - 0.0036).toFixed(6)), lon: at[0], behavior: 'closing', acoustic: null })
+          .then((r) => followRun(r.run_id, true))
+          .catch((err: unknown) => setProblem(String(err)))
+      }
+    }
+    window.addEventListener('soundings:presenter-action', onAction)
+    return () => window.removeEventListener('soundings:presenter-action', onAction)
+  }, [harbor])
+  // --- WO-061 end ---
+
   return (
-    <div className={`app style-${params.mapStyle}`}>
+    <div className={`app style-${params.mapStyle}${placing ? ' judge-placing' : ''}`} /* WO-061 */>
       <header className="topbar">
         <strong className="mark" title={TAGLINE}>
           Soundings
@@ -244,8 +303,25 @@ function App() {
           mapStyle={params.mapStyle}
           tickS={tickS}
           // --- WO-088 begin ---
-          overlay={<ResponderLayer responder={run.responder} target={responderTarget(run)} />}
+          // --- WO-061: plans and the judge pin share the overlay with the WO-088 responder ---
+          overlay={
+            <>
+              <ResponderLayer responder={run.responder} target={responderTarget(run)} />
+              <PlanLayer plans={plans} harbor={harbor} />
+              <JudgePin pin={pin} />
+            </>
+          }
           // --- WO-088 end ---
+          // --- WO-061 begin: the judge's next map click drops the pin ---
+          onMapClick={
+            placing
+              ? (lat, lon) => {
+                  setPin([lat, lon])
+                  setPlacing(false)
+                }
+              : undefined
+          }
+          // --- WO-061 end ---
         />
         <aside className="rail">
           <CaseList cases={cases} selected={selectedCase} auto={picked === null} tick={run.tick} tickS={tickS} flashOf={flashOf} onSelect={setPicked} />
@@ -267,7 +343,14 @@ function App() {
             <p className="boundary-reason label" data-testid="boundary-reason">
               {boundaryReason(boundary, activeRung)}
             </p>
-            <ApprovalButton pending={run.pendingApproval} />
+            <ApprovalButton
+              pending={run.pendingApproval}
+              // --- WO-061 begin ---
+              runId={run.runId}
+              tS={run.t_s}
+              personApproves={run.runId !== null && personRuns.has(run.runId)}
+              // --- WO-061 end ---
+            />
           </section>
         </aside>
       </main>
@@ -282,6 +365,23 @@ function App() {
       />
       <AboutPanel open={aboutOpen} about={about} boundary={boundary} onClose={() => setAboutOpen(false)} physics={physics} /* WO-089 */ />
       {/* --- WO-061 block (judge panel) --- */}
+      {qr?.lan && (
+        <div className="lan-banner" data-testid="lan-banner" role="status">
+          demo network mode
+        </div>
+      )}
+      <ProposalCard plans={plans} />
+      {judgeTab && (
+        <JudgePanel
+        open={judgeOpen}
+        onOpenChange={setJudgeOpen}
+        placing={placing}
+        onPlacing={setPlacing}
+        pin={pin}
+        onRun={(id) => followRun(id, true)}
+        qr={qr}
+        />
+      )}
       {/* --- end WO-061 block --- */}
       {/* --- WO-062 block (demo runner) --- */}
       {/* --- end WO-062 block --- */}

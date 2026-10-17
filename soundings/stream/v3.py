@@ -223,6 +223,10 @@ class V3Source:
         manual: bool = False,
         violations_path: Path | None = None,
         client_factory: Callable[[bool], RunClient] = client_for_run,
+        # --- WO-061 begin: an audit file for the stepped source's verify test ---
+        audit_db: str | Path | None = None,
+        approver: ManualApprover | None = None,
+        # --- WO-061 end ---
     ) -> None:
         self.req = req
         toggles = tuple(ToggleName(t) for t in req.toggles)
@@ -231,7 +235,9 @@ class V3Source:
         self.run_client = client_factory(bool(req.use_llm))
         client = self.run_client.client
         self.manual = manual
-        self.approver = ManualApprover() if manual else None
+        # --- WO-061 begin: the stepped source brings its own UiApprover ---
+        self.approver = approver if approver is not None else ManualApprover() if manual else None
+        # --- WO-061 end ---
         vpath = violations_path if violations_path is not None else DEFAULT_VIOLATIONS_PATH
         # --- WO-085: surge triage --- (a run carrying contact_surge goes through the
         # triage queue and the officer channel; every other run keeps triage=None)
@@ -249,6 +255,7 @@ class V3Source:
                 writer_mode="auto" if client is not None else "template",
                 sitrep_client=client,
                 run_id=req.run_id,
+                db_url=audit_db,  # WO-061 (None: in memory, as before)
             )
         self.v2 = self.rs.v2
         self.tick_s = float(self.v2.sim.tick_s)

@@ -666,6 +666,12 @@ class RunEngine:
             awaiting_speed=ui_config().awaiting_approval_speed,  # WO-060B
         )
         self._runs[run_id] = handle
+        # --- WO-061 begin: a source built in the background restarts the pacing clock
+        # when its stream begins (the stepped source; nothing is released in a burst) ---
+        on_ready = getattr(src, "on_ready", None)
+        if callable(on_ready):
+            on_ready(lambda: setattr(handle, "clock", self.clock_factory()))
+        # --- WO-061 end ---
         return handle
 
     def _evict(self) -> None:
@@ -822,3 +828,14 @@ __all__ = [
 # --- WO-060B begin: register the runner v3 sources ---
 _register_v3()
 # --- WO-060B end ---
+
+
+# --- WO-061 begin: the stepped source (runner v3, a person approves through the UI) ---
+def _stepped_source(req: SourceRequest) -> RunSource:
+    from soundings.stream.stepped import stepped_source
+
+    return stepped_source(req)
+
+
+_SOURCES.setdefault("stepped", _stepped_source)
+# --- WO-061 end ---
