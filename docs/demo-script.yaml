@@ -1,9 +1,62 @@
-# Replayed offline by `make demo`. Each step is a scenario + what the screen should show.
+# The 3:00 shot list (owner directive, WO-062 addenda Directive 1 section 2). Presenter mode
+# (`/?presenter=1`, WO-062P) steps through it with Space; `make demo` replays it headless
+# (WO-062 Part A); the Part B recording drives the presenter with timed Space presses.
+#
+# Step fields: t (m:ss shot start), caption (on screen, verbatim from the directive),
+# speed (1x | 20x, applied when the step starts a scenario), scenario (catalog id, run
+# through POST /api/runs) or action (named; see soundings/demo/script.py ACTIONS for the
+# WO that ships each one; until then presenter mode shows caption + spotlight and logs
+# "action pending WO-0xx"), optional beats (pending actions inside a scenario step),
+# optional spotlight (element to highlight), optional pause_for_click, and say (a short
+# line for the headless transcript). `end` is when the last shot ends.
+end: "3:00"
 steps:
-  - {t: "0:00", scenario: S01, expect_state: CLEARED_AT_ASK, say: "Tuesday. Filed survey, clears at ask. Zero interruptions."}
-  - {t: "0:30", scenario: S02, expect_state: LOST_VEHICLE, say: "Filed glider goes silent. Lost-vehicle report with a search box to the operator."}
-  - {t: "1:00", scenario: S05, say: "Harbor Night. Unfiled, closing on the fuel berth, no reply."}
-  - {t: "2:00", scenario: S05, continue_run: true, approve: true, say: "Hold on one berth under standing orders. Report handed to the officer. Judge approves."}
-  - {t: "2:45", scenario: live, say: "Judge drops a contact. We follow it live."}
-  - {t: "3:30", scenario: twist, scenario_ref: S05, toggles: [network_down], say: "Twist: network down. Same decision on kinematics and hail alone."}
-  - {t: "4:00", eval: true, say: "Catalog vs close-the-berth vs send-everything-to-a-human."}
+  # TODO(WO-080): use BT-01 for the cold open and Busy Tuesday once scenarios/BT-01.yaml is on main.
+  - t: "0:00"
+    scenario: S01
+    speed: 1x
+    spotlight: harbor-map
+    expect_state: CLEARED_AT_ASK
+    caption: "A working harbor sees ~40 things underwater on a Tuesday. One of them isn't filed."
+    say: "Cold open. The harbor at night, a Tuesday of filed work."
+  - t: "0:12"
+    action: ladder_chips
+    speed: 1x
+    spotlight: ladder
+    caption: "Today the safe answer is close the berth. Soundings climbs the gentlest rung that works: watch → ask → slow → hold → hand to a person."
+    say: "The ladder. Five rungs, gentlest first."
+  # Shot 3 has no quoted caption in the directive; this one is its beat list, word for word.
+  - t: "0:30"
+    scenario: S01
+    seed: 2
+    speed: 20x
+    beats: [file_plan_qr, propose_slot, vessel_advisory]
+    spotlight: state-timeline
+    caption: "Busy Tuesday. Filed jobs clear at ask; a plan is filed from a phone, conflict → proposed slot → accepted."
+    say: "Busy Tuesday at 20x. Filed jobs clear at ask."
+  - t: "1:00"
+    scenario: S05
+    speed: 1x
+    spotlight: evidence-ledger
+    pause_for_click: true
+    caption: "Our work stops here. The call is a person's."
+    say: "Harbor Night. Unfiled, closing on the fuel berth, no reply. Hold, SITREP, approve, handed off."
+  - t: "1:50"
+    action: twist_toggles
+    scenario_ref: S05
+    toggles: [network_down, approver_unreachable]
+    speed: 20x
+    spotlight: ladder
+    caption: "3 AM, nobody answers: it does only what the watch commander pre-signed."
+    say: "Twist: network down, approver unreachable. Same decision on kinematics and hail alone."
+  - t: "2:15"
+    action: rung_ledger_eval
+    speed: 1x
+    spotlight: ladder
+    caption: "Detection is simulated. The decisions aren't."
+    say: "Catalog vs close-the-berth vs send-everything-to-a-human."
+  - t: "2:40"
+    action: end_card
+    speed: 1x
+    caption: "VTS for the harbor floor."
+    say: "Who pays on Tuesday, who is safer on Harbor Night, and what comes next."

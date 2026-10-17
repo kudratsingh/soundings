@@ -48,7 +48,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 051 | eval harness | part A merged; part B pending | wo/051a-eval-core (part A) | #24 | | 1454+ passed after rebase (42 WO-051 part A) |
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
-| 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
+| 062 | demo runner | part A + presenter mode merged; recording (part B) pending | wo/062a-demo-runner-core; wo/062p-presenter-mode | #21; WO-062P see branch PR | 39c22eb (part A) | part A 53; WO-062P: test_demo_script 29, test_presenter_api 5, test_sfx 12, e2e presenter smoke 1 |
 | 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |
 | 081 | conflict detection at filing | PR open (auto-merge on green); JobType via local adapter until WO-080 part A | wo/081-conflict-detection | see branch PR | | 1546 passed, 1 skipped (52 WO-081 tests) |
 | 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |

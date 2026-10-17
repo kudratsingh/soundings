@@ -5,6 +5,9 @@ A catalog step runs its scenario through an injected ``ScenarioExecutor`` (defau
 step's ``seed``. A ``twist`` step runs ``scenario_ref`` with the step's toggles added. A
 ``continue_run`` step reuses the previous step's outcome. ``live`` prints a placeholder
 until WO-061; ``eval`` prints the headline of ``artifacts/eval/report.json`` when present.
+An ``action`` step (WO-062P) notes which WO ships it (``action ... pending WO-0xx``) or
+that the presenter overlay renders it; a ``twist_toggles`` action runs ``scenario_ref``
+with its toggles like a twist step. A catalog step's ``beats`` add their pending notes.
 
 The transcript holds sim data only (marks, seeds, states, ticks) and never a wall time, so
 two runs of one script give identical transcripts (CLAUDE.md 2.4). Wall-clock pacing uses
@@ -26,7 +29,15 @@ from pathlib import Path
 from typing import Protocol
 
 from soundings.demo.schedule import DEFAULT_TAIL_S, DEFAULT_TOTAL_S, Pace, build_schedule
-from soundings.demo.script import EVAL, LIVE, TWIST, DemoScript, DemoStep
+from soundings.demo.script import (
+    ACTION,
+    EVAL,
+    LIVE,
+    TWIST,
+    ActionName,
+    DemoScript,
+    DemoStep,
+)
 from soundings.schemas.enums import LadderState
 from soundings.schemas.scenario import Scenario, Toggle
 from soundings.sim.scenario import REPO_ROOT, resolve_scenario
@@ -35,6 +46,7 @@ DEFAULT_EVAL_REPORT = REPO_ROOT / "artifacts" / "eval" / "report.json"
 LIVE_PLACEHOLDER = "judge injection: wired in WO-061"
 EVAL_PENDING = "eval: pending WO-051"
 APPROVE_PENDING = "approve: wired with runner v3 (WO-043)"
+OVERLAY_NOTE = "presenter overlay"
 
 # Which case state headlines a run: the most consequential ground-truth case first.
 _HEADLINE_ORDER: tuple[LadderState, ...] = (
@@ -211,7 +223,11 @@ def run_step(
     if step.kind == LIVE:
         line = TranscriptLine(step.t, step.label, step.say, note=LIVE_PLACEHOLDER)
         return line, None
-    ref = step.run_ref
+    twist_action = step.action is ActionName.TWIST_TOGGLES
+    if step.kind == ACTION and not twist_action:
+        note = " ; ".join(step.pending) or OVERLAY_NOTE
+        return TranscriptLine(step.t, step.label, step.say, note=note), None
+    ref = step.scenario_ref if twist_action else step.run_ref
     assert ref is not None
     notes: list[str] = []
     if step.continue_run and previous is not None:
@@ -219,12 +235,13 @@ def run_step(
         notes.append("continued")
     else:
         scenario = resolve_scenario(ref)
-        if step.kind == TWIST:
+        if step.kind == TWIST or twist_action:
             scenario = with_toggles(scenario, step)
         seed = scenario.seed if step.seed is None else step.seed
         outcome = headline(executor.run_scenario(scenario, seed), seed, scenario.duration_ticks)
     if step.approve:
         notes.append(APPROVE_PENDING)
+    notes.extend(step.pending)
     line = TranscriptLine(
         step.t,
         step.label,
@@ -282,6 +299,7 @@ __all__ = [
     "DEFAULT_EVAL_REPORT",
     "EVAL_PENDING",
     "LIVE_PLACEHOLDER",
+    "OVERLAY_NOTE",
     "CaseView",
     "DemoResult",
     "RunnerV1Executor",

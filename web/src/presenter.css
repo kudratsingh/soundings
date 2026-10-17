@@ -1,0 +1,136 @@
+/* Presenter mode (WO-062P): a dark, high-contrast caption bar that reads at phone size in
+   the recording. Its own file so App.tsx and index.css stay with WO-060. */
+
+.presenter-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 28px 16px;
+  background: rgba(4, 12, 18, 0.94);
+  border-top: 2px solid #1f8fb0;
+  color: #f7fbfd;
+}
+
+.presenter-caption {
+  flex: 1;
+  margin: 0;
+  font-size: 44px;
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: #ffffff;
+  text-shadow: 0 1px 2px #000;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 1.18em;
+}
+
+.presenter-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: none;
+}
+
+.presenter-counter {
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #9fe3f5;
+}
+
+.presenter-hint {
+  font-size: 16px;
+  color: #ffd27a;
+}
+
+.presenter-button {
+  font-size: 14px;
+  background: #0d2230;
+  color: #e3eef3;
+  border: 1px solid #2c5568;
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+
+.presenter-spotlight {
+  outline: 4px solid #ffd27a !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 28px 6px rgba(255, 210, 122, 0.6) !important;
+  position: relative;
+  z-index: 1000;
+  transition: outline-color 0.3s ease;
+}
+
+.presenter-chips {
+  position: fixed;
+  left: 50%;
+  bottom: 170px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  display: flex;
+  gap: 14px;
+}
+
+.presenter-chip {
+  font-size: 30px;
+  font-weight: 700;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 2px solid #2c5568;
+  background: #0d2230;
+  color: #5d7d8c;
+  animation: presenter-chip-on 0.5s ease forwards;
+}
+
+@keyframes presenter-chip-on {
+  to {
+    background: #0e7490;
+    border-color: #9fe3f5;
+    color: #ffffff;
+  }
+}
+
+.presenter-endcard {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: rgba(4, 12, 18, 0.92);
+  color: #ffffff;
+}
+
+.presenter-endcard strong {
+  font-size: 96px;
+  letter-spacing: 0.02em;
+}
+
+.presenter-endcard span {
+  font-size: 40px;
+}
+
+.presenter-endcard .presenter-endcard-repo {
+  font-size: 30px;
+  color: #9fe3f5;
+}
+
+.sfx-toggle {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2000;
+  font-size: 12px;
+  opacity: 0.8;
+}
