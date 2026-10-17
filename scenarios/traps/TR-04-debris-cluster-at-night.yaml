@@ -1,0 +1,35 @@
+# Trap TR-04 (known answer: do not hand off). Three pieces of drifting debris enter the
+# fuel-berth zone together at night. Several unknown contacts at once near a critical
+# asset feel like a coordinated approach; none of them is under power. Calibrates the
+# false-shutdown side for a cluster of false alarms.
+id: TR-04
+name: Debris cluster in the fuel-berth zone at night
+seed: 37
+duration_ticks: 300
+tick_s: 2
+ground_truth: DEBRIS_OR_DRIFT
+hour_of_day: 3
+contacts:
+  - id: gt-1
+    start: {lat: 33.7412, lon: -118.2640, depth_m: 1.5}
+    behavior: {type: drift, jitter_mps: 0.05}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+  - id: gt-2
+    start: {lat: 33.7416, lon: -118.2646, depth_m: 1.0}
+    behavior: {type: drift, jitter_mps: 0.05}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+  - id: gt-3
+    start: {lat: 33.7409, lon: -118.2634, depth_m: 2.0}
+    behavior: {type: drift, jitter_mps: 0.05}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HAZARD_NOTICE
+  top_hypothesis: DEBRIS_OR_DRIFT
+  max_human_interruptions: 0
+notes: >-
+  Right answer: a hazard notice, no hand-off. Count of contacts is not evidence of intent;
+  every one of them drifts with the current and carries no propeller tonal.

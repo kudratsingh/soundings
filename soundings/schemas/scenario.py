@@ -32,7 +32,7 @@ from soundings.schemas.harbor import Harbor, load_harbor
 
 DEFAULT_SCENARIO_ROOT: Path = REPO_ROOT / "scenarios"
 
-ScenarioId = Annotated[str, StringConstraints(pattern=r"^(S\d{2}|smoke|L-\d{8}T\d{6})$")]
+ScenarioId = Annotated[str, StringConstraints(pattern=r"^(S\d{2}|TR-\d{2}|smoke|L-\d{8}T\d{6})$")]
 TruthContactId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]*$")]
 """Ground-truth contact ids, for example ``gt-1`` (observed ids are ``c-NNNN``)."""
 
