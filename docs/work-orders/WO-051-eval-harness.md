@@ -3,6 +3,8 @@
 Phase: 5 · Branch: `wo/051-eval-harness` · Worktree: `../soundings-worktrees/wo-051-eval-harness` · Est: 6.5 h · Owner: domain / eval / deck (unassigned); coordinator Kudrat
 Depends on: WO-010 (`LikelihoodSpec`, `canonical_json`, `round6`), WO-011 (catalog, `catalog_paths`, `resolve_scenario`), WO-032 (`soundings.llm.planner.LlmPlanner`, violations-log path), WO-033 and WO-043 (`ScenarioRunner`, `RunResult` v2/v3 fields), WO-040 (`RUNG_OF_STATE`), WO-050 (`Policy`, `PolicyRun`, counting rules, `run_scenario(likelihoods=)`, `config/eval.yaml`); WO-000 is merged (Makefile `eval` target, `ModelClient`, `FixtureStore`). Wave 9.
 
+> **Binding addendum (owner directive 2026-10-17 06:35 PDT):** see `WO-051-ADDENDUM-eval-directive.md` — mis-specified sim ±20%, toggle sweep, threshold sensitivity curve, BT-01 scale 40/100/200, seeds 1–20 (mean, min–max), planner ablation after the fixture run, `make eval` < 5 min. It extends the exit tests below.
+
 ## Goal
 Running `make eval` produces `artifacts/eval/report.md` and `artifacts/eval/report.json`. It runs the catalog × seeds × 3 policies in replay mode with no network. Two runs give byte-identical output. The report has:
 - the metric tables that `docs/DECK-INPUTS.md` pastes, with stable columns;
