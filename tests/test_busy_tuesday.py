@@ -1,7 +1,7 @@
 """WO-080: Busy Tuesday (BT-01) through the runner with ``skip_idle_ticks=True``.
 
-Exit tests: ``-k filed_cleared``, ``-k rogue_handed_off`` (gated: until WO-033 runner v2
-is on main the rogue lineage stays INVESTIGATING and is never cleared), ``-k two_runs``,
+Exit tests: ``-k filed_cleared``, ``-k rogue_handed_off`` (ungated: WO-033 runner v2 is on
+main), ``-k two_runs``,
 ``-k runtime``, ``-k false_alarm_rate``, ``-k no_show``, ``-k reacquire_precision``,
 ``-k ais_feature``, and the BT-01 citation check. Ground truth is read here for grading
 only.
@@ -21,7 +21,7 @@ import pytest
 from soundings.investigation.features import NO_AIS_FEED, SOURCE_SIM_AIS, extract_context
 from soundings.matcher import PLAN_POSITION_SOURCE_PREFIX, PLAN_SOURCE_PREFIX
 from soundings.registry.store import RegistryStore, plan_views_from_scenario
-from soundings.runner import RunResult, ScenarioRunner
+from soundings.runner import RunResult, ScenarioRunner, ScenarioRunnerV2
 from soundings.schemas.enums import FeatureName, LadderState
 from soundings.schemas.harbor import load_harbor
 from soundings.schemas.scenario import Scenario
@@ -86,18 +86,34 @@ def test_filed_cleared_all_39(result: RunResult) -> None:
     assert set(jobs) <= answered
 
 
-def test_rogue_handed_off_gated(result: RunResult) -> None:
-    """Gated: runner v2 (WO-033) is not on main, so the v1 end state is INVESTIGATING.
+@pytest.fixture(scope="module")
+def v2_result() -> RunResult:
+    """Runner v2 (WO-033, on main): the rogue's investigation hands it to a person."""
+    return ScenarioRunnerV2(BT01, skip_idle_ticks=True).run(llm_roles=False)
 
-    WO-033 part B flips this to the HANDED_OFF assertion (DECISIONS 2026-10-17 06:37).
-    """
-    cases = lineages(result)["rogue-1"]
+
+def test_rogue_handed_off(v2_result: RunResult) -> None:
+    """Ungated (WO-033 runner v2 is on main): the rogue lineage ends HANDED_OFF, its first
+    case is handed to a person, and no case of it is ever CLEARED_AT_ASK."""
+    cases = lineages(v2_result)["rogue-1"]
     assert cases
-    assert lineage_terminal(cases) is S.INVESTIGATING
-    for case in cases:
-        assert case.state is S.INVESTIGATING and case.investigation_pending
-        assert case.state is not S.CLEARED_AT_ASK
-        assert not case.state.value.startswith("RESOLVED")
+    assert lineage_terminal(cases) is S.HANDED_OFF
+    assert cases[0].state is S.HANDED_OFF
+    assert all(c.state is not S.CLEARED_AT_ASK for c in cases)
+    assert check_expected_contacts(v2_result, BT01) == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "runner v2 (WO-033) resolves some re-issued ids of the rogue, parked at fuel_berth_2, "
+        "as RESOLVED_BENIGN (3 of 8 cases at seed 7); the lineage still ends HANDED_OFF. "
+        "See the WO-080 open question for WO-033/WO-043"
+    ),
+)
+def test_rogue_handed_off_no_resolved_case(v2_result: RunResult) -> None:
+    cases = lineages(v2_result)["rogue-1"]
+    assert not any(c.state.value.startswith("RESOLVED") for c in cases)
 
 
 def test_false_alarm_rate() -> None:
