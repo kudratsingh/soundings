@@ -53,7 +53,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |
 | 081 | conflict detection at filing | PR open (auto-merge on green); JobType via local adapter until WO-080 part A | wo/081-conflict-detection | see branch PR | | 1546 passed, 1 skipped (52 WO-081 tests) |
 | 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
-| 083 | separation advisories (CPA/TCPA) | WO being written | wo/083-separation-advisories | | | |
+| 083 | separation advisories (CPA/TCPA) | PR open (auto-merge) | wo/083-separation-advisories | see PR | | make check green; 25 WO-083 tests (BT-01 cases skip until WO-080 part A merges) |
 | 084 | projected tracks (Kalman) | PR open (flag flipped to kalman for build_evidence; runner stays window) | wo/084-projected-tracks | see PR | | 1436 passed (24 test_kalman*) |
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
