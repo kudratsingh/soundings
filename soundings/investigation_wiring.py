@@ -54,7 +54,6 @@ from soundings.investigation.machine import (
     StopOutcome,
     StoppingConfig,
     TemplateQuestionWriter,
-    latency_ticks,
 )
 from soundings.investigation.planner import (
     BudgetCounts,
@@ -69,18 +68,25 @@ from soundings.investigation.planner import Planner as ChoosePlanner
 from soundings.investigation.posterior import LikelihoodTables, PosteriorReport, PriorConfig
 from soundings.investigation.probes import (
     ALLOWLIST,
+    RESPONDER_PROBES,
     ProbeCache,
     ProbeContext,
     ProbeNotAllowed,
+    ResponderPort,
+    catch_up,
+    probe_latency_ticks,
     resolve_args,
     run_probe,
+    state_name,
+    track_upto,
 )
+from soundings.ladder.guards import ResponderDispatchInputs, responder_dispatch_permitted
 from soundings.llm.client import FixtureStore, ModelClient, ModelMode
 from soundings.llm.fallback import template_question
 from soundings.llm.guard import DEFAULT_VIOLATIONS_PATH
 from soundings.llm.planner import LLM_ROLES_DEFAULT, LlmPlanner, make_planner
 from soundings.llm.roles import HypothesisWriter
-from soundings.matcher import MatchConfig
+from soundings.matcher import MatchConfig, SearchBox
 from soundings.registry.models import PlanView
 from soundings.schemas.enums import ProbeId, Rung
 from soundings.schemas.evidence import EvidenceRow
@@ -104,6 +110,10 @@ class ProbeWorld:
     hail: HailSimulator | None = None
     match_cfg: MatchConfig | None = None
     known: KnownOperatorTable | None = None
+    # --- WO-088 begin ---
+    responder: ResponderPort | None = None
+    search_box_for: Callable[[str, int], SearchBox | None] | None = None
+    # --- WO-088 end ---
 
     def context(self, contact_id: str, tick: int, rung: Rung) -> ProbeContext:
         return ProbeContext(
@@ -119,7 +129,64 @@ class ProbeWorld:
             hail=self.hail,
             match_cfg=self.match_cfg,
             known=self.known,
+            responder=self.responder,
+            search_box=None
+            if self.search_box_for is None
+            else self.search_box_for(contact_id, tick),
         )
+
+
+# --- WO-088 begin ---
+def responder_dispatch_inputs(
+    world: ProbeWorld, contact_id: str, table: EvidenceTable, tick: int
+) -> ResponderDispatchInputs | None:
+    """The responder guard's inputs for a look at ``contact_id`` now (None: no responder)."""
+    port = world.responder
+    if port is None:
+        return None
+    snap = catch_up(port, tick)  # time passes for the responder too (return to dock)
+    track = track_upto(world.run, contact_id, tick)
+    inside: bool | None = None
+    if track is not None:
+        last = track.points[-1]
+        fence = getattr(port, "inside_geofence", None)
+        inside = bool(fence(last.lat, last.lon)) if callable(fence) else None
+    standoff = getattr(snap, "standoff_m", None)
+    busy = state_name(snap) != "DOCKED"
+    return ResponderDispatchInputs(
+        contact_id=contact_id,
+        station_inside_geofence=inside,
+        standoff_m=None if standoff is None else float(standoff),
+        other_vehicles_dispatched=1 if busy else 0,
+        dispatches_for_contact=responder_dispatches(table, contact_id),
+    )
+
+
+def _landing_latency_s(
+    probe_id: ProbeId, ctx: ProbeContext, table: EvidenceTable, default: float
+) -> float:
+    """When the probe lands: a responder's ``eta_ticks`` (the key's), else the allowlist."""
+    if probe_id not in RESPONDER_PROBES:
+        return default
+    args = resolve_args(probe_id, ctx, table)
+    return float(probe_latency_ticks(probe_id, args, ctx.tick_s)) * ctx.tick_s
+
+
+def responder_dispatches(table: EvidenceTable, contact_id: str) -> int:
+    """Responder dispatches already made for this contact (1 once any row landed)."""
+    ran = {r.probe_id for r in table.for_contact(contact_id) if r.probe_id in RESPONDER_PROBES}
+    return len(ran)
+
+
+def responder_available(
+    world: ProbeWorld, contact_id: str, table: EvidenceTable, tick: int
+) -> bool:
+    """True when the boundary guard lets the platform dispatch to look alone, now."""
+    inputs = responder_dispatch_inputs(world, contact_id, table, tick)
+    return inputs is not None and responder_dispatch_permitted(inputs).permits
+
+
+# --- WO-088 end ---
 
 
 class RunProbeRunner:
@@ -147,8 +214,7 @@ class RunProbeRunner:
     def run(
         self, probe_id: ProbeId, contact_id: str, tick: int, args: Mapping[str, Any]
     ) -> Sequence[EvidenceRow]:
-        spec = ALLOWLIST[probe_id]
-        sent = tick - latency_ticks(spec.latency_s, float(self.world.run.tick_s))
+        sent = tick - probe_latency_ticks(probe_id, args, float(self.world.run.tick_s))  # WO-088
         ctx = self.world.context(contact_id, max(0, sent), self.rung)
         try:
             result = run_probe(probe_id, ctx, self.table, args=dict(args), cache=self.cache)
@@ -214,15 +280,27 @@ class PlannerAdapter:
     ) -> ProbeChoice | None:
         cid = posterior.contact_id
         tick_s = float(self.world.run.tick_s)
+        # --- WO-088 begin --- (a look is a candidate only when the guard permits it)
+        available = responder_available(self.world, cid, table, budget.tick)
+        latency: dict[ProbeId, float] = {}
+        if available:
+            ctx0 = self.world.context(cid, budget.tick, rung)
+            for pid in sorted(RESPONDER_PROBES):  # latency = the dispatch's transit time
+                latency[pid] = float(resolve_args(pid, ctx0, table)["eta_ticks"]) * tick_s
+        ledger = planner_ledger(cid, budget.ledger, budget.limits)
+        ledger.seed_dispatches(cid, responder_dispatches(table, cid))
+        # --- WO-088 end ---
         state = PlannerState(
             contact_id=cid,
             posterior=posterior.posterior,
             observed_confidence=observed_confidence(table, cid, self.tables),
             current_rung=rung,
-            ledger=planner_ledger(cid, budget.ledger, budget.limits),
+            ledger=ledger,
             tick=budget.tick,
             tick_s=tick_s,
             ran_probes=ran_probes(table, cid),
+            responder_available=available,  # WO-088
+            probe_latency_s=latency,  # WO-088
         )
         if isinstance(self.planner, LlmPlanner):
             when = f"{self.label}{cid}/t={budget.tick}"
@@ -240,7 +318,7 @@ class PlannerAdapter:
             probe_id=choice.probe_id,
             args=resolve_args(choice.probe_id, ctx, table),
             cost_usd=spec.cost_usd,
-            latency_s=spec.latency_s,
+            latency_s=_landing_latency_s(choice.probe_id, ctx, table, spec.latency_s),  # WO-088
             interruption=spec.interruption,
             rung_required=spec.rung_required,
             source=choice.source,

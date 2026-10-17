@@ -327,6 +327,9 @@ class BudgetLimits(StrictModel):
     paid_probes_per_contact: NonNegInt
     human_interruptions_per_contact: NonNegInt
     llm_calls_per_contact: NonNegInt
+    # --- WO-088 begin ---
+    responder_dispatches_per_contact: NonNegInt = 1
+    # --- WO-088 end ---
 
 
 def load_budgets(path: str | Path = LADDER_PATH) -> BudgetLimits:

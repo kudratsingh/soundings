@@ -74,4 +74,34 @@ class WorldRun(ObservedTracks, Protocol):
     def eyes_on_path(self, contact_id: str) -> Sequence[EyesOnPoint]: ...
 
 
-__all__ = ["EyesOnPoint", "HailResponder", "ObservedTracks", "WorldRun"]
+# --- WO-088 begin ---
+@dataclass(frozen=True, slots=True)
+class CloseLook:
+    """What the responder sees and hears from its station at standoff (CLAUDE.md 8 A2).
+
+    ``visual_class`` is a class label ("uuv", "diver", "marine_life", "debris",
+    "surface_vessel"), never a hypothesis id; None when nothing is there to see.
+    ``acoustics`` maps an acoustic feature name to the close-range reading.
+    """
+
+    visual_class: str | None
+    acoustics: Mapping[str, bool | str | float]
+
+
+class CloseLookWorld(Protocol):
+    """A world that can answer a responder's close look (``SimRun`` does)."""
+
+    def close_look(self, contact_id: str, tick: int) -> CloseLook | None: ...
+
+
+# --- WO-088 end ---
+
+
+__all__ = [
+    "CloseLook",
+    "CloseLookWorld",
+    "EyesOnPoint",
+    "HailResponder",
+    "ObservedTracks",
+    "WorldRun",
+]
