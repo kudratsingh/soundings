@@ -25,9 +25,10 @@ Out:
 `docs/SPEC-INVESTIGATION.md` §7 (and the `C_KNOWN_OPERATOR` amendment), §9.9; `docs/SPEC-LADDER.md` watch after handoff; CLAUDE.md §8 A5 (one interruption definition).
 
 ## Interfaces
-- `soundings/runner.py` (WO-094 block): `CARRYOVER_OUTCOMES`, `CarryOver` (frozen record per re-acquired case: `case_id`, `old_case_id`, `prior_outcome`, `prior_rule`, `eligible`, `reason`, `rehailed`, `identity_confirmed`, `row_ids`), `RunResultV2.carryovers: tuple[CarryOver, ...]` (default empty), `lineage_of(result, contact_id) -> tuple[str, ...]`.
-- `soundings/eval/catalog_verify.py`: `Graded.lineage_interruptions: int` (sum over the lineage's observed ids).
-- Config: no new key unless needed; the staleness limit is `plan_watch.rehail_interval_s` (config/matcher.yaml).
+- `soundings/runner.py` (WO-094 blocks): `CARRYOVER_OUTCOMES`, `CARRYOVER_SOURCE_PREFIX` (`reacquired_from:`), `CARRYOVER_REASON`, frozen `CarryOver(case_id, contact_id, old_contact_id, old_case_id, prior_outcome, prior_rule, tick, eligible, reason, hail_age_s, rehailed, identity_confirmed, row_ids)` with `.canonical()`, `carryover_consistency(table, old_id, new_id, *, old_first_tick, first_tick, stopping, speed_tol_mps) -> str | None`, `carried_hail_age_s(table, old_id, tick, tick_s)`, `carried_hail_stale(age_s, rehail_interval_s)`, `lineage_of(result, contact_id)`, `lineage_interruption_view(result, per_contact, handoff_counted, handled_off)`.
+- `RunResultV2.carryovers: tuple[CarryOver, ...]` (default empty); `RunResultV3.lineage_interruptions: Mapping[str, int]` (keyed by a lineage's first id) and `repeat_handoffs: tuple[str, ...]`.
+- `soundings/eval/catalog_verify.py`: `Graded.lineage_interruptions: int`; the JSON row and the text line print it (`lineage=`).
+- Config: no new key. The staleness limit is `plan_watch.rehail_interval_s` and the speed tolerance `reacquire.speed_tol_mps` (both config/matcher.yaml, existing).
 
 ## Files expected
 - `soundings/runner.py`, `soundings/eval/catalog_verify.py`
