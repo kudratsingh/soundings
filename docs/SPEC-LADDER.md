@@ -30,6 +30,8 @@ There is no state for interdiction. The kinetic denylist (`config/denylist.txt`:
 
 `contact_detected, probe_result, posterior_updated, stop_rule_fired(outcome), standing_order_check(result), approval(granted|denied|timeout), contact_departed, contact_persisted(interval), error`.
 
+Added 2026-10-16 (DECISIONS.md 23:05): `timer(limit)`, `scope_exceeded`, `handoff_complete` name the events behind the HOLDING → AWAITING_APPROVAL and HANDED_OFF → WATCH_AFTER_HANDOFF rows.
+
 ## 3. Transition table (exhaustive; anything else is impossible)
 
 | from | event | guard | to |

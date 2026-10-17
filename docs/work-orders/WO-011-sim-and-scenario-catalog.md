@@ -114,3 +114,8 @@ watch (the sim feeds the evidence that watch reads; no rung logic here).
 
 ## Done
 PR: · Merged commit: · Test summary: · STATE.md updated:
+
+## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
+- Prefix stability: `run_scenario(scenario, seed, ticks=N)` must reproduce the first `duration_ticks` ticks byte for byte when `N > duration_ticks` (derive per-tick RNG streams from `(seed, tick)`, or pre-draw per tick). Runner v3 (WO-043) extends the sim tail past `duration_ticks`. Exit test: hash of the first 600 ticks equal for N=600 and N=900 on S05 seed 11.
+- `run_scenario(..., likelihoods: LikelihoodSpec | None = None)`: when given, sample acoustic features from that table instead of config/likelihoods.yaml (WO-051's mis-specified eval passes a perturbed table). Default `None` keeps output identical.
+- S05 geometry: place the start so that `time_to_nearest_critical_asset` is below 300 s by about tick 60–120 at 1.0 m/s, so the literal SPEC-LADDER §3 table yields HOLDING under signed standing orders (WO-033/041 verify).
