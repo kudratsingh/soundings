@@ -1,0 +1,8 @@
+# Separation advisories (WO-083). STRESS-TEST VALUES, not operational guidance.
+# Soundings proposes a slow advisory for a job's basin when a surface vessel's closest
+# point of approach (CPA) to an in-water filed job is under `separation_m` and the time
+# to CPA lies strictly inside (0, `advisory_window_s`). The proposal goes through the
+# standing-orders guard like any other slow; the vessel operator accepts or ignores it.
+# Soundings plans no route and gives no vessel any instruction.
+separation_m: 150
+advisory_window_s: 600
