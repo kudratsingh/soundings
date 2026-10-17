@@ -1,12 +1,12 @@
 # STATE — read this first after CLAUDE.md
 
-Last updated: 2026-10-17 02:05 PT (Phases 0–1 complete; Phase 2 two-thirds; Phases 3–5 started)
+Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; WO-041 merged; WO-022/030/050 in progress)
 
 ## Where we are
 - **Phase 0 complete** (scaffold `25e7dbb`). **Phase 1 complete**: WO-010 schemas `6d7fd6c` (#1), WO-011 sim + catalog `32db5a7` (#3), WO-012 evidence table + pattern of life `26cea7d` (#7). `main` CI green, 809 tests, `make check` clean.
 - **Phase 2**: WO-020 registry `ff04e56` (#4) and WO-021 challenge-response `fcb8761` (#5) merged; WO-022 matcher + ask rung (runner v1) in progress.
 - **Phase 3**: WO-030 posterior in progress; WO-031 → 032 → 033 queued behind it and WO-022.
-- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) merged; WO-041 guards + standing orders in progress; WO-042/043 queued.
+- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) and WO-041 guards + signed standing orders `1848d92` (#9) merged; WO-042/043 queued.
 - **Phase 5**: WO-050 baselines in progress; WO-051 queued. **Phase 6**: WO-060/061/062 queued.
 - All work orders WO-010..WO-062 are on `main` with coordinator addenda; rulings in `docs/log/DECISIONS.md`. Zero paid runs.
 - Lens declared at submission: Crisis Mitigation (Track 01 Marine, NULL Labs).
@@ -31,7 +31,7 @@ Last updated: 2026-10-17 02:05 PT (Phases 0–1 complete; Phase 2 two-thirds; Ph
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
-| 041 | guards + standing orders | PR open, auto-merge on green CI | wo/041-guards-standing-orders | [#9](https://github.com/kudratsingh/soundings/pull/9) | squash commit on main (see PR) | 950 passed after rebase (141 WO-041: guards 95, standing orders 14, approval 22, integration 10) |
+| 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
 | 050 | baselines | pending | wo/050-baselines | | | |

@@ -168,4 +168,4 @@ PR: [#7](https://github.com/kudratsingh/soundings/pull/7) · Merged commit: squa
   - `features.pol_observation(track, harbor, *, hour_of_day)` gives the section 4 vector that pol.py builds the month from.
   - `PolTable.anomaly(zone, hour, weekday, observed)` falls back to the pooled `*` cell when the weekday cell has fewer than 8 characterized contacts.
   - `PolCell` also carries `n_characterized`.
-- Interpretations and deviations: see DECISIONS.md 2026-10-16 22:29 (noise-robust kinematics) and 2026-10-17 00:05 (pattern-of-life details, and the S05 check at tick 180). No cut-line item was used.
+- Interpretations and deviations: see DECISIONS.md 2026-10-16 22:29 (noise-robust kinematics) and 2026-10-16 23:10 (pattern-of-life details, and the S05 check at tick 180). No cut-line item was used.
