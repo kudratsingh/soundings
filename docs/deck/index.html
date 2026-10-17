@@ -140,6 +140,20 @@ td.lives { color: var(--accent-ink); }
 ul.tight { margin: 0; padding-left: 28px; }
 ul.tight li { margin: 6px 0; }
 
+/* WO-089 begin: physics cards (slide 10) */
+.slide[data-slide="honesty"] { gap: 24px; padding-top: 80px; }
+.slide[data-slide="honesty"] .row .panel { padding: 22px 28px; font-size: 22px; }
+.slide[data-slide="honesty"] .row .panel h3 { font-size: 26px; }
+.panel.physics { padding: 20px 26px; display: flex; flex-direction: column; gap: 12px; font-size: 22px; }
+.pcards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+.pcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.pcard h4 { margin: 0 0 6px; font-size: 20px; color: var(--accent-ink); }
+.pcard .eq { display: block; font-size: 16px; line-height: 1.3; margin-bottom: 6px; overflow-wrap: anywhere; }
+.pparams { list-style: none; margin: 0; padding: 0; font-size: 15px; line-height: 1.35; color: var(--muted); }
+.pparams .num { color: var(--fg); }
+.pcards .legacy { grid-column: 1 / -1; }
+/* WO-089 end */
+
 /* print: one slide per 1920x1080 page */
 @page { size: 1920px 1080px; margin: 0; }
 @media print {
@@ -279,9 +293,15 @@ ul.tight li { margin: 6px 0; }
 <section class="slide" data-slide="honesty">
   <div class="kicker">Honesty and responsible use</div>
   <h2>What this is, and what it is not</h2>
+  <!-- WO-089 begin: the physics cards replace the one-line detection disclaimer -->
+  <div class="panel physics">
+    <p><span class="label-estimate">simulated</span> Detection is simulated: one card per model, every value a <span class="label-estimate">demo value</span> with its source in config/physics.yaml.</p>
+    <div class="pcards"><p class="legacy">Detection is simulated for this demonstration: range falloff, noise, track gaps, biologic false alarms.</p></div>
+    <p class="small muted">What we do not model: <span class="src text" data-src="file:soundings/physics.py#model_cards.not_modeled">hydrodynamics, beam patterns, multipath, bottom type</span>.</p>
+  </div>
+  <!-- WO-089 end -->
   <div class="row">
     <div class="panel col">
-      <p><span class="label-estimate">simulated</span> Detection is simulated for this demonstration: range falloff, noise, track gaps, biologic false alarms.</p>
       <p><span class="label-estimate">stress-test</span> Probabilities are stress-test estimates from a declared, visible catalog, not operational forecasts.</p>
       <p><span class="label-fact">scope</span> The work stops at the handoff. Physically stopping a vehicle is out of scope by the sponsor's brief.</p>
       <p class="small muted"><span class="num pending" data-src="report:llm.sentence">[eval pending]</span></p>
