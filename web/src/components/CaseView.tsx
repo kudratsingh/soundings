@@ -88,7 +88,7 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
           {step.probes && step.probes.length > 0 && (
             <ul className="probes">
               {step.probes.slice(-6).map((p) => (
-                <li key={`${p.probe_id}@${p.tick}`} className="probe-card" data-testid="probe-card">
+                <li key={`${p.probe_id}@${p.tick}`} className="probe-card" data-testid="probe-card" data-source={p.source ?? ''}>
                   <strong>{p.probe_id.replaceAll('_', ' ')}</strong> <span className="label num">tick {p.tick}</span>
                   <span className="label"> · {p.why} · {p.rows.length} rows</span>
                 </li>
@@ -96,7 +96,7 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
             </ul>
           )}
           {step.posterior ? (
-            <div className="posterior" data-testid="posterior">
+            <div className="posterior" data-testid="posterior" data-threat-mass={step.posterior.threat_mass}>
               {Object.entries(step.posterior.probs)
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 2)
@@ -105,6 +105,9 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
                     {h.replaceAll('_', ' ')} {(p * 100).toFixed(1)}% <span className="label">{step.posterior?.label}</span>
                   </div>
                 ))}
+              <div className="num label" data-testid="posterior-mass">
+                threat mass {step.posterior.threat_mass.toFixed(2)} · benign mass {step.posterior.benign_mass.toFixed(2)} · {step.posterior.label}
+              </div>
               <div className="mass" aria-label="threat and benign mass">
                 <span className="threat" style={{ transform: `scaleX(${step.posterior.threat_mass})` }} />
                 <span className="benign" style={{ transform: `scaleX(${step.posterior.benign_mass})` }} />
@@ -112,11 +115,22 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
             </div>
           ) : (
             <p className="label" data-testid="posterior-placeholder">
-              Hypotheses (stress-test estimate) stream with the investigation runner (WO-060 part B).
+              Hypotheses (stress-test estimate) appear when the first probe lands.
             </p>
           )}
         </div>
       )}
+      {/* --- WO-060B begin: one line per ladder action --- */}
+      {reached && step.kind === 'ladder' && step.ladderLines && step.ladderLines.length > 0 && (
+        <ul className="ladder-lines">
+          {step.ladderLines.map((l, i) => (
+            <li key={`${l.tick}-${i}`} className={`ladder-line tone-${l.tone}`} data-testid="ladder-line">
+              <span className="label num">t {Math.round(l.tick * tickS)} s</span> {l.text}
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* --- WO-060B end --- */}
       {reached && step.kind === 'ladder' && step.approval && (
         <p className="label">
           Approval {step.approval.request.request_id}: {step.approval.request.action_label} ·{' '}
@@ -125,7 +139,7 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
       )}
       {reached && (step.kind === 'handoff' || step.kind === 'after') && step.sitrep && (
         <button type="button" className="link" onClick={onOpenSitrep}>
-          {step.sitrep.kind === 'lost_vehicle' ? 'Open the notice' : `Open SITREP v${step.sitrep.version}`} ({step.sitrep.writer})
+          {step.sitrep.kind === 'lost_vehicle' ? 'Open the notice' : `Open SITREP v${step.sitrep.version}${step.sitrep.status ? ` ${step.sitrep.status}` : ''}`} ({step.sitrep.writer})
         </button>
       )}
       {reached && step.slots.length > 0 && (

@@ -48,7 +48,13 @@ class RunStartedPayload(_Model):
     toggles: list[ToggleName] = Field(default_factory=list)
     source: Literal["batch", "stepped"]
     runner: str
-    """Which runner produced the stream (``v1`` in Part A)."""
+    """Which runner produced the stream (``v1`` in Part A, ``v3`` for the WO-060B source)."""
+    # --- WO-060B begin: run_started extras ---
+    model_path: Literal["off", "replay", "live"] = "off"
+    """Which model client the run was given: ``off`` (deterministic planner and template
+    SITREP), ``replay`` (fixtures with fallbacks) or ``live`` (stage live mode, WO-087)."""
+    orders: Literal["signed", "unsigned"] = "signed"
+    # --- WO-060B end ---
 
 
 class TickContact(_Model):
@@ -122,7 +128,9 @@ class ApprovalRequestPayload(_Model):
 
 class ApprovalResultPayload(_Model):
     request_id: str
-    outcome: Literal["granted", "timeout", "backup_paged"]
+    # --- WO-060B begin: denied (a person's no through the approval UI, runner v3) ---
+    outcome: Literal["granted", "denied", "timeout", "backup_paged"]
+    # --- WO-060B end ---
     token_hash: str | None = None
 
 
@@ -136,6 +144,14 @@ class SitrepPayload(_Model):
     kind: Literal["lost_vehicle", "sitrep"]
     notice: LostVehicleNotice | None = None
     sitrep: dict[str, Any] | None = None
+    # --- WO-060B begin: runner v3 SITREP packets ---
+    status: Literal["draft", "final", "update"] | None = None
+    """WO-042 ``SitrepStatus``: draft at AWAITING_APPROVAL, final at HANDED_OFF, update while
+    watching after the handoff. ``None`` for the LOST_VEHICLE notice."""
+    markdown: str | None = None
+    path: str | None = None
+    """WO-042 ``SitrepPath`` (template, fixture-replay, fallback-after-rejection, live)."""
+    # --- WO-060B end ---
 
 
 class RunFinishedPayload(_Model):
@@ -147,6 +163,65 @@ class RunFinishedPayload(_Model):
 
 class ErrorPayload(_Model):
     message: str
+
+
+# --- WO-060B begin: investigation, recommendation and ladder-action payloads ---
+class InvestigationStepPayload(_Model):
+    """One planner choice of an investigation (runner v2 inside runner v3).
+
+    ``source`` is where the choice came from: ``deterministic`` (no model), ``llm`` (a
+    model reply that passed the guard) or ``fallback`` (the model path was refused or
+    missed, so the deterministic choice stands; ``fallback_reason`` says why). The event is
+    sent at ``landed_tick``, after the rows the probe produced (``row_ids``)."""
+
+    contact_id: str
+    case_id: str
+    probe_id: str | None
+    source: Literal["deterministic", "llm", "fallback"]
+    fallback_reason: str | None = None
+    why: str | None = None
+    reason: str
+    sent_tick: Annotated[int, Field(ge=0)]
+    landed_tick: Annotated[int, Field(ge=0)]
+    row_ids: list[str] = Field(default_factory=list)
+
+
+class RecommendationPayload(_Model):
+    """The frozen end of an investigation (WO-033 ``Recommendation``). The rung is computed
+    from the outcome by the investigation machine; nothing downstream can edit it."""
+
+    contact_id: str
+    case_id: str
+    outcome: str
+    recommended_rung: Rung
+    stop_clause: str
+    threat_mass: float
+    benign_mass: float
+    top: Hypothesis
+    uncertain: bool
+    question_for_human: str | None = None
+    evidence_row_ids: list[str] = Field(default_factory=list)
+    label: Literal["stress-test estimate"] = POSTERIOR_LABEL
+
+
+class LadderActionPayload(_Model):
+    """One action the ladder executed (WO-043 driver), with the clause it rests on.
+
+    ``clause`` is ``standing_orders.<rung>.<action>`` for an advisory or a hold (the
+    standing orders' signer in ``signed_by``), ``approval.<action>`` for an approved action.
+    ``timeout_s``/``expires_t_s`` are set for an approval request or a backup page."""
+
+    contact_id: str
+    state: LadderState
+    action: str
+    scope: dict[str, Any] | None = None
+    clause: str | None = None
+    signed_by: str | None = None
+    timeout_s: float | None = None
+    expires_t_s: float | None = None
+
+
+# --- WO-060B end ---
 
 
 # --- WO-089 begin: live sensor range rings ---
@@ -267,6 +342,23 @@ class ErrorEvent(EventEnvelope):
     payload: ErrorPayload
 
 
+# --- WO-060B begin ---
+class InvestigationStepEvent(EventEnvelope):
+    type: Literal["investigation_step"] = "investigation_step"
+    payload: InvestigationStepPayload
+
+
+class RecommendationEvent(EventEnvelope):
+    type: Literal["recommendation"] = "recommendation"
+    payload: RecommendationPayload
+
+
+class LadderActionEvent(EventEnvelope):
+    type: Literal["ladder_action"] = "ladder_action"
+    payload: LadderActionPayload
+
+
+# --- WO-060B end ---
 # --- WO-089 begin ---
 class SensorRangesEvent(EventEnvelope):
     type: Literal["sensor_ranges"] = "sensor_ranges"
@@ -335,6 +427,11 @@ StreamEvent = Annotated[
     | RunFinished
     | ErrorEvent
     | SensorRangesEvent  # WO-089
+    # --- WO-060B begin ---
+    | InvestigationStepEvent
+    | RecommendationEvent
+    | LadderActionEvent
+    # --- WO-060B end ---
     # --- WO-088 begin ---
     | ResponderEvent
     # --- WO-088 end ---
@@ -357,6 +454,11 @@ EVENT_TYPES: tuple[str, ...] = (
     "run_finished",
     "error",
     "sensor_ranges",  # WO-089
+    # --- WO-060B begin ---
+    "investigation_step",
+    "recommendation",
+    "ladder_action",
+    # --- WO-060B end ---
     # --- WO-088 begin ---
     "responder",
     # --- WO-088 end ---
@@ -397,6 +499,12 @@ __all__ = [
     "ErrorEvent",
     "EventEnvelope",
     "EvidenceRowEvent",
+    "InvestigationStepEvent",  # WO-060B
+    "InvestigationStepPayload",  # WO-060B
+    "LadderActionEvent",  # WO-060B
+    "LadderActionPayload",  # WO-060B
+    "RecommendationEvent",  # WO-060B
+    "RecommendationPayload",  # WO-060B
     "PosteriorEvent",
     "RunFinished",
     "RunStarted",
