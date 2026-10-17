@@ -115,7 +115,12 @@ slow, hold (standing orders), hand to a person (approval rows), ask (the ceiling
 - §3: thresholds come only from config (`test_criteria_edges`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: [#9](https://github.com/kudratsingh/soundings/pull/9) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, 950 passed after rebase on main (141 new: test_guards 95 incl. test_matrix_from_config 68, test_standing_orders 14, test_approval 22, test_guards_integration 10) · STATE.md updated: yes
+
+- Every exit test passes with `MODEL_MODE=replay`; `uv run python -m soundings.ladder.sign --check` exits 0 on the committed, signed `config/standing_orders.yaml` (sha256 `0df7260f...a70`, tamper-evident, not authenticated; `standing_orders.SIGNATURE_LABEL` is the About-text wording).
+- Determinism: the signed S05-shaped stream printed under `PYTHONHASHSEED=0` and `=1` diffs empty (13 lines of checkpoint hashes and guard `inputs_hash`es, both sha256 `3e752c87...`).
+- Choices beyond the text (DECISIONS.md, WO-041 row): reason `invalid`; never cell overrides the YAML's `person_approves` for the three never actions; `boundary_decision(action, inputs, table) -> BoundaryDecision`; `scope_exceeded` BLOCK = exceeded (`exceeds_scope` bool); `GuardInputs` adds `contact_id`, `nearest_asset_id`; token `approver` is `primary`/`backup`.
+- Cut line: nothing dropped.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - The agent may run the sign CLI and commit the real sha256 signature for 'Watch Commander (demo)'. The check is tamper-evident, not authenticated; label it so in the About text; keyed HMAC/PKI is a production step, out of scope.
