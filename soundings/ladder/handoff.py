@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
-from soundings.canonical import round6
+from soundings.canonical import round6, stable_hash
 from soundings.clock import TickClock
 from soundings.investigation.evidence import EvidenceError, EvidenceTable
 from soundings.investigation.posterior import (
@@ -55,7 +55,15 @@ from soundings.schemas.enums import Rung
 from soundings.schemas.evidence import EvidenceRow
 
 from .actions import LadderAction
-from .audit import AuditKind, AuditLog, AuditSink, LlmCallPayload, SitrepPayload
+from .audit import (
+    AuditEntry,
+    AuditKind,
+    AuditLog,
+    AuditSink,
+    GuardInputsLog,
+    LlmCallPayload,
+    SitrepPayload,
+)
 from .checkpoint import LadderCheckpoint
 from .sitrep import (
     ActionLine,
@@ -64,6 +72,7 @@ from .sitrep import (
     SitrepLine,
     SitrepStatus,
     render_markdown,
+    sitrep_inputs,
 )
 from .sitrep_port import UNREACHABLE
 from .sitrep_port import SitrepInputs as PortInputs
@@ -157,10 +166,15 @@ class HandoffService:
         self.violations_path = Path(violations_path)
         self.writer_mode: WriterMode = writer_mode
         self.channel: DeliveryChannel = channel
-        self.sink = None if audit is None else AuditSink(audit, run_id, clock)
+        # --- WO-042 audit semantics ---
+        # Pass ``guard_log.record`` as a ``BoundaryGuards.observer`` for full guard rows.
+        self.guard_log = GuardInputsLog()
+        self.sink = None if audit is None else AuditSink(audit, run_id, clock, self.guard_log)
+        # --- WO-042 audit semantics end ---
         self._posterior = posterior
         self._contacts: dict[str, _ContactLog] = {}
         self.packets: list[HandoffPacket] = []
+        self._issued: dict[str, HandoffPacket] = {}  # WO-042 audit semantics
         self.outbox: dict[DeliveryChannel, list[HandoffPacket]] = {"ui": [], "sms_sim": []}
 
     # --- LadderListener -------------------------------------------------------------------
@@ -250,6 +264,15 @@ class HandoffService:
         cid = inputs.contact_id
         log = self._log(cid)
         t = round6(float(t_s))
+        # --- WO-042 audit semantics ---
+        # SITREP issuance is keyed on its inputs: re-delivering the same inputs returns the
+        # packet already issued (no second model call, row or delivery). The packet is
+        # delivered only after its audit rows are written; a failed write delivers nothing.
+        key = issuance_key(inputs, notes)
+        issued = self._issued.get(key)
+        if issued is not None:
+            return issued
+        # --- WO-042 audit semantics end ---
         outcome: SitrepOutcome
         if (
             inputs.status is SitrepStatus.FINAL
@@ -268,7 +291,7 @@ class HandoffService:
             extra = tuple(SitrepLine(text=n, evidence_ids=cite) for n in notes)
             sitrep = sitrep.model_copy(update={"contact": sitrep.contact + extra})
         markdown = render_markdown(sitrep)
-        seq = self._audit(outcome, sitrep, markdown, t)
+        seq = self._audit(outcome, sitrep, markdown, t, key)
         packet = HandoffPacket(
             contact_id=cid,
             status=sitrep.status,
@@ -286,44 +309,42 @@ class HandoffService:
         )
         self.packets.append(packet)
         self.outbox[self.channel].append(packet)
+        self._issued[key] = packet  # WO-042 audit semantics
         return packet
 
+    # --- WO-042 audit semantics ---
     def _audit(
-        self, outcome: SitrepOutcome, sitrep: Sitrep, markdown: str, t_s: float
+        self, outcome: SitrepOutcome, sitrep: Sitrep, markdown: str, t_s: float, key: str
     ) -> int | None:
+        """The model-call row (when the writer called) and the SITREP row, as one batch."""
         if self.audit is None:
             return None
         cid = sitrep.contact_id
+        entries: list[AuditEntry] = []
         if outcome.llm_outcome is not None and outcome.fixture_key is not None:
-            self.audit.append(
-                AuditKind.LLM_CALL,
-                LlmCallPayload(
-                    role=ROLE_SITREP_WRITER,
-                    fixture_key=outcome.fixture_key,
-                    outcome=outcome.llm_outcome,
-                    violation_reason=None if outcome.violation is None else outcome.violation.value,
-                ),
-                run_id=self.run_id,
-                t_s=t_s,
-                contact_id=cid,
-            )
-        row = self.audit.append(
-            AuditKind.SITREP,
-            SitrepPayload(
-                markdown_sha256=_sha256(markdown),
-                writer=sitrep.writer.value,
-                status=sitrep.status.value,
-                recommended_rung=sitrep.recommended_rung,
-                path=outcome.path.value,
+            call = LlmCallPayload(
+                role=ROLE_SITREP_WRITER,
                 fixture_key=outcome.fixture_key,
+                outcome=outcome.llm_outcome,
                 violation_reason=None if outcome.violation is None else outcome.violation.value,
-                channel=self.channel,
-            ),
-            run_id=self.run_id,
-            t_s=t_s,
-            contact_id=cid,
+            )
+            call_key = f"{ROLE_SITREP_WRITER}:{cid}:{outcome.fixture_key}"
+            entries.append(AuditEntry(AuditKind.LLM_CALL, call, cid, call_key))
+        row = SitrepPayload(
+            markdown_sha256=_sha256(markdown),
+            writer=sitrep.writer.value,
+            status=sitrep.status.value,
+            recommended_rung=sitrep.recommended_rung,
+            path=outcome.path.value,
+            fixture_key=outcome.fixture_key,
+            violation_reason=None if outcome.violation is None else outcome.violation.value,
+            channel=self.channel,
         )
-        return row.seq
+        entries.append(AuditEntry(AuditKind.SITREP, row, cid, key))
+        written = self.audit.append_many(entries, run_id=self.run_id, t_s=t_s)
+        return written[-1].seq
+
+    # --- WO-042 audit semantics end ---
 
     # --- queries ----------------------------------------------------------------------------
 
@@ -336,6 +357,16 @@ class HandoffService:
 
     def _log(self, contact_id: str) -> _ContactLog:
         return self._contacts.setdefault(contact_id, _ContactLog())
+
+
+# --- WO-042 audit semantics ---
+def issuance_key(inputs: SitrepInputs, notes: Sequence[str] = ()) -> str:
+    """The idempotency key of one SITREP issuance: contact, status and a hash of its inputs."""
+    digest = stable_hash([sitrep_inputs(inputs), list(notes)])
+    return f"{inputs.contact_id}:{inputs.status.value}:{digest}"
+
+
+# --- WO-042 audit semantics end ---
 
 
 def _sha256(text: str) -> str:
@@ -365,4 +396,5 @@ __all__ = [
     "PosteriorFn",
     "WriterMode",
     "evidence_table",
+    "issuance_key",
 ]
