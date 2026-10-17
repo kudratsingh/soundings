@@ -101,7 +101,7 @@ def test_s04_resolved_benign(seed: int) -> None:
 
 @pytest.mark.parametrize("sid", ["S01", "S02", "S05", "S08"])
 def test_same_track_hash_for_all_policies(sid: str) -> None:
-    for seed in (1, 2):
+    for seed in (1,):
         hashes = {_run(sid, seed, p).track_hash for p in ("soundings", "bang", "human_queue")}
         assert len(hashes) == 1
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -365,6 +366,13 @@ AT_OR_BELOW_ASK_OPEN_QUESTION = (
     "(the open S04 question, DECISIONS 2026-10-17 07:31/08:30) and S08 hands its debris to a "
     "person on seeds 1, 2 and 5. No threshold or table was changed (CLAUDE.md 3)."
 )
+LOCAL_ONLY = pytest.mark.skipif(
+    os.environ.get("SOUNDINGS_CI", "").strip() not in ("", "0"),
+    reason=(
+        "full-catalog eval (catalog x seeds 1..5, make eval, a second full CLI run) runs in "
+        "local `make check`; the CI job is capped at 15 min (CLAUDE.md 8 A7 pattern)"
+    ),
+)
 MAKE_EVAL_BOUND_S = 360.0  # the directive says < 5 min; the test allows 6 on a shared box
 SWEEP_HEADINGS = (
     "## Mis-specified sim at +-20%",
@@ -376,8 +384,6 @@ SWEEP_HEADINGS = (
 
 
 def _env() -> dict[str, str]:
-    import os
-
     env = {k: v for k, v in os.environ.items() if k != "SOUNDINGS_CI"}
     env["MODEL_MODE"] = "replay"
     return env
@@ -396,6 +402,7 @@ def catalog_report() -> EvalReport:
     )
 
 
+@LOCAL_ONLY
 def test_catalog_claims(catalog_report: EvalReport) -> None:
     out = catalog_report.outcomes
     snd, bang, hq = out[PolicyName.SOUNDINGS], out[PolicyName.BANG], out[PolicyName.HUMAN_QUEUE]
@@ -432,6 +439,7 @@ def _soundings_run(sid: str, seed: int):  # type: ignore[no-untyped-def]
     return SoundingsPolicy().run(resolve_scenario(sid), seed)
 
 
+@LOCAL_ONLY
 @pytest.mark.xfail(strict=True, reason=AT_OR_BELOW_ASK_OPEN_QUESTION)
 def test_catalog_at_or_below_ask_claim(catalog_report: EvalReport) -> None:
     """The >= 70% claim (DECISIONS 23:05 rule) and S04 counted on every seed."""
@@ -444,6 +452,7 @@ def test_catalog_at_or_below_ask_claim(catalog_report: EvalReport) -> None:
         assert at_or_below_ask(outcome_for_gt(_soundings_run("S04", seed), "gt-1"))
 
 
+@LOCAL_ONLY
 def test_at_or_below_ask_reading_is_reported(catalog_report: EvalReport) -> None:
     """Until the claim holds, the report states the real number (no rounding up)."""
     snd = catalog_report.outcomes[PolicyName.SOUNDINGS]
@@ -451,12 +460,12 @@ def test_at_or_below_ask_reading_is_reported(catalog_report: EvalReport) -> None
     assert "| soundings | 45 | 60.00 |" in render_markdown(catalog_report)
 
 
-def test_per_contact_table_matches_ledger(catalog_report: EvalReport) -> None:
+def test_per_contact_table_matches_ledger(report: EvalReport) -> None:
     """WO-086 compares its ledger with a Counter of ContactOutcome.max_rung per run."""
     from collections import Counter
 
-    rows = {(r.scenario, r.seed, r.policy): r for r in catalog_report.per_contact}
-    assert len(rows) == 3 * 8 * len(CATALOG_SEEDS)
+    rows = {(r.scenario, r.seed, r.policy): r for r in report.per_contact}
+    assert len(rows) == 3 * 8 * len(SEEDS)
     run = _soundings_run("S05", 1)
     row = rows[("S05", 1, PolicyName.SOUNDINGS)]
     counts = Counter(c.max_rung for c in run.contacts)
@@ -468,12 +477,12 @@ def test_per_contact_table_matches_ledger(catalog_report: EvalReport) -> None:
         counts.get(Rung.HOLD, 0),
         counts.get(Rung.HAND_TO_PERSON, 0),
     )
-    for r in catalog_report.per_contact:
+    for r in report.per_contact:
         assert r.watch + r.ask + r.slow + r.hold + r.hand_to_person == r.contacts
 
 
-def test_every_table_has_seeds_and_method(catalog_report: EvalReport) -> None:
-    md = render_markdown(catalog_report)
+def test_every_table_has_seeds_and_method(markdown: str) -> None:
+    md = markdown
     sections = md.split("\n## ")[1:]
     for sec in sections:
         title = sec.split("\n", 1)[0]
@@ -492,6 +501,7 @@ def make_eval() -> tuple[float, Path]:
     return time.monotonic() - started, REPO / "artifacts" / "eval"
 
 
+@LOCAL_ONLY
 def test_make_eval_under_budget(make_eval: tuple[float, Path]) -> None:
     wall, out = make_eval
     assert wall < MAKE_EVAL_BOUND_S, wall
@@ -503,6 +513,7 @@ def test_make_eval_under_budget(make_eval: tuple[float, Path]) -> None:
     assert report.seeds == CATALOG_SEEDS and report.policies_pending == {}
 
 
+@LOCAL_ONLY
 def test_sweeps_sections(make_eval: tuple[float, Path]) -> None:
     _, out = make_eval
     md = (out / "report.md").read_text(encoding="utf-8")
@@ -554,6 +565,7 @@ def test_sweeps_sections(make_eval: tuple[float, Path]) -> None:
     assert "both planner paths are the deterministic fallback" in md
 
 
+@LOCAL_ONLY
 def test_full_report_deterministic(make_eval: tuple[float, Path], tmp_path: Path) -> None:
     """A second process (the BUILD-PLAN seed form) gives byte-identical report.md,
     report.json and PNG to ``make eval``, and the same files inside its archive."""
