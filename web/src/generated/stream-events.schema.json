@@ -804,6 +804,177 @@
       "title": "ProbeId",
       "type": "string"
     },
+    "ResponderEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ResponderPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "responder",
+          "default": "responder",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "ResponderEvent",
+      "type": "object"
+    },
+    "ResponderPayload": {
+      "additionalProperties": false,
+      "description": "The harbor's responder at this tick (CLAUDE.md section 8 A2): a mobile probe that is\ndispatched to look, holds station at standoff and returns to dock. Display only: no\nfield here can dispatch, position or recall it.",
+      "properties": {
+        "battery_capacity_min": {
+          "title": "Battery Capacity Min",
+          "type": "number"
+        },
+        "battery_min": {
+          "title": "Battery Min",
+          "type": "number"
+        },
+        "dispatched": {
+          "default": false,
+          "title": "Dispatched",
+          "type": "boolean"
+        },
+        "distance_to_target_m": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distance To Target M"
+        },
+        "heading_deg": {
+          "title": "Heading Deg",
+          "type": "number"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "lat": {
+          "title": "Lat",
+          "type": "number"
+        },
+        "lon": {
+          "title": "Lon",
+          "type": "number"
+        },
+        "speed_mps": {
+          "title": "Speed Mps",
+          "type": "number"
+        },
+        "standoff_m": {
+          "title": "Standoff M",
+          "type": "number"
+        },
+        "state": {
+          "enum": [
+            "DOCKED",
+            "TRANSIT",
+            "ON_STATION",
+            "RETURNING"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "target_contact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Contact Id"
+        },
+        "trail": {
+          "items": {
+            "$ref": "#/$defs/ResponderTrailPoint"
+          },
+          "title": "Trail",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "lat",
+        "lon",
+        "heading_deg",
+        "speed_mps",
+        "battery_min",
+        "battery_capacity_min",
+        "standoff_m",
+        "trail"
+      ],
+      "title": "ResponderPayload",
+      "type": "object"
+    },
+    "ResponderTrailPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "lat": {
+          "title": "Lat",
+          "type": "number"
+        },
+        "lon": {
+          "title": "Lon",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tick",
+        "lat",
+        "lon"
+      ],
+      "title": "ResponderTrailPoint",
+      "type": "object"
+    },
     "RunFinished": {
       "additionalProperties": false,
       "properties": {
@@ -1599,6 +1770,7 @@
       "error": "#/$defs/ErrorEvent",
       "evidence_row": "#/$defs/EvidenceRowEvent",
       "posterior": "#/$defs/PosteriorEvent",
+      "responder": "#/$defs/ResponderEvent",
       "run_finished": "#/$defs/RunFinished",
       "run_started": "#/$defs/RunStarted",
       "rung": "#/$defs/RungEvent",
@@ -1645,6 +1817,9 @@
     },
     {
       "$ref": "#/$defs/SensorRangesEvent"
+    },
+    {
+      "$ref": "#/$defs/ResponderEvent"
     }
   ],
   "title": "SoundingsStreamEvent",

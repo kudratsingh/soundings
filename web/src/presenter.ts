@@ -26,6 +26,9 @@ export interface PresenterStep {
   spotlight?: string
   pause_for_click?: boolean
   pending: string[]
+  // --- WO-088 begin ---
+  subcaption?: string
+  // --- WO-088 end ---
 }
 
 export interface PresenterScript {

@@ -23,10 +23,22 @@ import PresenterMode from './components/PresenterMode'
 import type { PhysicsInfo } from './api'
 import { fetchPhysics } from './api'
 // --- WO-089 end ---
+// --- WO-088 begin ---
+import ResponderLayer from './components/ResponderLayer'
+// --- WO-088 end ---
 
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
 const RECENT_TICKS = 30
+
+// --- WO-088 begin ---
+/** Where the contact the responder is looking at was last seen (null when not seen). */
+function responderTarget(run: ReturnType<typeof useRun>): [number, number] | null {
+  const cid = run.responder?.target_contact_id
+  const c = cid ? run.contacts[cid] : undefined
+  return c ? [c.last.lat, c.last.lon] : null
+}
+// --- WO-088 end ---
 
 function useParams() {
   return useMemo(() => {
@@ -135,6 +147,9 @@ function App() {
           selected={selected}
           onSelect={(id) => setPicked(id)}
           ranges={ranges} // WO-089
+          // --- WO-088 begin ---
+          overlay={<ResponderLayer responder={run.responder} target={responderTarget(run)} />}
+          // --- WO-088 end ---
         />
         <div className="side">
           <RungIndicator active={activeRung} livesOn={boundary?.lives_on ?? ['ask', 'hand_to_person']} />

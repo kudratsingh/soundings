@@ -17,6 +17,9 @@ import type {
   TickContact,
   TransitionPayload,
 } from './events'
+// --- WO-088 begin ---
+import type { ResponderPayload } from './events'
+// --- WO-088 end ---
 import { RUNGS } from './events'
 
 export const TRACK_POINTS = 400
@@ -59,6 +62,12 @@ export interface RunState {
   // --- WO-089 begin ---
   sensorRanges: Record<string, SensorRangeRow>
   // --- WO-089 end ---
+  // --- WO-088 begin ---
+  /** The responder at the latest tick (null when the run has none). */
+  responder: ResponderPayload | null
+  /** How many dispatches to look the stream has shown (the sound cue counts these). */
+  responderDispatches: number
+  // --- WO-088 end ---
 }
 
 export const initialRunState = (runId: string | null): RunState => ({
@@ -81,6 +90,10 @@ export const initialRunState = (runId: string | null): RunState => ({
   // --- WO-089 begin ---
   sensorRanges: {},
   // --- WO-089 end ---
+  // --- WO-088 begin ---
+  responder: null,
+  responderDispatches: 0,
+  // --- WO-088 end ---
 })
 
 /** Fold a batch of events into a new state (pure: the input state is not mutated). */
@@ -159,6 +172,12 @@ export function reduceEvents(prev: RunState, events: StreamEvent[]): RunState {
         break
       }
       // --- WO-089 end ---
+      // --- WO-088 begin ---
+      case 'responder':
+        s.responder = e.payload
+        if (e.payload.dispatched) s.responderDispatches += 1
+        break
+      // --- WO-088 end ---
     }
   }
   return s

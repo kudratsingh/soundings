@@ -121,6 +121,10 @@ class DemoStep(StrictModel):
     beats: tuple[ActionName, ...] = ()
     spotlight: StrictStr | None = None
     pause_for_click: StrictBool = False
+    # --- WO-088 begin ---
+    subcaption: FreeText | None = None
+    """A second, smaller caption line under ``caption`` (presenter mode only)."""
+    # --- WO-088 end ---
 
     @field_validator("t")
     @classmethod
