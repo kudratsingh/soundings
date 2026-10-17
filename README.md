@@ -26,7 +26,7 @@ No API key, no `.env`: every target runs with `MODEL_MODE=replay` (recorded fixt
 ## Evidence and deck
 
 - **Eval report:** `make eval` runs the scenario catalog × five seeds against two baselines (close the berth on any contact; send everything to a person) and writes [`artifacts/eval/report.md`](artifacts/eval/report.md): rung histogram, missed threats, seconds seen→handled, interruptions/hour. The file is generated, not committed; regenerate it on any clone.
-- **Pitch deck:** [`docs/deck/deck.pdf`](docs/deck/deck.pdf) · **Boundary table:** [`config/ladder.yaml`](config/ladder.yaml) · **Twist responses:** [`twists/`](twists/)
+- **Pitch deck:** [`docs/deck/index.html`](docs/deck/index.html); `make deck` rebuilds it from the eval report and exports `docs/deck/deck.pdf` (generated, not committed) · **Boundary table:** [`config/ladder.yaml`](config/ladder.yaml) · **Twist responses:** [`twists/`](twists/)
 
 ## Honesty
 
