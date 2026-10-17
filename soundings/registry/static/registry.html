@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soundings Registry</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2430; --muted: #5b6676;
+    --line: #d9dee5; --accent: #1f5f8b; --ok-bg: #e7f4ec; --ok-ink: #1d5e36;
+    --bad-bg: #fbeaea; --bad-ink: #8a1f1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --panel: #1a2029; --ink: #e4e8ee; --muted: #9aa5b4;
+      --line: #2c3542; --accent: #6fb0dd; --ok-bg: #173323; --ok-ink: #9fdcb5;
+      --bad-bg: #3a1c1c; --bad-ink: #f2b0b0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 10px; }
+  p.lede { margin: 0 0 18px; color: var(--muted); }
+  form { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+         padding: 18px; display: grid; gap: 14px;
+         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select { width: 100%; min-width: 0; font: inherit; color: var(--ink); background: var(--bg);
+                  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+  fieldset { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 6px;
+             margin: 0; padding: 10px 12px; display: grid; gap: 12px;
+             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+  .actions { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center;
+             flex-wrap: wrap; }
+  button { font: inherit; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+           border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+  button.secondary { background: transparent; color: var(--accent); padding: 4px 10px; }
+  #result { padding: 7px 12px; border-radius: 6px; min-height: 1em; }
+  #result.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  #result.bad { background: var(--bad-bg); color: var(--bad-ink); }
+  #result:empty { display: none; }
+  .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
+                border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  td code, td button { white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  footer { margin-top: 28px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Registry of planned underwater work</h1>
+  <p class="lede">File a vehicle or dive plan inside a declared security zone. The watch
+    clears contacts that match an active plan and answer the acoustic hail.</p>
+
+  <form id="plan-form" autocomplete="off">
+    <label>Zone (declared security zones only)
+      <select id="area" name="area" required></select>
+    </label>
+    <label>Plan id (optional; assigned if blank)
+      <input id="plan_id" name="plan_id" placeholder="P-20261017-001">
+    </label>
+    <label>Operator
+      <input id="operator" name="operator" required maxlength="200">
+    </label>
+    <label>Vehicle
+      <input id="vehicle" name="vehicle" required maxlength="200">
+    </label>
+    <label>Modem id
+      <input id="modem_id" name="modem_id" required placeholder="MOD-4471">
+    </label>
+    <label>Contact channel
+      <input id="contact_channel" name="contact_channel" required maxlength="200"
+             placeholder="phone or radio channel">
+    </label>
+    <label>Start
+      <input id="start_at" name="start_at" type="datetime-local" required>
+    </label>
+    <label>End
+      <input id="end_at" name="end_at" type="datetime-local" required>
+    </label>
+    <label>UTC offset
+      <input id="utc_offset" name="utc_offset" required pattern="[+-][0-9]{2}:[0-9]{2}"
+             placeholder="-07:00">
+    </label>
+    <fieldset>
+      <legend>Sim ticks (optional, for scenario runs)</legend>
+      <label>Start tick <input id="start_tick" name="start_tick" type="number" min="0"></label>
+      <label>End tick <input id="end_tick" name="end_tick" type="number" min="0"></label>
+    </fieldset>
+    <div class="actions">
+      <button type="submit" id="submit">File plan</button>
+      <div id="result" role="status" aria-live="polite"></div>
+    </div>
+  </form>
+
+  <h2>Active plans</h2>
+  <div class="table-wrap">
+    <table id="plans">
+      <thead>
+        <tr><th>Plan</th><th>Zone</th><th>Operator</th><th>Vehicle</th><th>Modem</th>
+            <th>Start</th><th>End</th><th>Ticks</th><th></th></tr>
+      </thead>
+      <tbody id="plans-body"><tr><td colspan="9">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <footer>Registry entries are retained for at most 30 days. Simplified for demonstration.</footer>
+</main>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  function browserOffset() {
+    var mins = -new Date().getTimezoneOffset();
+    var sign = mins < 0 ? "-" : "+";
+    mins = Math.abs(mins);
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return sign + pad(Math.floor(mins / 60)) + ":" + pad(mins % 60);
+  }
+
+  function withOffset(local, offset) {
+    if (!local) { return null; }
+    var base = local.length === 16 ? local + ":00" : local;
+    return base + offset;
+  }
+
+  function shortTime(iso) {
+    return iso.slice(0, 10) + " " + iso.slice(11, 16) + " " + iso.slice(19);
+  }
+
+  function intOrNull(v) { return v === "" ? null : Number(v); }
+
+  function cell(row, text) {
+    var td = document.createElement("td");
+    td.textContent = text;
+    row.appendChild(td);
+    return td;
+  }
+
+  function showResult(kind, text) {
+    var el = $("result");
+    el.className = kind;
+    el.textContent = text;
+  }
+
+  function loadZones() {
+    return fetch("/api/plans/zones").then(function (r) { return r.json(); }).then(function (zones) {
+      var sel = $("area");
+      sel.textContent = "";
+      zones.forEach(function (z) {
+        var opt = document.createElement("option");
+        opt.value = z.zone_id;
+        opt.textContent = z.name + " (" + z.zone_id + ")";
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  function loadPlans() {
+    return fetch("/api/plans?status=active").then(function (r) { return r.json(); })
+      .then(function (plans) {
+        var body = $("plans-body");
+        body.textContent = "";
+        if (!plans.length) {
+          var empty = document.createElement("tr");
+          cell(empty, "No active plans.").colSpan = 9;
+          body.appendChild(empty);
+          return;
+        }
+        plans.forEach(function (p) {
+          var tr = document.createElement("tr");
+          var idCell = cell(tr, "");
+          var code = document.createElement("code");
+          code.textContent = p.plan_id;
+          idCell.appendChild(code);
+          cell(tr, p.area);
+          cell(tr, p.operator);
+          cell(tr, p.vehicle);
+          cell(tr, p.modem_id);
+          cell(tr, shortTime(p.start_at));
+          cell(tr, shortTime(p.end_at));
+          cell(tr, p.start_tick === null ? "-" : p.start_tick + "-" + p.end_tick);
+          var actions = cell(tr, "");
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary";
+          btn.textContent = "Expire";
+          btn.addEventListener("click", function () { expirePlan(p.plan_id); });
+          actions.appendChild(btn);
+          body.appendChild(tr);
+        });
+      });
+  }
+
+  function expirePlan(planId) {
+    fetch("/api/plans/" + encodeURIComponent(planId) + "/expire", { method: "POST" })
+      .then(function (r) {
+        showResult(r.ok ? "ok" : "bad", r.ok ? "Expired " + planId + "." : "Could not expire " + planId + ".");
+        return loadPlans();
+      });
+  }
+
+  function submitPlan(ev) {
+    ev.preventDefault();
+    var offset = $("utc_offset").value.trim();
+    var payload = {
+      plan_id: $("plan_id").value.trim() || null,
+      area: $("area").value,
+      operator: $("operator").value.trim(),
+      vehicle: $("vehicle").value.trim(),
+      modem_id: $("modem_id").value.trim(),
+      contact_channel: $("contact_channel").value.trim(),
+      start_at: withOffset($("start_at").value, offset),
+      end_at: withOffset($("end_at").value, offset),
+      start_tick: intOrNull($("start_tick").value),
+      end_tick: intOrNull($("end_tick").value),
+      source: "form"
+    };
+    fetch("/api/plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().then(function (data) { return { status: r.status, data: data }; });
+    }).then(function (res) {
+      if (res.status === 201) {
+        showResult("ok", "Filed " + res.data.plan_id + " in " + res.data.area + ".");
+      } else if (res.data && res.data.reason) {
+        showResult("bad", "Rejected: " + res.data.reason + ". " + res.data.detail);
+      } else {
+        showResult("bad", "Rejected: the form has a malformed field.");
+      }
+      return loadPlans();
+    });
+  }
+
+  $("utc_offset").value = browserOffset();
+  $("plan-form").addEventListener("submit", submitPlan);
+  loadZones().then(loadPlans);
+})();
+</script>
+</body>
+</html>
