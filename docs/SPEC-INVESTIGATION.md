@@ -116,6 +116,7 @@ Every outcome produces a SITREP whose "recommended rung" is computed here, deter
 ## 8. Honesty requirements (shown in the UI)
 
 - The detection model's assumptions (range falloff, biologic false-alarm rate, track-gap rate) are listed on the About panel with the words "simulated for this demonstration."
+- From WO-089 (owner directive 2026-10-17): the About panel adds a Physics section with one card per model (detection, ambient noise, hail latency, camera visibility, responder battery). Each card shows the equation, the parameters with their sources and the label "demo value", and what we do NOT model (hydrodynamics, beam patterns, multipath, bottom type). The header keeps "simulated for this demonstration".
 - Probabilities are labeled "stress-test estimate."
 - Every SITREP has a "what we don't know" section generated from the `assumption` rows and the missing features.
 
