@@ -4,7 +4,7 @@ Two sessions, one page each. Each page starts with the one decision we are stuck
 
 Say this once at the start of each session: detection is simulated for this demonstration; every probability is a stress-test estimate from a visible table; the work stops at the handoff, and everything after it is a person's call.
 
-**Fast run for the table.** `uv run python -m soundings.demo --script docs/demo-script.yaml --pace fast` prints all seven steps in about 5 s. `make demo` runs the same steps at real-time pace. As of 06:38 PDT, steps 3, 4 and 6 end at `INVESTIGATING` (the hold and handoff need runner v3, WO-043 part B), step 5 prints a placeholder (WO-061), and step 7 prints "eval: pending WO-051". If these have not landed by 10:00, show the files listed under each step.
+**Fast run for the table.** `uv run python -m soundings.demo --script docs/demo-script.yaml --pace fast` prints all seven steps in about 5 s. `make demo` runs the same steps at real-time pace; `/?presenter=1` steps through them with Space (the 3:00 shot list, WO-062P). As of 07:15 PDT, steps 4 and 5 end at `INVESTIGATING` (the hold and handoff need runner v3, WO-043 part B), step 6 prints "action rung_ledger_eval pending WO-086", and the S02 lost-vehicle run is no longer a shot (start it from the scenario picker or `uv run python -m soundings.stream --scenario S02`). If these have not landed by 10:00, show the files listed under each step.
 
 ---
 
@@ -26,9 +26,9 @@ Say this once at the start of each session: detection is simulated for this demo
 ### What to show (about 4 min)
 | order | what | on screen |
 |---|---|---|
-| 1 | step 1 (0:00): S01, filed survey clears at ask, zero interruptions | `scenarios/S01-filed-survey-on-plan.yaml` (the plan fields for question 1) |
-| 2 | step 2 (0:30): S02, filed glider goes silent; lost-vehicle report with a search box goes to the operator, not the watch officer | `scenarios/S02-filed-vehicle-gone-silent.yaml` |
-| 3 | step 7 (4:00): catalog vs close-the-berth vs send-everything-to-a-human, shutdown-minutes and the "$0: no mentor-validated figure yet" label | `artifacts/eval/report.md` if present; otherwise `config/ladder.yaml` `costs` and `config/eval.yaml` `baselines` |
+| 1 | step 1 (0:00): S01 (stand-in for BT-01), filed survey clears at ask, zero interruptions | `scenarios/S01-filed-survey-on-plan.yaml` (the plan fields for question 1) |
+| 2 | S02 (not a shot; scenario picker): filed glider goes silent; lost-vehicle report with a search box goes to the operator, not the watch officer | `scenarios/S02-filed-vehicle-gone-silent.yaml` |
+| 3 | step 6 (2:15): catalog vs close-the-berth vs send-everything-to-a-human, shutdown-minutes and the "$0: no mentor-validated figure yet" label | `artifacts/eval/report.md` if present; otherwise `config/ladder.yaml` `costs` and `config/eval.yaml` `baselines` |
 
 **If merged by 10:00:** Busy Tuesday (WO-080, 40 filed plans) and conflict detection at filing (WO-081). Show one plan flagged for overlapping another in area, depth band and window. This is the "flight plan for the water" story, and it feeds question 1. Not on `main` as of 06:45 PDT.
 
@@ -56,9 +56,9 @@ Say this once at the start of each session: detection is simulated for this demo
 ### What to show (about 5 min)
 | order | what | on screen |
 |---|---|---|
-| 1 | step 3 (1:00): S05, Harbor Night, unfiled, closing on the fuel berth, no reply | `scenarios/S05-unfiled-closing-fuel-berth.yaml`; track plot from `make sim-plot scenario=S05` (writes `artifacts/S05.png`; repeat for S06, S07, S08 for question 1) |
-| 2 | step 4 (2:00): hold on one berth under standing orders, report handed to the officer, a person approves | `config/ladder.yaml` `criteria` (the decision above) and the report sections for question 3 |
-| 3 | step 6 (3:30): twist, network down; same decision on kinematics and hail alone | `config/standing_orders.yaml` `degraded_mode` (allowed rungs watch, ask, slow, hold within scope; never harbor closure or an external call) |
+| 1 | step 4 (1:00): S05, Harbor Night, unfiled, closing on the fuel berth, no reply | `scenarios/S05-unfiled-closing-fuel-berth.yaml`; track plot from `make sim-plot scenario=S05` (writes `artifacts/S05.png`; repeat for S06, S07, S08 for question 1) |
+| 2 | step 4 (1:00), continued: hold on one berth under standing orders, report handed to the officer, a person approves | `config/ladder.yaml` `criteria` (the decision above) and the report sections for question 3 |
+| 3 | step 5 (1:50): twist, network down and approver unreachable; same decision on kinematics and hail alone | `config/standing_orders.yaml` `degraded_mode` (allowed rungs watch, ask, slow, hold within scope; never harbor closure or an external call) |
 
 **Have open:** `config/sim.yaml` (detection: p = 0.95·exp(−(range/400 m)²), nothing beyond 800 m, position noise 5 m + 0.03·range, track gaps; `docs/SPEC-SIM.md` §2) · `config/likelihoods.yaml` (every number he may want to edit) · `scenarios/S05-unfiled-closing-fuel-berth.yaml`.
 
