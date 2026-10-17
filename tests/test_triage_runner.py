@@ -198,13 +198,17 @@ def test_triage_none_keeps_v2_api() -> None:
 
 
 def test_surge_toggle_wired_v3_source() -> None:
+    """WO-060B's stepped source (runner v3) turns triage on for a contact_surge run. A
+    small surge keeps it cheap; the batch-source test above runs bt01_with_surge(25)."""
+    from soundings.schemas.scenario import Toggle
     from soundings.stream.engine import SourceRequest
     from soundings.stream.v3 import V3Source
 
-    req = SourceRequest(scenario=bt01_with_surge(25), seed=7, run_id="run-085-surge", speed=0.0)
-    src = V3Source(req)
-    assert src.rs.v2.triage_log_hash == surge_run().triage_log_hash != ""
-    plain = V3Source(
-        SourceRequest(scenario=resolve_scenario("S05"), seed=11, run_id="r", speed=0.0)
-    )
+    s05 = resolve_scenario("S05")
+    surge = Toggle(name=ToggleName.CONTACT_SURGE, n=3, at_tick=0)
+    sc = s05.model_copy(update={"toggles": (*s05.toggles, surge)})
+    src = V3Source(SourceRequest(scenario=sc, seed=11, run_id="run-085-v3", speed=0.0))
+    direct = ScenarioRunnerV2(sc, seed=11, triage=CFG).run()
+    assert src.rs.v2.triage_log_hash == direct.triage_log_hash != ""
+    plain = V3Source(SourceRequest(scenario=s05, seed=11, run_id="run-085-v3p", speed=0.0))
     assert plain.rs.v2.triage_log_hash == ""
