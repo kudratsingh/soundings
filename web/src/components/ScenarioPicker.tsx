@@ -5,11 +5,13 @@ interface Props {
   scenarios: ScenarioInfo[]
   initial: { scenario: string; seed: string; speed: string }
   onStart(scenario: string, seed: number | null, speed: number | null): void
+  /** A run is on screen: the button restarts it (design pass). */
+  running?: boolean
 }
 
 const SPEEDS = ['1', '5', '20', '50', '100', '0']
 
-export default function ScenarioPicker({ scenarios, initial, onStart }: Props) {
+export default function ScenarioPicker({ scenarios, initial, onStart, running = false }: Props) {
   const [scenario, setScenario] = useState(initial.scenario || 'S02')
   const [seed, setSeed] = useState(initial.seed)
   const [speed, setSpeed] = useState(initial.speed || '20')
@@ -28,7 +30,7 @@ export default function ScenarioPicker({ scenarios, initial, onStart }: Props) {
           </option>
         ))}
       </select>
-      <input aria-label="seed" placeholder="seed" value={seed} onChange={(e) => setSeed(e.target.value.replace(/\D/g, ''))} size={4} />
+      <input aria-label="seed" placeholder="seed" value={seed} onChange={(e) => setSeed(e.target.value.replace(/\D/g, ''))} size={3} />
       <select aria-label="speed" value={speed} onChange={(e) => setSpeed(e.target.value)}>
         {SPEEDS.map((s) => (
           <option key={s} value={s}>
@@ -37,7 +39,7 @@ export default function ScenarioPicker({ scenarios, initial, onStart }: Props) {
         ))}
       </select>
       <button type="submit" data-testid="start-run">
-        Start
+        {running ? 'Reset' : 'Start'}
       </button>
     </form>
   )

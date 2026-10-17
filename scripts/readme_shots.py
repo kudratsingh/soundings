@@ -1,4 +1,4 @@
-"""Capture the three README screenshots from the watch-officer UI (WO-091).
+"""Capture the three README screenshots from the watch-officer UI (WO-091; WO-060 design pass).
 
 Usage (after ``make web``; no server needs to be running):
 
@@ -7,9 +7,10 @@ Usage (after ``make web``; no server needs to be running):
 Starts the API + built UI on a free loopback port, opens it in a dark-scheme headless
 chromium with every non-loopback request aborted (map tiles off, no network), and saves:
 
-1. ``01-map-evidence.png``   S05 (Harbor Night): a contact on the map and the evidence ledger
-2. ``02-rung-mid-run.png``   S01 (Tuesday): the rung indicator at ``ask`` mid-run
-3. ``03-sitrep-or-lost.png`` S02: the LOST_VEHICLE notice in the SITREP drawer
+1. ``01-case-view-s02.png``   S02 seed 3 mid-run: the NOW line, key moments, the cases list
+                              and the case view of the re-acquired lineage c-0001
+2. ``02-investigate-s05.png`` S05 seed 11: a case in INVESTIGATE, its step in view
+3. ``03-about.png``           the About panel ("simulated for this demonstration")
 
 Chromium is never downloaded: the newest cached ``chromium_headless_shell-*`` under the
 Playwright cache is reused unless ``--executable-path`` is given. No model calls.
@@ -31,7 +32,7 @@ sys.path.insert(0, str(REPO))  # run as a file from anywhere
 
 WEB_DIST = REPO / "web" / "dist"
 DEFAULT_OUT = REPO / "docs" / "screenshots"
-VIEWPORT = {"width": 1440, "height": 860}
+VIEWPORT = {"width": 1440, "height": 900}
 LOOPBACK = {"127.0.0.1", "localhost"}
 MAX_BYTES = 400 * 1024
 
@@ -100,32 +101,35 @@ def capture(base: str, out: Path, executable_path: str | None) -> None:
         browser = pw.chromium.launch(executable_path=executable_path)
 
         page = _page(browser)
-        page.goto(f"{base}/?scenario=S05&seed=11&speed=20&tiles=off")
-        page.wait_for_selector("[data-testid=contact-marker]", timeout=30_000)
+        page.goto(f"{base}/?scenario=S02&seed=3&speed=20&tiles=off")
         page.wait_for_function(
-            "/ASKING|INVESTIGATING/.test("
-            "document.querySelector('[data-testid=state-badge]')?.innerText ?? '')",
+            "Number(document.querySelector('[data-testid=rows-total]')?.dataset.rows ?? 0) > 3000",
             timeout=120_000,
         )
-        _save(page, out / "01-map-evidence.png")
+        page.click("[data-testid=case-row][data-case='c-0001']")
+        page.wait_for_timeout(600)
+        _save(page, out / "01-case-view-s02.png")
+        page.close()
+
+        page = _page(browser)
+        page.goto(f"{base}/?scenario=S05&seed=11&speed=20&tiles=off")
+        step = "[data-testid=case-view] [data-step=investigate][data-status=current]"
+        page.wait_for_selector(step, timeout=120_000)
+        page.wait_for_timeout(1_500)
+        page.locator("[data-testid=case-row]").first.click()  # pin the case so it holds still
+        page.wait_for_timeout(400)
+        page.locator(step).first.evaluate("el => el.scrollIntoView({block: 'start'})")
+        page.wait_for_timeout(400)
+        _save(page, out / "02-investigate-s05.png")
         page.close()
 
         page = _page(browser)
         page.goto(f"{base}/?scenario=S01&seed=1&speed=20&tiles=off")
-        page.wait_for_selector("[data-testid=rung-active][data-rung=ask]", timeout=60_000)
-        _save(page, out / "02-rung-mid-run.png")
-        page.close()
-
-        page = _page(browser)
-        page.goto(f"{base}/?scenario=S02&seed=3&speed=40&tiles=off")
-        page.wait_for_function(
-            "document.querySelector('[data-testid=state-badge]')?.innerText.includes('LOST_VEHICLE')",
-            timeout=120_000,
-        )
-        page.click("[data-testid=sitrep-open]")
-        page.wait_for_selector("[data-testid=sitrep-drawer]")
-        page.wait_for_timeout(500)
-        _save(page, out / "03-sitrep-or-lost.png")
+        page.wait_for_selector("[data-testid=case-row]", timeout=60_000)
+        page.click("[data-testid=about-open]")
+        page.wait_for_selector("[data-testid=about-panel]")
+        page.wait_for_timeout(400)
+        _save(page, out / "03-about.png")
         page.close()
 
         browser.close()

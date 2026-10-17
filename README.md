@@ -9,11 +9,11 @@ Soundings sits with the harbor watch officer between "seen" and "handled" when a
 
 ## The screen
 
-| S05 Harbor Night: contact on the map + evidence ledger | S01 Tuesday: rung indicator at ask, mid-run | S02: LOST_VEHICLE notice to the operator |
+| S02 mid-run: the NOW line, key moments, cases by severity, and one case's steps | S05: a case in INVESTIGATE, the steps still to come shown dim | About: "simulated for this demonstration", the boundary table |
 |---|---|---|
-| ![map and evidence ledger](docs/screenshots/01-map-evidence.png) | ![rung indicator mid-run](docs/screenshots/02-rung-mid-run.png) | ![lost-vehicle notice for S02](docs/screenshots/03-sitrep-or-lost.png) |
+| ![S02 case view mid-run with the NOW line and key moments](docs/screenshots/01-case-view-s02.png) | ![S05 case view with the INVESTIGATE step](docs/screenshots/02-investigate-s05.png) | ![the About panel](docs/screenshots/03-about.png) |
 
-Facts and assumptions are drawn in two colours. Re-capture with `uv run python scripts/readme_shots.py` (needs `make web`).
+Everything is grouped by case (one contact lineage): each step card says what happened in one sentence, with its evidence rows one click away (fact blue, assumption orange, derived grey). Re-capture with `uv run python scripts/readme_shots.py` (needs `make web`).
 
 ## Quickstart
 

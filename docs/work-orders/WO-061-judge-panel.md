@@ -230,3 +230,9 @@ Never cut an exit test.
 
 ### Notes
 - Venue Wi-Fi often isolates clients. Rehearse on a phone hotspot with the laptop joined to it, and set `SOUNDINGS_PUBLIC_BASE_URL` to the laptop's hotspot address.
+
+## Coordinator note (WO-060 design pass, 2026-10-17 10:04 PDT)
+Where things mount in the case-centric layout (`wo/060b3-design-pass`):
+- Approval card: `web/src/components/ApprovalButton.tsx` renders in the ladder rail at the bottom of the right column. While an `approval_request` is pending it shows `approval-card` (action label, scope, approver, expiry, request id); put the real `approve` button there, replacing the `approval-placeholder` span. With nothing pending it is one quiet line; keep the `approval-placeholder` text or update the part A smoke in the same PR. The case's LADDER step (`[data-step=ladder]`) shows the request and its result from the stream.
+- Judge panel: mount it in the `{/* --- WO-061 block (judge panel) --- */}` block of `App.tsx` as an overlay (fixed position, z-index under the presenter bar, above `.rail`), or as a drawer like `SitrepDrawer`; the right rail has no spare height. A top-bar button belongs beside `sitrep-open`; the bar is one line at 1440 px, so keep it short.
+- Map layers (plans, proposals) still go through `HarborMap`'s `overlay` prop; it is shared with the WO-088 responder layer, so wrap both in a fragment.
