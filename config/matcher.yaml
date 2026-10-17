@@ -15,7 +15,7 @@ plan_watch:
   rehail_interval_s: 300     # re-hail a cleared filed contact this often while its window is open
 
 reacquire:                   # SPEC-INVESTIGATION 9.9: match a returning track to a lost one
-  max_gap_s: 100             # no match after this long without a reading (DECISIONS 2026-10-17)
+  max_gap_s: 100             # no match after this long without a reading (DECISIONS 2026-10-16 23:44)
   gate_base_m: 75            # gate radius at zero gap
   gate_growth_mps: 0.15      # gate growth per second of gap
   speed_tol_mps: 0.5         # max |speed_new - speed_old| when the new speed is measured

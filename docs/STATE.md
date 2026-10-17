@@ -25,7 +25,7 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | 012 | evidence table + features | merged | wo/012-evidence-table-and-features | #7 | 26cea7d | 809 passed |
 | 020 | registry | merged | wo/020-registry | #4 | ff04e56 | 330 passed (57 registry) |
 | 021 | challenge-response | merged | wo/021-challenge-response | #5 | fcb8761 | 395 passed (65 hail) |
-| 022 | matcher + ask rung | pending | wo/022-matcher-ask-rung | | | |
+| 022 | matcher + ask rung | PR open, auto-merge on green CI | wo/022-matcher-ask-rung | [#14](https://github.com/kudratsingh/soundings/pull/14) | squash commit on main (see PR) | 1080 passed (91 WO-022: matcher 31, box 6, reacquire 9, ask rung 10, runner 27, rules 18) |
 | 030 | posterior | PR open, auto-merge on green CI | wo/030-posterior | (see PR) | squash commit on main (see PR) | 1043 passed after rebase on WO-050 (posterior 43, likelihood tables 8, catalog 13) |
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
