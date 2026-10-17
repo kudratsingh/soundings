@@ -1,0 +1,9 @@
+# Replayed offline by `make demo`. Each step is a scenario + what the screen should show.
+steps:
+  - {t: "0:00", scenario: S01, say: "Tuesday. Filed survey, clears at ask. Zero interruptions."}
+  - {t: "0:30", scenario: S02, say: "Filed glider goes silent. Lost-vehicle report with a search box to the operator."}
+  - {t: "1:00", scenario: S05, say: "Harbor Night. Unfiled, closing on the fuel berth, no reply."}
+  - {t: "2:00", scenario: S05, say: "Hold on one berth under standing orders. Report handed to the officer. Judge approves."}
+  - {t: "2:45", scenario: live, say: "Judge drops a contact. We follow it live."}
+  - {t: "3:30", scenario: twist, say: "Twist: network down. Same decision on kinematics and hail alone."}
+  - {t: "4:00", eval: true, say: "Catalog vs close-the-berth vs send-everything-to-a-human."}

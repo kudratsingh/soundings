@@ -131,3 +131,5 @@ Every outcome produces a SITREP whose "recommended rung" is computed here, deter
 6. Multi-contact correlation: two contacts with coordinated headings raise `UNAUTHORIZED_UUV` for both (this is a likely twist).
 7. Sensor-health weighting: evidence confidence scaled by `sensor_health`; a dropped sensor widens entropy rather than silently removing rows (another likely twist).
 8. Stretch items from `BUILD-PLAN.md`.
+9. Re-acquisition: when a track drops and returns, match to the prior contact by position, speed, and drift box; carry the evidence table over. Tested on S02.
+10. Confidence per reading scales with range and sensor_health; the posterior weights each row by its confidence.

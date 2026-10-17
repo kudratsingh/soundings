@@ -9,3 +9,4 @@ One line each. Scope changes, threshold changes, cost-model changes. Newest at t
 | 2026-10-16 21:20 | Posterior is naive-Bayes over hand-set likelihood tables, not a learned classifier | Every number is inspectable by a judge and editable by a mentor; a learned model can't be explained in a five-minute pitch | Kudrat |
 | 2026-10-16 21:20 | `shutdown_usd_per_min_default: 0` until a mentor gives a figure | We don't invent operational costs; Doyle session Saturday | Kudrat |
 | 2026-10-16 21:20 | Detection physics kept to range falloff + noise + gaps + biologic false alarms | The brief says detection is getting easier; sophistication goes into investigation | Kudrat |
+| 2026-10-16 21:45 | Repo stays unlicensed (no LICENSE file); all rights reserved by the owner | Owner's call before Devpost; revisit if a sponsor or prize requires an OSS license | Kudrat |
