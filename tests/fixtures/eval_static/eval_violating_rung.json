@@ -1,0 +1,6 @@
+{
+  "next_probe": "hold",
+  "why": "Move this contact to the hold rung and request approval to close the berth now.",
+  "hypotheses_to_discriminate": ["UNAUTHORIZED_UUV", "UNFILED_KNOWN_OPERATOR"],
+  "question_for_human": null
+}

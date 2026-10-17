@@ -30,7 +30,15 @@ from soundings.eval.metrics import (
 )
 from soundings.eval.perturb import TableShift
 from soundings.eval.policies import EvalConfig, PolicyName, PolicyRun
-from soundings.schemas import LadderConfig, LadderState, Scenario
+from soundings.eval.sweeps import (
+    BOTH_FALLBACK_SENTENCE,
+    SWEEP_COLUMNS,
+    WALL_TIME_NOTE,
+    SweepsReport,
+    render_ablation,
+    render_sweeps,
+)
+from soundings.schemas import LadderConfig, LadderState, Rung, Scenario
 from soundings.schemas._base import CONFIG_DIR, REPO_ROOT, StrictModel
 
 REPORT_TITLE = "# Soundings eval report"
@@ -95,12 +103,30 @@ LLM_DIFF_COLUMNS: tuple[str, ...] = (
     "verdict",
 )
 
+# --- WO-051 part B begin ---
+PER_CONTACT_COLUMNS: tuple[str, ...] = (
+    "scenario",
+    "seed",
+    "policy",
+    "contacts",
+    "watch",
+    "ask",
+    "slow",
+    "hold",
+    "hand_to_person",
+)
+"""Per observed contact (sim false alarms included): a ``Counter`` of
+``ContactOutcome.max_rung`` per run, the number WO-086's rung ledger compares against."""
+# --- WO-051 part B end ---
+
 REPORT_COLUMNS: dict[str, tuple[str, ...]] = {
     "outcomes": OUTCOME_COLUMNS,
     "false_alarms": FALSE_ALARM_COLUMNS,
     "per_scenario": PER_SCENARIO_COLUMNS,
+    "per_contact": PER_CONTACT_COLUMNS,
     "misspecified": MISSPECIFIED_COLUMNS,
     "misspecified_changes": MISSPECIFIED_CHANGE_COLUMNS,
+    **SWEEP_COLUMNS,
     "llm_diff": LLM_DIFF_COLUMNS,
 }
 
@@ -196,6 +222,40 @@ class LlmSection(StrictModel):
     sentence: str
 
 
+class ContactLedgerRow(StrictModel):
+    scenario: str
+    seed: int
+    policy: PolicyName
+    contacts: int
+    watch: int
+    ask: int
+    slow: int
+    hold: int
+    hand_to_person: int
+
+
+def per_contact_rows(runs: Sequence[PolicyRun]) -> tuple[ContactLedgerRow, ...]:
+    """One row per run: observed contacts by max rung (WO-086's ledger numbers)."""
+    order = list(PolicyName)
+    rows: list[ContactLedgerRow] = []
+    for r in sorted(runs, key=lambda r: (r.scenario_id, r.seed, order.index(r.policy))):
+        counts = Counter(c.max_rung for c in r.contacts)
+        rows.append(
+            ContactLedgerRow(
+                scenario=r.scenario_id,
+                seed=r.seed,
+                policy=r.policy,
+                contacts=len(r.contacts),
+                watch=counts.get(Rung.WATCH, 0),
+                ask=counts.get(Rung.ASK, 0),
+                slow=counts.get(Rung.SLOW, 0),
+                hold=counts.get(Rung.HOLD, 0),
+                hand_to_person=counts.get(Rung.HAND_TO_PERSON, 0),
+            )
+        )
+    return tuple(rows)
+
+
 class Assumption(StrictModel):
     name: str
     text: str
@@ -216,6 +276,11 @@ class EvalReport(StrictModel):
     misspecified: MisspecifiedSection | None
     llm: LlmSection
     assumptions: tuple[Assumption, ...]
+    # --- WO-051 part B begin ---
+    methods: dict[str, str] = {}
+    per_contact: tuple[ContactLedgerRow, ...] = ()
+    sweeps: SweepsReport | None = None
+    # --- WO-051 part B end ---
 
 
 # ---------------------------------------------------------------------------
@@ -397,8 +462,10 @@ def build_report(
     policies_pending: Mapping[PolicyName, str] | None = None,
     misspecified: MisspecifiedSection | None = None,
     llm_diff: LlmDiff | None = None,
+    sweeps: SweepsReport | None = None,
 ) -> EvalReport:
     pending = dict(policies_pending or {})
+    seeds_text = ", ".join(str(s) for s in sorted(set(seeds)))
     outcomes = compute_metrics(runs, ladder_cfg=ladder_cfg)
     soundings_pending = pending.get(PolicyName.SOUNDINGS)
     return EvalReport(
@@ -416,7 +483,40 @@ def build_report(
         misspecified=misspecified,
         llm=llm_section(llm_diff, pending=soundings_pending if llm_diff is None else None),
         assumptions=assumptions(eval_cfg),
+        methods=table_methods(seeds_text, misspecified is not None),
+        per_contact=per_contact_rows(runs),
+        sweeps=sweeps,
     )
+
+
+def table_methods(seeds_text: str, misspecified: bool) -> dict[str, str]:
+    """The one-line method under each core table (every table names its seeds)."""
+    out = {
+        "outcomes": (
+            f"Seeds {seeds_text}; every policy over the suite on the same seeded sim; "
+            "soundings = runner v3 (signed standing orders, default approver, deterministic "
+            "planner); WO-050 counting rules for every policy."
+        ),
+        "false_alarms": f"Seeds {seeds_text}; observed contacts the sim generated as false alarms.",
+        "per_scenario": (
+            f"Seeds {seeds_text}; the first ground-truth contact's rolled-up terminal state per "
+            "seed against the scenario's expected.terminal_state."
+        ),
+        "per_contact": (
+            f"Seeds {seeds_text}; every observed contact of each run (false alarms included) "
+            "counted by its max rung, the numbers the UI rung ledger shows (WO-086)."
+        ),
+        "llm": (
+            f"Seeds {seeds_text}; soundings with the LLM planner (replay only) vs the "
+            "deterministic planner, matched by scenario, seed and ground-truth contact."
+        ),
+    }
+    if misspecified:
+        out["misspecified"] = (
+            f"Seeds {seeds_text}; every policy, acoustic pins cleared, sim tables perturbed "
+            "(magnitude and seed below), scorer unchanged."
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +559,11 @@ def _metric_rows(report: EvalReport) -> list[list[str]]:
     return rows
 
 
+def _method(report: EvalReport, key: str) -> list[str]:
+    text = report.methods.get(key)
+    return [] if text is None else [f"Method: {text} {WALL_TIME_NOTE}", ""]
+
+
 def render_markdown(report: EvalReport) -> str:
     out: list[str] = [REPORT_TITLE, ""]
     out.append(
@@ -485,11 +590,13 @@ def render_markdown(report: EvalReport) -> str:
         "per detected ground-truth contact. shutdown_usd: " + USD_LABEL + "."
     )
     out.append("")
+    out.extend(_method(report, "outcomes"))
     out.extend(_table(OUTCOME_COLUMNS, _metric_rows(report)))
     out.append("")
 
     out.append("## Sim false alarms by policy")
     out.append("")
+    out.extend(_method(report, "false_alarms"))
     fa_rows: list[list[str]] = []
     for policy in PolicyName:
         if policy in report.false_alarms:
@@ -508,10 +615,22 @@ def render_markdown(report: EvalReport) -> str:
         "terminal_states is the first ground-truth contact's rolled-up terminal state per seed."
     )
     out.append("")
+    out.extend(_method(report, "per_scenario"))
     out.extend(
         _table(
             PER_SCENARIO_COLUMNS,
             ([_fmt(getattr(r, c)) for c in PER_SCENARIO_COLUMNS] for r in report.per_scenario),
+        )
+    )
+    out.append("")
+
+    out.append("## Per observed contact")
+    out.append("")
+    out.extend(_method(report, "per_contact"))
+    out.extend(
+        _table(
+            PER_CONTACT_COLUMNS,
+            ([_fmt(getattr(r, c)) for c in PER_CONTACT_COLUMNS] for r in report.per_contact),
         )
     )
     out.append("")
@@ -532,6 +651,7 @@ def render_markdown(report: EvalReport) -> str:
         out.append("")
         out.append(MISSPECIFIED_REFERENCE_NOTE)
         out.append("")
+        out.extend(_method(report, "misspecified"))
         out.extend(
             _table(
                 MISSPECIFIED_COLUMNS,
@@ -557,8 +677,12 @@ def render_markdown(report: EvalReport) -> str:
             out.append("None.")
     out.append("")
 
+    if report.sweeps is not None:
+        out.extend(render_sweeps(report.sweeps))
+
     out.append("## Where the LLM layer added nothing")
     out.append("")
+    out.extend(_method(report, "llm"))
     llm = report.llm
     out.append(f"Status: {llm.status}")
     out.append("")
@@ -570,6 +694,13 @@ def render_markdown(report: EvalReport) -> str:
     out.append(f"- differing contacts: {len(llm.diff.differences) if llm.diff else 0}")
     out.append("")
     out.append(llm.sentence)
+    ablation = report.sweeps.ablation if report.sweeps is not None else None
+    if ablation is not None:
+        out.append("")
+        out.extend(render_ablation(ablation))
+    elif llm.diff is None or llm.diff.stats.fixture_hits == 0:
+        out.append("")
+        out.append(BOTH_FALLBACK_SENTENCE)
     if llm.diff is not None and llm.diff.differences:
         out.append("")
         out.extend(

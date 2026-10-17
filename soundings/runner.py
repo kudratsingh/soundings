@@ -361,6 +361,15 @@ class _Plans:
         return plans
 
 
+# --- WO-051 begin ---
+from typing import TYPE_CHECKING  # noqa: E402
+
+if TYPE_CHECKING:
+    from soundings.investigation.machine import StoppingConfig
+    from soundings.schemas.config import LikelihoodSpec
+# --- WO-051 end ---
+
+
 # --- the runner ---------------------------------------------------------------------------
 
 
@@ -378,6 +387,10 @@ class ScenarioRunner:
         seed: int | None = None,
         plans: RegistryStore | Sequence[PlanView] | None = None,
         harbor: Harbor | None = None,
+        # --- WO-051 begin ---
+        sim_likelihoods: LikelihoodSpec | None = None,
+        stopping: StoppingConfig | None = None,
+        # --- WO-051 end ---
         current_field: CurrentField | None = None,
         match_cfg: MatchConfig | None = None,
         hail_cfg: HailConfig | None = None,
@@ -398,6 +411,13 @@ class ScenarioRunner:
         self.hail_cfg = hail_cfg
         self.known = known
         self.timeout_ticks = load_detection_params().track_timeout_ticks
+        # --- WO-051 begin ---
+        # The sim samples unpinned acoustics from ``sim_likelihoods`` (the mis-specified
+        # world); the scorer keeps config/likelihoods.yaml. ``stopping`` overrides the
+        # investigation's stop rule for the eval's threshold sweep (config never edited).
+        self.sim_likelihoods = sim_likelihoods
+        self.stopping_override = stopping
+        # --- WO-051 end ---
 
     def run(self) -> RunResult:
         """Run the scenario and return the ask-rung result (deterministic)."""
@@ -412,7 +432,11 @@ class _V1Run:
         sc = runner.scenario
         self.cfg = runner.match_cfg
         self.harbor = runner.harbor
-        self.sim = run_scenario(sc, seed=runner.seed, harbor=runner.harbor)
+        # --- WO-051 begin ---
+        self.sim = run_scenario(
+            sc, seed=runner.seed, harbor=runner.harbor, likelihoods=runner.sim_likelihoods
+        )
+        # --- WO-051 end ---
         self.tick_s = float(self.sim.tick_s)
         self.clock = TickClock(self.tick_s)
         self.hail = HailSimulator(
@@ -1318,7 +1342,13 @@ class _V2Run(_V1Run):
             world,
             tables=load_likelihood_tables(),
             prior_cfg=load_prior_config(),
-            stopping=load_stopping_config(),
+            # --- WO-051 begin ---
+            stopping=(
+                runner.stopping_override
+                if runner.stopping_override is not None
+                else load_stopping_config()
+            ),
+            # --- WO-051 end ---
             budgets=load_budgets(),
             llm_roles=llm_roles,
             fixture_store=fixture_store,
@@ -2539,6 +2569,7 @@ class RunSession:
             seed=runner.seed,
             ticks=sc.duration_ticks + self.tail_ticks,
             harbor=runner.harbor,
+            likelihoods=runner.sim_likelihoods,  # WO-051
         )
         cf = runner.current_field
         self.current_at = current_at_from_field(
@@ -3015,6 +3046,12 @@ def main(argv: Sequence[str] | None = None) -> int:  # type: ignore[no-redef]
 # --- end v3 (WO-043) ---
 
 # --- sim_likelihoods (WO-051) ---
+# ``ScenarioRunner(..., sim_likelihoods=None, stopping=None)``: both default to None, which
+# leaves every sim draw, the transition log and its hash unchanged
+# (tests/test_soundings_policy.py). ``sim_likelihoods`` reaches only
+# ``run_scenario(likelihoods=...)`` (the scenario sim and v3's extended sim); the scorer
+# keeps loading config/likelihoods.yaml. ``stopping`` reaches only the investigation kit.
+# The keyword arguments, their attributes and the three call sites carry WO-051 markers.
 # --- end sim_likelihoods (WO-051) ---
 
 __all__ = [
