@@ -258,6 +258,14 @@ def test_run_keys_skip_only_the_current_bucket() -> None:
     assert DeterministicPlanner().choose(later, TABLES).probe_id is P.REGISTRY_LOOKUP
 
 
+def test_ran_probes_skip_at_any_tick() -> None:
+    state = replace(_state(Case("x", {}, None)), ran_probes=frozenset({P.REGISTRY_LOOKUP}))
+    for tick in (TICK, TICK + 15, TICK + 600):
+        choice = DeterministicPlanner().choose(replace(state, tick=tick), TABLES)
+        assert P.REGISTRY_LOOKUP not in [r.probe_id for r in choice.ranked]
+        assert choice.probe_id is P.KINEMATICS_PROFILE
+
+
 def test_planner_protocol_and_choice_fields() -> None:
     planner: Planner = DeterministicPlanner()
     choice = planner.choose(_state(EIG_CASES[0]), TABLES)

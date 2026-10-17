@@ -250,6 +250,9 @@ class PlannerState:
     posterior reads for it (0 or absent when unknown or missing; see
     ``observed_confidence``). ``run_keys`` holds the idempotency keys of probes already
     run; a probe whose argument-free key for the current tick bucket is in it is skipped.
+    ``ran_probes`` names probes already run for this contact at any tick; they are
+    skipped too (SPEC section 6 ranks only probes "not yet run"; pass the ids the
+    investigation has run so far, or leave it empty to allow re-reads in later buckets).
     ``probe_confidence`` overrides ``ProbeSpec.nominal_confidence`` per probe (for
     example the contact's track confidence for the watch re-reads).
     """
@@ -263,6 +266,7 @@ class PlannerState:
     run_keys: frozenset[str] = frozenset()
     tick_s: float = DEFAULT_TICK_S
     probe_confidence: Mapping[ProbeId, float] = field(default_factory=dict)
+    ran_probes: frozenset[ProbeId] = frozenset()
 
     def key_for(self, probe_id: ProbeId) -> str:
         """The argument-free idempotency key of ``probe_id`` in this tick bucket."""
@@ -271,7 +275,7 @@ class PlannerState:
         )
 
     def already_ran(self, probe_id: ProbeId) -> bool:
-        return self.key_for(probe_id) in self.run_keys
+        return probe_id in self.ran_probes or self.key_for(probe_id) in self.run_keys
 
 
 class RankedProbe(StrictModel):
@@ -396,6 +400,7 @@ def state_from_table(
     tick_s: float = DEFAULT_TICK_S,
     run_keys: frozenset[str] = frozenset(),
     probe_confidence: Mapping[ProbeId, float] | None = None,
+    ran_probes: frozenset[ProbeId] = frozenset(),
 ) -> PlannerState:
     """A ``PlannerState`` from the table: WO-030 ``score_contact`` posterior plus
     ``observed_confidence``."""
@@ -410,6 +415,7 @@ def state_from_table(
         run_keys=run_keys,
         tick_s=tick_s,
         probe_confidence=dict(probe_confidence or {}),
+        ran_probes=ran_probes,
     )
 
 
