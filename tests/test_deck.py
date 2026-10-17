@@ -310,6 +310,29 @@ def test_threshold_curve_embedded_when_present(tmp_path: Path) -> None:
     assert build_deck.CURVE_PENDING not in page
 
 
+def test_pending_policy_renders_placeholders(tmp_path: Path, report: dict[str, Any]) -> None:
+    """WO-051 part A: the soundings policy is listed in policies_pending until runner v3."""
+    partial = json.loads(json.dumps(report))
+    del partial["outcomes"]["soundings"]
+    del partial["false_alarms"]["soundings"]
+    partial["policies_pending"] = {"soundings": "pending runner v3"}
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(partial))
+    page = build_deck.build(path, tmp_path / "i.html", devpost=None, curve=tmp_path / "x.png")
+    w = walk(page)
+    for src, text in w.sourced:
+        if src.startswith(("report:outcomes.soundings", "report:false_alarms.soundings")):
+            assert text.startswith(build_deck.PENDING), (src, text)
+        elif src.startswith("report:outcomes.bang.") and src.count(".") == 2:
+            value = build_deck.dig(partial, src.removeprefix("report:"))
+            assert text.startswith(build_deck.fmt_value(value)), (src, text)
+    assert not re.search(r"\d", "".join(w.free_text))
+    copy = tmp_path / "DEVPOST.md"
+    shutil.copy(DEVPOST, copy)
+    build_deck.refresh_devpost(copy, build_deck.Report(partial))
+    assert copy.read_text() == DEVPOST.read_text()
+
+
 # ---------------------------------------------------------------------------
 # Without report.json
 # ---------------------------------------------------------------------------

@@ -175,7 +175,10 @@ class Report:
         if len(parts) >= 2 and parts[0] in ("outcomes", "false_alarms"):
             reason = self.pending_reason(parts[1])
             if reason is not None:
-                return src_span(src, esc(f"[pending: {reason}]"), cls="num pending")
+                return (
+                    f'<span class="num pending" data-src="{esc(src)}" '
+                    f'title="{esc(reason)}">{esc(PENDING)}</span>'
+                )
         try:
             value = self.get(path)
         except (KeyError, IndexError, ValueError):
@@ -303,7 +306,7 @@ def histogram(rep: Report) -> str:
         label = esc(POLICY_LABEL[policy])
         reason = rep.pending_reason(policy)
         if not rep.present or reason is not None or rep.value(f"outcomes.{policy}") is None:
-            text = f"[pending: {reason}]" if reason else PENDING
+            text = f"{PENDING} ({reason})" if reason else PENDING
             bar = (
                 f'<div class="hist-bar">'
                 f"{src_span(f'report:outcomes.{policy}', esc(text), cls='num pending')}</div>"
