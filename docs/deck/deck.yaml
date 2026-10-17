@@ -1,0 +1,32 @@
+# Deck-owned inputs that are not eval numbers (WO-090). Eval numbers come only from
+# artifacts/eval/report.json; the boundary table only from config/ladder.yaml; twist rows
+# only from docs/DECK-INPUTS.md. Every dollar figure here is an ESTIMATE for a pitch,
+# not a quote: confirm or relabel before the finalist deck.
+
+event: "InnovateLA Dual-Use Hackathon 2026 · USC Viterbi · Track 01 Marine with NULL Labs · Crisis Mitigation lens"
+team: "Kudrat Singh · [teammates: add names before submission]"
+repo: "github.com/kudratsingh/soundings"
+
+bom_label: "estimate — order of magnitude, unverified, per node"
+bom:
+  - {item: "Hydrophone (passive, COTS)", role: "sense", usd: "1,500–3,000"}
+  - {item: "Acoustic modem (challenge-response)", role: "ask", usd: "1,500–4,000"}
+  - {item: "Edge computer + storage", role: "decide", usd: "150–500"}
+  - {item: "Mooring, housing, cable", role: "sense", usd: "500–1,500"}
+  - {item: "Cellular / SMS modem", role: "hand off", usd: "50–150"}
+
+tenth_budget:
+  label: "a tenth of the budget (estimate)"
+  usd: "under 1,000"
+  lines:
+    - "One low-cost hydrophone node, no modem: the registry web form does the asking"
+    - "A laptop or single-board computer runs the ladder; no cloud dependency"
+    - "SMS handoff to whoever is reachable; the SITREP queues when the network is down"
+
+next:
+  - title: "NULL Labs sim adapter"
+    text: "Feed NULL Labs' simulated contacts into the same evidence table; the ladder and guards do not change."
+  - title: "Navy SBIR / DHS S&T pathway"
+    text: "Navy SBIR (N152-113 harbor UUV detection; N252-116/117 start after a contact is called unauthorized: Soundings is that call). DHS S&T Maritime Safety and Security as the civilian alternative."
+  - title: "First pilot customer"
+    text: "Operators of planned underwater work at the Port of LA (research AUV teams, hull-cleaning divers, inspectors): file a plan, clear at ask, find the vehicle that went silent."

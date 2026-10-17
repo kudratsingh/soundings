@@ -1,0 +1,135 @@
+{
+ "_comment": "SYNTHETIC test fixture for tests/test_deck.py (WO-090). Not an eval result; never shown on stage.",
+ "assumptions": [],
+ "false_alarms": {
+  "bang": {
+   "detected": 17,
+   "false_alarms": 17,
+   "false_shutdowns": 17,
+   "interruptions": 17,
+   "policy": "bang",
+   "probes_used": 0,
+   "shutdown_minutes": 170.0
+  },
+  "human_queue": {
+   "detected": 17,
+   "false_alarms": 17,
+   "false_shutdowns": 0,
+   "interruptions": 17,
+   "policy": "human_queue",
+   "probes_used": 0,
+   "shutdown_minutes": 0.0
+  },
+  "soundings": {
+   "detected": 17,
+   "false_alarms": 17,
+   "false_shutdowns": 0,
+   "interruptions": 0,
+   "policy": "soundings",
+   "probes_used": 40,
+   "shutdown_minutes": 0.0
+  }
+ },
+ "inputs_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+ "label": "stress-test estimate",
+ "llm": {
+  "diff": null,
+  "sentence": "No recorded probe_planner fixtures were used in this run; every LLM-planner call fell back to the deterministic planner, so outcomes are identical by construction. The LLM layer added nothing measurable here.",
+  "status": "no_fixtures"
+ },
+ "misspecified": null,
+ "mode": "replay",
+ "outcomes": {
+  "bang": {
+   "ask": 0,
+   "at_or_below_ask": 0,
+   "at_or_below_ask_pct": 0.0,
+   "false_shutdowns": 35,
+   "gt_contacts": 45,
+   "hand_to_person": 0,
+   "hold": 45,
+   "interruptions": 90,
+   "interruptions_per_hour": 8.0,
+   "median_s_seen_to_handled": 12.0,
+   "missed_threats": 0,
+   "policy": "bang",
+   "probes_used": 0,
+   "runs": 40,
+   "shutdown_minutes": 412.5,
+   "shutdown_usd": 0.0,
+   "sim_hours": 11.25,
+   "slow": 0,
+   "unhandled": 0,
+   "watch": 0
+  },
+  "human_queue": {
+   "ask": 0,
+   "at_or_below_ask": 0,
+   "at_or_below_ask_pct": 0.0,
+   "false_shutdowns": 0,
+   "gt_contacts": 45,
+   "hand_to_person": 45,
+   "hold": 0,
+   "interruptions": 135,
+   "interruptions_per_hour": 12.0,
+   "median_s_seen_to_handled": 263.0,
+   "missed_threats": 1,
+   "policy": "human_queue",
+   "probes_used": 0,
+   "runs": 40,
+   "shutdown_minutes": 0.0,
+   "shutdown_usd": 0.0,
+   "sim_hours": 11.25,
+   "slow": 0,
+   "unhandled": 3,
+   "watch": 0
+  },
+  "soundings": {
+   "ask": 30,
+   "at_or_below_ask": 35,
+   "at_or_below_ask_pct": 77.777778,
+   "false_shutdowns": 0,
+   "gt_contacts": 45,
+   "hand_to_person": 5,
+   "hold": 5,
+   "interruptions": 22,
+   "interruptions_per_hour": 1.955556,
+   "median_s_seen_to_handled": 41.5,
+   "missed_threats": 0,
+   "policy": "soundings",
+   "probes_used": 131,
+   "runs": 40,
+   "shutdown_minutes": 7.5,
+   "shutdown_usd": 0.0,
+   "sim_hours": 11.25,
+   "slow": 0,
+   "unhandled": 0,
+   "watch": 5
+  }
+ },
+ "per_scenario": [],
+ "policies_pending": {},
+ "policies_run": [
+  "soundings",
+  "bang",
+  "human_queue"
+ ],
+ "scenarios": [
+  "S01",
+  "S02",
+  "S03",
+  "S04",
+  "S05",
+  "S06",
+  "S07",
+  "S08"
+ ],
+ "seeds": [
+  1,
+  2,
+  3,
+  4,
+  5
+ ],
+ "suite": "catalog"
+}

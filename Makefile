@@ -2,7 +2,7 @@
 # it on the command line after a paid-run approval (docs/WORKFLOW.md §7).
 export MODEL_MODE ?= replay
 
-.PHONY: setup check lint types test web e2e dev sim sim-plot pol demo eval denylist clean
+.PHONY: setup check lint types test web e2e dev sim sim-plot pol demo eval deck denylist clean
 
 setup:
 	uv sync --all-extras
@@ -45,6 +45,11 @@ demo:
 
 eval:
 	uv run python -m soundings.eval --suite catalog --seeds 1,2,3,4,5 --mode replay --out artifacts/eval
+
+# Pitch deck (WO-090): every number from artifacts/eval/report.json; placeholders without it.
+deck:
+	uv run python scripts/build_deck.py
+	uv run python scripts/export_deck.py
 
 clean:
 	rm -rf artifacts/*.png artifacts/eval web/dist
