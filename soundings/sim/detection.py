@@ -71,7 +71,7 @@ class DetectionParams:
     false_alarm_mean_ticks: int = 20
     false_alarm_max_depth_m: float = 3.0
     # --- WO-089 begin: which detection model runs (docs/SPEC-SIM.md section 2a) ---
-    model: str = "sonar_equation"
+    model: str = "gaussian"
     # --- WO-089 end ---
 
     def __post_init__(self) -> None:

@@ -11,9 +11,10 @@
 #
 # Tuning (DECISIONS 2026-10-17, WO-089 code half): SL, DT and k are set so the effective
 # range (p = 0.5 of the logistic term) at calm noise is 400 m, the former Gaussian r0, for
-# every acoustic class. Catalog S01..S08 outcomes are unchanged except three runs (S04
-# seeds 7 and 2, S08 seed 1) that now reach their scenario's expected state (listed in
-# DECISIONS and in tests/test_catalog_outcomes_physics.py).
+# every acoustic class. Under sonar_equation the runner-v2 catalog outcomes are unchanged
+# except three runs (S04 seeds 7 and 2, S08 seed 1) that reach their scenario's expected
+# state (DECISIONS; tests/test_catalog_outcomes_physics.py). config/sim.yaml keeps the
+# gaussian model as the default until runner v3's S05 HOLDING check passes under sonar.
 
 sonar:
   source_level_db:

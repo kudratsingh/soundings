@@ -94,8 +94,8 @@ def _lineage_end(sid: str, seed: int) -> str:
 
 @cache
 def sonar_outcomes() -> dict[str, str]:
-    assert sim_run.default_config().params.model == "sonar_equation"
-    return {f"{sid}/{seed}": _lineage_end(sid, seed) for sid in CATALOG for seed in _seeds(sid)}
+    with _model("sonar_equation"):
+        return {f"{sid}/{seed}": _lineage_end(sid, seed) for sid in CATALOG for seed in _seeds(sid)}
 
 
 def test_baseline_covers_catalog_seed_and_seeds_1_to_3() -> None:

@@ -131,7 +131,7 @@ def _attenuation(run: SimRun, contact_id: str, tick: int) -> float:
     depths = [p.depth_m for p in run.tracks[contact_id].points if p.tick <= tick]
     depth = max(depths[-1], 0.0) if depths else 0.0
     k, turbidity = cfg.camera.k_depth_per_m.value, cfg.camera.turbidity_default.value
-    return math.exp(-k * depth) * math.exp(-turbidity)
+    return round(math.exp(-k * depth) * math.exp(-turbidity), 6)  # the law's 6-dp output
 
 
 # --- WO-089 end ---

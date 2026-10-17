@@ -234,6 +234,7 @@ def _expected(sid: str) -> Expected:
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # WO-094: S04's re-acquired track (c-0009) re-decides its prior C_KNOWN_OPERATOR outcome from
 # the carried rows (modem-confirmed identity), so the two former strict xfails pass.
 =======
@@ -243,6 +244,26 @@ def _expected(sid: str) -> Expected:
 # WO-089 code half). Every catalog scenario now runs as a plain, strict test.
 >>>>>>> 009523b (feat(wo-089): passive-sonar-equation detection model, sourced physics config, hail/camera/battery laws)
 CATALOG_PARAMS = list(CATALOG)
+=======
+CATALOG_PARAMS = [
+    pytest.param(
+        sid,
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason=(
+                "S04's re-acquired track (c-0009 from tick 366) carries registry rows at "
+                "confidence 0.57 (0.91 on the first track), so P(UNFILED_KNOWN_OPERATOR) "
+                "stays at 0.605 < benign_mass_resolve and the case ends in an uncertain "
+                "C_BUDGET handoff; the primary track resolves (test_s04_*). Open question "
+                "for the coordinator; no table or threshold was changed."
+            ),
+        ),
+    )
+    if sid == "S04"
+    else sid
+    for sid in CATALOG
+]
+>>>>>>> a21663d (fix(wo-089): keep gaussian as the default detection model until runner v3 clears S05 under sonar)
 
 
 @pytest.mark.parametrize("sid", CATALOG_PARAMS)

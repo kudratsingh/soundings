@@ -35,7 +35,7 @@ from soundings.sim.hashing import track_hash
 from soundings.sim.run import NodeNoise, run_scenario
 from soundings.sim.scenario import resolve_scenario
 
-PARAMS = load_detection_params()
+PARAMS = replace(load_detection_params(), model="sonar_equation")
 SETUP = sonar_setup()
 NL0 = SETUP.base_nl_db
 NODES = sorted(load_harbor().sensor_nodes, key=lambda n: n.node_id)
@@ -50,8 +50,8 @@ class Fix:
 
 
 def test_sonar_is_the_configured_default() -> None:
-    assert PARAMS.model == "sonar_equation"
-    assert DetectionParams().model == "sonar_equation"
+    assert load_detection_params().model in DETECTION_MODELS
+    assert DetectionParams().model == "gaussian"  # WO-011 stays the default (DECISIONS 10:30)
     assert DETECTION_MODELS == ("sonar_equation", "gaussian")
     assert detection_params_from_mapping({"model": "gaussian"}).model == "gaussian"
     with pytest.raises(ValueError):
@@ -137,7 +137,7 @@ def test_false_alarm_rate_over_10k_node_hours_unchanged() -> None:
 
 def test_false_alarm_arrivals_identical_across_models() -> None:
     sc = resolve_scenario("S07")
-    sonar = run_scenario(sc, seed=2)
+    sonar = run_scenario(sc, seed=2, params=PARAMS)
     gauss = run_scenario(sc, seed=2, params=replace(PARAMS, model="gaussian"))
     fa = sorted(k for k in sonar.truth_paths if k.startswith("fa-"))
     assert fa == sorted(k for k in gauss.truth_paths if k.startswith("fa-"))
@@ -147,7 +147,7 @@ def test_false_alarm_arrivals_identical_across_models() -> None:
 
 def test_confidence_is_health_times_the_logistic_term() -> None:
     sc = resolve_scenario("S05")
-    run = run_scenario(sc, seed=11)
+    run = run_scenario(sc, seed=11, params=PARAMS)
     for d in run.detections[:400]:
         cls = "biologic" if d.is_false_alarm else None
         if cls is None:
@@ -185,15 +185,15 @@ def test_node_noise_rises_near_a_synthetic_vessel_and_lowers_detection() -> None
 
 def test_run_with_synthetic_vessel_fixes_is_deterministic_and_quieter() -> None:
     sc = resolve_scenario("S05")
-    base = run_scenario(sc, seed=11)
+    base = run_scenario(sc, seed=11, params=PARAMS)
     # a vessel parked beside every node for the whole run raises NL everywhere
     tracks = {}
     for i, n in enumerate(NODES):
         nx, ny = to_local_m(n.lat, n.lon)
         lat, lon = from_local_m(nx + 40.0, ny)
         tracks[f"v{i}"] = [Fix(t, lat, lon, 1.0) for t in range(0, sc.duration_ticks, 5)]
-    noisy = run_scenario(sc, seed=11, ais_tracks=tracks)
-    again = run_scenario(sc, seed=11, ais_tracks=tracks)
+    noisy = run_scenario(sc, seed=11, ais_tracks=tracks, params=PARAMS)
+    again = run_scenario(sc, seed=11, ais_tracks=tracks, params=PARAMS)
     assert track_hash(noisy) == track_hash(again)
     real = [d for d in base.detections if not d.is_false_alarm]
     real_noisy = [d for d in noisy.detections if not d.is_false_alarm]
@@ -210,7 +210,7 @@ def test_detection_rows_match_track_points_with_a_short_node() -> None:
     from soundings.sim.detection import node_gain_db
 
     scenario = scenario_from_data(_orbit_scenario())
-    run = run_scenario(scenario, harbor=_one_short_node(), ticks=400)
+    run = run_scenario(scenario, harbor=_one_short_node(), ticks=400, params=PARAMS)
     gain = node_gain_db(100.0, PARAMS.r0_m, SETUP)
     assert gain < 0.0
     sl = SETUP.sl("propeller_tonal_present") + gain

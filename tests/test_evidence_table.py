@@ -426,7 +426,7 @@ def test_context_rows() -> None:
         cam = load_physics_config().camera
         depth = max(fleet[contact_id].points[-1].depth_m, 0.0)
         attenuation = math.exp(-cam.k_depth_per_m.value * depth)
-        attenuation *= math.exp(-cam.turbidity_default.value)
+        attenuation = round(attenuation * math.exp(-cam.turbidity_default.value), 6)
         assert visibility.value == round(F.VISIBILITY_DARK * attenuation, 6)
         assert isinstance(visibility.value, float) and 0.0 < visibility.value <= F.VISIBILITY_DARK
         weekday = table.latest(contact_id, FeatureName.WEEKDAY)
