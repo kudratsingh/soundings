@@ -1395,6 +1395,48 @@ def extract_pattern_of_life(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PolObservation:
+    """What a pattern-of-life cell is keyed by and scored on, for one observed track.
+
+    ``zone_id`` and ``hour`` are the ``zone_id`` and ``hour_of_day`` row values at the
+    last reading (``zone_id`` is None outside every zone); ``values`` holds the known
+    ``POL_INPUT_FEATURES`` exactly as the evidence rows hold them (6 dp, pattern names).
+    ``characterized`` is True when the track meets the ``transit_pattern`` minimum (10
+    readings over 60 s), the shortest track on which the whole vector is defined.
+    """
+
+    zone_id: str | None
+    hour: int
+    values: dict[str, EvidenceValue]
+    characterized: bool
+
+
+def pol_observation(track: Track, harbor: Harbor, *, hour_of_day: float) -> PolObservation:
+    """The section 4 feature vector of a track without building its whole evidence.
+
+    ``soundings.investigation.pol`` builds the normal month from these, so the baseline
+    and ``pattern_of_life_anomaly`` read the same feature definitions.
+    """
+    arrays = track_arrays(track)
+    last = track.points[-1]
+    zone = harbor.zone_at(last.lat, last.lon)
+    raw: dict[FeatureName, EvidenceValue | TransitPattern | None] = {
+        FeatureName.SPEED_OVER_GROUND: speed_over_ground(arrays),
+        FeatureName.DEPTH: depth(arrays),
+        FeatureName.DWELL_TIME_IN_ZONE: (
+            None if zone is None else dwell_time_s(arrays.t_s, _inside(track, zone))
+        ),
+        FeatureName.TRANSIT_PATTERN: classify_transit_pattern(arrays),
+    }
+    return PolObservation(
+        zone_id=None if zone is None else zone.zone_id,
+        hour=hour_at(hour_of_day, last.tick * track.tick_s),
+        values={f.value: _row_value(v) for f, v in raw.items() if v is not None},
+        characterized=has_min_points(FeatureName.TRANSIT_PATTERN.value, arrays),
+    )
+
+
 def contact_evidence(
     track: Track,
     harbor: Harbor,
@@ -1494,6 +1536,7 @@ __all__ = [
     "NOT_CLOSING_S",
     "ObservedRun",
     "PolBaseline",
+    "PolObservation",
     "REGISTRY_FEATURES",
     "TRANSIT_PATTERNS",
     "TrackArrays",
@@ -1526,6 +1569,7 @@ __all__ = [
     "nearest_point_index",
     "pol_assumes",
     "pol_baseline_row",
+    "pol_observation",
     "speed_over_ground",
     "speed_variance",
     "track_arrays",
