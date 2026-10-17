@@ -48,6 +48,12 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.include_router(presenter_router)
     # --- WO-062P end ---
 
+    # --- WO-089 begin: physics cards and sensor ranges (before the web/dist mount) ---
+    from soundings.api_routes.physics import router as physics_router
+
+    application.include_router(physics_router)
+    # --- WO-089 end ---
+
     if web_dist.is_dir():
         application.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
 

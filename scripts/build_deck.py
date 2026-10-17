@@ -10,10 +10,13 @@ Every number on a slide comes from a file at build time, never from the template
 - eval metrics from ``artifacts/eval/report.json`` (WO-051 ``EvalReport``);
 - the boundary table and the slow/hold criteria from ``config/ladder.yaml``;
 - the twist rows, the honesty text and the responsible-use note from ``docs/DECK-INPUTS.md``;
-- the team line, the BOM estimates and the "next" items from ``docs/deck/deck.yaml``.
+- the team line, the BOM estimates and the "next" items from ``docs/deck/deck.yaml``;
+- the physics cards on slide 10 (WO-089): equations from ``soundings.physics.model_cards``
+  and every parameter from ``config/physics.yaml``.
 
 Each such value is emitted inside an element whose ``data-src`` names its source
-(``report:<path>``, ``config:ladder.<path>``, ``inputs:<section>``, ``deck:<path>``), so
+(``report:<path>``, ``config:ladder.<path>``, ``config:physics.<path>``,
+``file:soundings/physics.py#model_cards.<i>``, ``inputs:<section>``, ``deck:<path>``), so
 ``tests/test_deck.py`` can check every figure against its file. Without ``report.json``
 the eval values render as ``[eval pending]``, a warning goes to stderr and the exit code
 is 0. The rendered HTML (and ``docs/DEVPOST.md``) must be denylist-clean: a hit exits 1.
@@ -509,6 +512,54 @@ def ask_line(rep: Report) -> str:
     )
 
 
+# --- WO-089 begin: physics cards (slide 10) ---
+PHYSICS_SRC = "file:soundings/physics.py#model_cards"
+
+
+def physics_value(param: dict[str, Any]) -> str:
+    """A parameter as the slide shows it: the deck's number format, then the unit."""
+    unit = str(param.get("unit") or "")
+    return fmt_value(param["value"]) + (f" {unit}" if unit else "")
+
+
+def physics_cards_html() -> str:
+    """One card per model: its name and equation (from ``model_cards``) and each parameter's
+    value and unit from ``config/physics.yaml`` under ``data-src="config:physics.<key>"``,
+    with the source in the element's title. Every value is a demo value."""
+    from soundings.physics_view import physics_cards
+
+    out: list[str] = []
+    for i, card in enumerate(physics_cards()):
+        head = f'<h4>{esc(card["name"])}</h4><code class="eq">{esc(card["equation"])}</code>'
+        rows = "".join(
+            f'<li title="{esc(p["source"])}">'
+            f'<span class="src text" data-src="config:physics.{esc(p["key"])}">'
+            f"{esc(p['name'].replace('_', ' ').replace('.', ' '))} "
+            f'<span class="num">{esc(physics_value(p))}</span></span></li>'
+            for p in card["parameters"]
+        )
+        out.append(
+            f'<div class="pcard">{src_span(f"{PHYSICS_SRC}.{i}", head, cls="src text", tag="div")}'
+            f'<ul class="pparams">{rows}</ul></div>'
+        )
+    return "".join(out)
+
+
+def physics_not_modeled() -> str:
+    """The union of every card's "what we do NOT model", in card order."""
+    from soundings.physics_view import physics_cards
+
+    seen: list[str] = []
+    for card in physics_cards():
+        for item in card["not_modeled"]:
+            if item not in seen:
+                seen.append(item)
+    return src_span(f"{PHYSICS_SRC}.not_modeled", esc(", ".join(seen)), cls="src text")
+
+
+# --- WO-089 end ---
+
+
 def llm_sentence(rep: Report) -> str:
     return rep.num("llm.sentence", cls="src text")
 
@@ -550,6 +601,8 @@ def build_values(
         "tenth_title": tenth_title(deck),
         "tenth_lines": tenth_lines(deck),
         "llm_sentence": llm_sentence(rep),
+        "physics_cards": physics_cards_html(),  # WO-089
+        "physics_not_modeled": physics_not_modeled(),  # WO-089
         "responsible_use": responsible_use(deck_inputs),
         "next_items": next_items(deck),
         "repo": src_span("deck:repo", esc(deck["repo"])),

@@ -140,6 +140,19 @@ td.lives { color: var(--accent-ink); }
 ul.tight { margin: 0; padding-left: 28px; }
 ul.tight li { margin: 6px 0; }
 
+/* WO-089 begin: physics cards (slide 10) */
+.slide[data-slide="honesty"] { gap: 24px; padding-top: 80px; }
+.slide[data-slide="honesty"] .row .panel { padding: 22px 28px; font-size: 22px; }
+.slide[data-slide="honesty"] .row .panel h3 { font-size: 26px; }
+.panel.physics { padding: 20px 26px; display: flex; flex-direction: column; gap: 12px; font-size: 22px; }
+.pcards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+.pcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.pcard h4 { margin: 0 0 6px; font-size: 20px; color: var(--accent-ink); }
+.pcard .eq { display: block; font-size: 16px; line-height: 1.3; margin-bottom: 6px; overflow-wrap: anywhere; }
+.pparams { list-style: none; margin: 0; padding: 0; font-size: 15px; line-height: 1.35; color: var(--muted); }
+.pparams .num { color: var(--fg); }
+/* WO-089 end */
+
 /* print: one slide per 1920x1080 page */
 @page { size: 1920px 1080px; margin: 0; }
 @media print {
@@ -279,9 +292,15 @@ ul.tight li { margin: 6px 0; }
 <section class="slide" data-slide="honesty">
   <div class="kicker">Honesty and responsible use</div>
   <h2>What this is, and what it is not</h2>
+  <!-- WO-089 begin: the physics cards replace the one-line detection disclaimer -->
+  <div class="panel physics">
+    <p><span class="label-estimate">simulated</span> Detection is simulated: one card per model, every value a <span class="label-estimate">demo value</span> with its source in config/physics.yaml.</p>
+    <div class="pcards"><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.0"><h4>Passive sonar detection</h4><code class="eq">p = logistic((SL - TL - NL - DT) / k)</code></div><ul class="pparams"><li title="Au and Hastings, Principles of Marine Bioacoustics"><span class="src text" data-src="config:physics.sonar.source_level_db.biologic">source level db biologic <span class="num">145 dB re 1 uPa at 1 m</span></span></li><li title="Urick (quiet electric thruster order of magnitude)"><span class="src text" data-src="config:physics.sonar.source_level_db.propeller_tonal_absent">source level db propeller tonal absent <span class="num">140 dB re 1 uPa at 1 m</span></span></li><li title="Urick, Principles of Underwater Sound (small craft propeller tonal order of magnitude)"><span class="src text" data-src="config:physics.sonar.source_level_db.propeller_tonal_present">source level db propeller tonal present <span class="num">150 dB re 1 uPa at 1 m</span></span></li><li title="tuned so the p = 0.5 range at base noise is about 400 m"><span class="src text" data-src="config:physics.sonar.detection_threshold_db">detection threshold db <span class="num">26 dB</span></span></li><li title="demo choice"><span class="src text" data-src="config:physics.sonar.logistic_k_db">logistic k db <span class="num">3 dB</span></span></li></ul></div><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.1"><h4>Transmission loss</h4><code class="eq">TL = 20 log10(r) + alpha r</code></div><ul class="pparams"><li title="Francois and Garrison 1982 at tens of kHz"><span class="src text" data-src="config:physics.sonar.alpha_db_per_km">alpha db per km <span class="num">1 dB/km</span></span></li></ul></div><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.2"><h4>Ambient noise</h4><code class="eq">NL = 10 log10(10^(base/10) + sum 10^(vessel_i/10))</code></div><ul class="pparams"><li title="Wenz 1962 harbor curves"><span class="src text" data-src="config:physics.sonar.ambient_noise_base_db">ambient noise base db <span class="num">70 dB re 1 uPa</span></span></li><li title="Wenz 1962"><span class="src text" data-src="config:physics.sonar.sea_state_table.0">sea state table 0 <span class="num">0 dB</span></span></li><li title="Wenz 1962"><span class="src text" data-src="config:physics.sonar.sea_state_table.2">sea state table 2 <span class="num">5 dB</span></span></li><li title="Wenz 1962"><span class="src text" data-src="config:physics.sonar.sea_state_table.4">sea state table 4 <span class="num">10 dB</span></span></li><li title="spherical spreading"><span class="src text" data-src="config:physics.sonar.vessel_noise.falloff_db_per_doubling">vessel noise falloff db per doubling <span class="num">6 dB</span></span></li><li title="McKenna et al. 2012"><span class="src text" data-src="config:physics.sonar.vessel_noise.source_level_db">vessel noise source level db <span class="num">165 dB re 1 uPa at 1 m</span></span></li></ul></div><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.3"><h4>Hail latency</h4><code class="eq">t = 2 r / c</code></div><ul class="pparams"><li title="nominal sound speed in seawater"><span class="src text" data-src="config:physics.hail.sound_speed_mps">sound speed mps <span class="num">1,500 m/s</span></span></li></ul></div><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.4"><h4>Camera visibility</h4><code class="eq">V = exp(-k depth) exp(-turbidity)</code></div><ul class="pparams"><li title="Jerlov coastal water types"><span class="src text" data-src="config:physics.camera.k_depth_per_m">k depth per m <span class="num">0.1 1/m</span></span></li><li title="demo choice"><span class="src text" data-src="config:physics.camera.turbidity_default">turbidity default <span class="num">0.5</span></span></li></ul></div><div class="pcard"><div class="src text" data-src="file:soundings/physics.py#model_cards.5"><h4>Responder battery</h4><code class="eq">drain = c v^3 dt</code></div><ul class="pparams"><li title="drag power scales with v cubed"><span class="src text" data-src="config:physics.responder.drain_coeff">drain coeff <span class="num">0.02 min per (m/s)^3 per s</span></span></li></ul></div></div>
+    <p class="small muted">What we do not model: <span class="src text" data-src="file:soundings/physics.py#model_cards.not_modeled">hydrodynamics, beam patterns, multipath, bottom type</span>.</p>
+  </div>
+  <!-- WO-089 end -->
   <div class="row">
     <div class="panel col">
-      <p><span class="label-estimate">simulated</span> Detection is simulated for this demonstration: range falloff, noise, track gaps, biologic false alarms.</p>
       <p><span class="label-estimate">stress-test</span> Probabilities are stress-test estimates from a declared, visible catalog, not operational forecasts.</p>
       <p><span class="label-fact">scope</span> The work stops at the handoff. Physically stopping a vehicle is out of scope by the sponsor's brief.</p>
       <p class="small muted"><span class="num pending" data-src="report:llm.sentence">[eval pending]</span></p>

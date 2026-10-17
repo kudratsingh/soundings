@@ -139,6 +139,26 @@ class ErrorPayload(_Model):
     message: str
 
 
+# --- WO-089 begin: live sensor range rings ---
+class SensorRangeRow(_Model):
+    """One hydrophone node's ring: the passive-sonar p = 0.5 range at its current noise."""
+
+    node_id: str
+    effective_range_m: Annotated[float, Field(ge=0.0)]
+    nl_db: float
+
+
+class SensorRangesPayload(_Model):
+    """Every node's ring, sent every tick after the ``tick`` event, sorted by node id
+    (simulated physics, ``config/physics.yaml`` demo values; a vessel transit raises NL and
+    shrinks the ring)."""
+
+    nodes: list[SensorRangeRow]
+
+
+# --- WO-089 end ---
+
+
 # --- envelopes ----------------------------------------------------------------------------
 
 
@@ -207,6 +227,15 @@ class ErrorEvent(EventEnvelope):
     payload: ErrorPayload
 
 
+# --- WO-089 begin ---
+class SensorRangesEvent(EventEnvelope):
+    type: Literal["sensor_ranges"] = "sensor_ranges"
+    payload: SensorRangesPayload
+
+
+# --- WO-089 end ---
+
+
 StreamEvent = Annotated[
     RunStarted
     | TickEvent
@@ -218,7 +247,8 @@ StreamEvent = Annotated[
     | ApprovalResultEvent
     | SitrepEvent
     | RunFinished
-    | ErrorEvent,
+    | ErrorEvent
+    | SensorRangesEvent,  # WO-089
     Field(discriminator="type"),
 ]
 
@@ -234,6 +264,7 @@ EVENT_TYPES: tuple[str, ...] = (
     "sitrep",
     "run_finished",
     "error",
+    "sensor_ranges",  # WO-089
 )
 
 STREAM_ADAPTER: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
@@ -272,6 +303,9 @@ __all__ = [
     "RunFinished",
     "RunStarted",
     "RungEvent",
+    "SensorRangeRow",  # WO-089
+    "SensorRangesEvent",  # WO-089
+    "SensorRangesPayload",  # WO-089
     "SitrepEvent",
     "StreamEvent",
     "TickEvent",

@@ -520,3 +520,62 @@ def test_pdf_has_eleven_pages(tmp_path: Path) -> None:
     )
     assert done.returncode == 0, done.stderr
     assert export_deck.count_pdf_pages(pdf) == 11
+
+
+# ---------------------------------------------------------------------------
+# --- WO-089 begin: slide 10 carries the physics cards, every value from config ---
+# ---------------------------------------------------------------------------
+
+PHYSICS = yaml.safe_load((REPO / "config" / "physics.yaml").read_text())
+
+
+def _physics_leaves() -> dict[str, Any]:
+    from soundings.physics_view import iter_params
+
+    return dict(iter_params(PHYSICS))
+
+
+@pytest.mark.parametrize("which", ["page_with", "page_without"])
+def test_physics_cards_replace_the_disclaimer_line(
+    which: str, request: pytest.FixtureRequest
+) -> None:
+    from soundings.physics import model_cards
+
+    page = request.getfixturevalue(which)
+    honesty = dict(walk(page).slides)["honesty"]
+    assert "range falloff, noise, track gaps" not in honesty
+    assert "Detection is simulated" in honesty and "demo value" in honesty
+    sourced = walk(page).sourced
+    heads = [
+        t for s, t in sourced if re.fullmatch(r"file:soundings/physics\.py#model_cards\.\d+", s)
+    ]
+    cards = model_cards()
+    assert len(heads) == len(cards) >= 4
+    for card, text in zip(cards, heads, strict=True):
+        assert text == f"{card.name}{card.equation}"
+    not_modeled = dict(sourced)["file:soundings/physics.py#model_cards.not_modeled"]
+    for item in ("hydrodynamics", "beam patterns", "multipath", "bottom type"):
+        assert item in not_modeled
+
+
+def test_physics_values_match_config(page_with: str) -> None:
+    leaves = _physics_leaves()
+    shown = {
+        src.removeprefix("config:physics."): text
+        for src, text in walk(page_with).sourced
+        if src.startswith("config:physics.")
+    }
+    assert set(shown) == set(leaves), "every config/physics.yaml parameter is on slide 10"
+    for key, node in leaves.items():
+        assert build_deck.physics_value(dict(node)) in shown[key], key
+    for node in leaves.values():
+        assert str(node["source"]).strip() and node["label"] == "demo value"
+
+
+def test_template_holds_the_physics_keys() -> None:
+    t = TEMPLATE.read_text()
+    assert "{{ physics_cards }}" in t and "{{ physics_not_modeled }}" in t
+    assert "Detection is simulated for this demonstration: range falloff" not in t
+
+
+# --- WO-089 end ---

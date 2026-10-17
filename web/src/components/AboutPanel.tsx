@@ -1,13 +1,22 @@
+import { useState } from 'react' // WO-089
 import type { AboutInfo, BoundaryInfo } from '../api'
+// --- WO-089 begin ---
+import type { PhysicsInfo } from '../api'
+import PhysicsPanel from './PhysicsPanel'
+// --- WO-089 end ---
 
 interface Props {
   open: boolean
   about: AboutInfo | null
   boundary: BoundaryInfo | null
   onClose(): void
+  physics?: PhysicsInfo | null // WO-089
 }
 
-export default function AboutPanel({ open, about, boundary, onClose }: Props) {
+export default function AboutPanel({ open, about, boundary, onClose, physics = null }: Props) {
+  // --- WO-089 begin: About | Physics tabs ---
+  const [tab, setTab] = useState<'about' | 'physics'>('about')
+  // --- WO-089 end ---
   if (!open) return null
   const h = about?.honesty
   return (
@@ -19,6 +28,26 @@ export default function AboutPanel({ open, about, boundary, onClose }: Props) {
             Close
           </button>
         </header>
+        {/* --- WO-089 begin: About | Physics tabs --- */}
+        <nav className="tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={tab === 'about'} className={tab === 'about' ? 'on' : ''} onClick={() => setTab('about')}>
+            About
+          </button>
+          <button
+            type="button"
+            role="tab"
+            data-testid="physics-tab"
+            aria-selected={tab === 'physics'}
+            className={tab === 'physics' ? 'on' : ''}
+            onClick={() => setTab('physics')}
+          >
+            Physics
+          </button>
+        </nav>
+        {tab === 'physics' && <PhysicsPanel physics={physics} />}
+        {tab === 'about' && (
+          <>
+        {/* --- WO-089 end --- */}
         {h && (
           <>
             <h3>{h.detection_heading}</h3>
@@ -37,6 +66,7 @@ export default function AboutPanel({ open, about, boundary, onClose }: Props) {
                 ))}
               </tbody>
             </table>
+            <p className="small">The equations, parameters and sources are on the Physics tab.</p>{/* WO-089 */}
             <p>Probabilities are labeled “{h.probability_label}”.</p>
             <p>{h.shared_tables_note}</p>
             <p>Map: {h.map_note}.</p>
@@ -82,6 +112,10 @@ export default function AboutPanel({ open, about, boundary, onClose }: Props) {
             </p>
           </>
         )}
+        {/* --- WO-089 begin --- */}
+          </>
+        )}
+        {/* --- WO-089 end --- */}
       </div>
     </div>
   )

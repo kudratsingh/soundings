@@ -178,6 +178,18 @@ export interface RunFinishedPayload {
   n_events: number
 }
 
+// --- WO-089 begin: live sensor range rings ---
+export interface SensorRangeRow {
+  node_id: string
+  effective_range_m: number
+  nl_db: number
+}
+
+export interface SensorRangesPayload {
+  nodes: SensorRangeRow[]
+}
+// --- WO-089 end ---
+
 interface Envelope<T extends string, P> {
   v: 1
   run_id: string
@@ -200,6 +212,7 @@ export type StreamEvent =
   | Envelope<'sitrep', SitrepPayload>
   | Envelope<'run_finished', RunFinishedPayload>
   | Envelope<'error', { message: string }>
+  | Envelope<'sensor_ranges', SensorRangesPayload> // WO-089
 
 export const RUNG_LABEL: Record<Rung, string> = {
   watch: 'watch',
