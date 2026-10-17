@@ -229,6 +229,7 @@ class RunResult:
     transition_log_hash: str
     hails: tuple[HailRecord, ...] = ()
     reacquisitions: tuple[ReacquireMatch, ...] = ()
+    ticks_stepped: int = 0  # WO-080: ticks the loop ran (< n_ticks when idle ticks skip)
 
     def case(self, case_id: str) -> CaseResult:
         for c in self.cases:
@@ -380,7 +381,9 @@ class ScenarioRunner:
         match_cfg: MatchConfig | None = None,
         hail_cfg: HailConfig | None = None,
         known: KnownOperatorTable | None = None,
+        skip_idle_ticks: bool = False,  # WO-080: outcome-identical tick skipping
     ) -> None:
+        self.skip_idle_ticks = skip_idle_ticks
         self.harbor = harbor if harbor is not None else load_harbor()
         self.scenario = (
             resolve_scenario(scenario, self.harbor) if isinstance(scenario, str) else scenario
@@ -446,6 +449,8 @@ class _V1Run:
         self.rehail_ticks = max(
             1, int(math.ceil(round(self.cfg.plan_watch.rehail_interval_s / self.tick_s, 9)))
         )
+        self.live_index = _ActiveIndex(self.contacts)  # WO-080: contacts covering the tick
+        self.ticks_stepped = 0
 
     # --- evidence -------------------------------------------------------------------------
 
@@ -638,6 +643,8 @@ class _V1Run:
             if oid == c.cid or o.linked_to is not None or o.n_seen == 0:
                 continue
             if not o.last_tick + self.r.timeout_ticks < first.tick:
+                continue
+            if _beyond_reacquire_gap(self, o.last_tick, first.tick):  # WO-080 (same filter)
                 continue
             if not self.table.for_contact(oid):
                 continue
@@ -963,18 +970,20 @@ class _V1Run:
 
     def step(self, tick: int) -> None:
         in_run = tick < self.sim.n_ticks
-        for cid in sorted(self.contacts):
+        self.ticks_stepped += 1
+        active = self.live_index.at(tick)  # WO-080: ids in the water
+        for cid in active:
             c = self.contacts[cid]
             c.n_seen = bisect.bisect_right(c.ticks, tick)
             if not c.dropped and tick >= c.dropped_at:
                 c.dropped = True
         # New observed ids.
-        for cid in sorted(self.contacts):
+        for cid in active:
             c = self.contacts[cid]
             if c.first_tick == tick:
                 self.on_new_track(c, tick)
         # Evidence cadence for every tracked contact.
-        for cid in sorted(self.contacts):
+        for cid in active:
             c = self.contacts[cid]
             if c.n_seen and not c.dropped:
                 if (tick - c.first_tick) % self.cfg.evidence_every_ticks == 0:
@@ -1011,11 +1020,16 @@ class _V1Run:
         if in_run:
             self.plan_watch_sends(tick)
 
+    def next_wake_tick(self, tick: int) -> int:
+        return _next_wake_tick(self, tick)  # WO-080 block
+
     def execute(self) -> RunResult:
         n = self.sim.n_ticks
-        for tick in range(n):
+        tick = 0
+        while tick < n:
             self.clock.tick = tick
             self.step(tick)
+            tick = self.next_wake_tick(tick) if self.r.skip_idle_ticks else tick + 1
         tick = n
         while self.events or any(k.state is S.WATCHING for k in self.cases.values()):
             self.clock.tick = tick
@@ -1042,6 +1056,7 @@ class _V1Run:
             transition_log_hash=transition_log_hash_of(self.transitions),
             hails=tuple(self.hail_records),
             reacquisitions=tuple(self.reacquisitions),
+            ticks_stepped=self.ticks_stepped,
         )
 
 
@@ -1483,6 +1498,107 @@ def main_v2(argv: Sequence[str] | None = None) -> int:
 
 
 # --- WO-033 end: runner v2 ---
+
+# --- tick skipping (WO-080) ---
+# Opt-in ``ScenarioRunner(..., skip_idle_ticks=True)``: the loop jumps from one tick that
+# can change anything to the next. Every tick it skips would run no code that changes
+# state, so skipped and unskipped runs write the same transition log, cases and notices
+# (tests/test_tick_skipping.py). Nothing here reads ground truth, sends anything, or
+# imports soundings.llm; it only schedules the loop.
+
+_PER_TICK_STATES: frozenset[LadderState] = frozenset(
+    {
+        S.INVESTIGATING,
+        S.ADVISING_SLOW,
+        S.HOLDING,
+        S.AWAITING_APPROVAL,
+        S.WATCH_AFTER_HANDOFF,
+    }
+)
+"""Past ASKING and not terminal: later runners act on these every tick."""
+
+_V1_PARKED: frozenset[LadderState] = frozenset({S.INVESTIGATING})
+"""Runner v1 ends a case at INVESTIGATING (``investigation_pending``) and never acts on it."""
+
+
+class _ActiveIndex:
+    """Contacts whose ``[first_tick, dropped_at]`` covers a tick, as sorted ids."""
+
+    def __init__(self, contacts: dict[str, _Contact]) -> None:
+        self._contacts = contacts
+        self._by_first = sorted(contacts, key=lambda cid: (contacts[cid].first_tick, cid))
+        self._next = 0
+        self._live: set[str] = set()
+        self._tick = -1
+
+    def at(self, tick: int) -> list[str]:
+        if tick < self._tick:
+            raise ValueError("the active index only moves forward")
+        self._tick = tick
+        while self._next < len(self._by_first):
+            cid = self._by_first[self._next]
+            if self._contacts[cid].first_tick > tick:
+                break
+            self._live.add(cid)
+            self._next += 1
+        self._live = {cid for cid in self._live if self._contacts[cid].dropped_at >= tick}
+        return sorted(self._live)
+
+
+def _beyond_reacquire_gap(run: _V1Run, last_tick: int, first_tick: int) -> bool:
+    """``match_reacquisition``'s own gap test, applied before building a ``LostTrack``."""
+    return (first_tick - last_tick) * run.tick_s > run.cfg.reacquire.max_gap_s
+
+
+def _wake_every_tick(run: _V1Run) -> bool:
+    """True while any case is past ASKING and not terminal (later runners act per tick).
+
+    Runner v1 itself parks cases at INVESTIGATING; a subclass (v2+) does not inherit that
+    exemption, so it is stepped every tick until it schedules its own wake ticks.
+    """
+    states = _PER_TICK_STATES - _V1_PARKED if type(run) is _V1Run else _PER_TICK_STATES
+    return any(case.state in states for case in run.cases.values())
+
+
+def _next_wake_tick(run: _V1Run, tick: int) -> int:
+    """The next tick that can change anything (``tick + 1`` at the least, ``n_ticks`` at most).
+
+    The minimum over: each contact's first tick, its evidence-cadence ticks while it is
+    tracked and its ``dropped_at``; each WATCHING case's readiness tick; the head of the
+    event queue; each plan watch's ``next_tick`` and the tick after its plan ends.
+    """
+    n = run.sim.n_ticks
+    nxt = tick + 1
+    if nxt >= n or _wake_every_tick(run):
+        return nxt
+    every = run.cfg.evidence_every_ticks
+    best = n
+    for c in run.contacts.values():
+        if c.first_tick > tick:
+            best = min(best, c.first_tick)
+        elif tick < c.dropped_at:
+            k = (tick - c.first_tick) // every + 1
+            best = min(best, c.first_tick + k * every, c.dropped_at)
+    need = run.cfg.watch_min_points
+    for case in run.cases.values():
+        if case.state is S.WATCHING:
+            ticks = run.contacts[case.contact_id].ticks
+            if len(ticks) >= need and ticks[need - 1] > tick:
+                best = min(best, ticks[need - 1])
+    if run.events:
+        best = min(best, run.events[0].tick)
+    if run.watches:
+        ends = {p.plan_id: p.end_tick for p in run.plans.at(tick)}
+        for w in run.watches.values():
+            best = min(best, w.next_tick)
+            end = ends.get(w.plan_id)
+            if end is not None:
+                best = min(best, end + 1)
+    return min(max(best, nxt), n)
+
+
+# --- end tick skipping (WO-080) ---
+
 
 # --- v3 (WO-043) ---
 # --- end v3 (WO-043) ---

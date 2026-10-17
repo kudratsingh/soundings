@@ -109,3 +109,50 @@ def test_rule_2_1_generator_outputs_only_scenarios() -> None:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
                 assert not banned.match(node.name), (path.name, node.name)
+
+
+# --- part B: the tick-skipping block in runner.py ----------------------------------------
+
+
+def _skip_block() -> str:
+    text = RUNNER.read_text(encoding="utf-8")
+    start = text.index("# --- tick skipping (WO-080) ---")
+    end = text.index("# --- end tick skipping (WO-080) ---")
+    return text[start:end]
+
+
+def test_rule_2_1_skip_block_only_schedules() -> None:
+    """The block defines no sender and assigns no ladder state; it returns ticks only."""
+    block = _skip_block()
+    tree = ast.parse(block)
+    banned = re.compile(r"\b(send|command|steer|route|instruct|notify|dispatch)\w*", re.I)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            assert not banned.match(node.name), node.name
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                assert not (isinstance(target, ast.Attribute) and target.attr == "state")
+    assert ".advance(" not in block and "check_transition" not in block
+
+
+def test_rule_2_1_nothing_past_handed_off_reachable() -> None:
+    from soundings.runner import ASK_TRANSITIONS
+    from soundings.schemas.enums import LadderState
+
+    beyond = {LadderState.WATCH_AFTER_HANDOFF, LadderState.RESOLVED_DEPARTED}
+    assert not any(to in beyond for _, _, to in ASK_TRANSITIONS)
+
+
+def test_rule_2_2_skip_block_reads_no_truth() -> None:
+    block = _skip_block()
+    tree = ast.parse(block)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            pytest.fail("the skip block imports nothing")
+        if isinstance(node, ast.Attribute):
+            assert node.attr not in {"truth_paths", "ais_tracks", "contact_truth", "gt_id"}
+    for name in ("truth_paths", "ais_tracks", "contact_truth", "grading", "gt_id"):
+        assert name not in block, name
+    assert "import soundings.llm" not in block and "from soundings.llm" not in block
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert "ais_tracks" not in runner and "truth_paths" not in runner.split('"""', 2)[2]
