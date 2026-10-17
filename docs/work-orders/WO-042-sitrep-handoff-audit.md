@@ -135,7 +135,14 @@ hand to a person (the SITREP and the handoff packet); slow and hold (cited as ac
 - §2.6: the citation and section tests.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: part A #18; part B see the WO-042 part B PR (`wo/042b-sitrep-writer-handoff`) · Merged commit: squash on merge · Test summary: 1682 passed, 1 skipped (part B adds 17 in tests/test_sitrep.py and 4 in tests/test_audit.py) · STATE.md updated: yes (WO-042 row)
+
+Part B (2026-10-17 07:30 PDT, `wo/042b-sitrep-writer-handoff`). No model was called; both committed fixture bodies are hand-written.
+- `soundings/llm/sitrep_writer.py`: `ROLE_SITREP_WRITER`, `SITREP_PROMPT_VERSION = "s1.0"`, `SITREP_WRITER_PROMPT`, `sitrep_writer_prompt(inputs)` (part A `sitrep_inputs` minus the full row list, plus `prompt_rows`: latest row per feature, assumption rows, posterior/decision/action/search-box rows; `missing_features`), `SitrepWriterOutput` (strict, extra keys refused), `SitrepViolation` (schema, recommended_rung_mismatch, citation, probability_in_prose, denylist, sections), `guard_sitrep(raw, inputs) -> SitrepGuardResult`, `template_sitrep(inputs)` (= `build_sitrep`), `SitrepPath` (template, fixture-replay, fallback-after-rejection, live reserved for WO-087), `SitrepOutcome`, `SitrepWriterRole(client, violations_path).write(inputs, when=)`.
+- `soundings/ladder/handoff.py`: `HandoffService(client=None, audit=None, *, run_id, violations_path, writer_mode="template"|"auto", channel="ui"|"sms_sim", clock=None, posterior=None)` is the driver's `SitrepWriterLike` (`render`, `render_with_rows`) and a `LadderListener`; `adapt(port_inputs, rows)`, `deliver(inputs, *, t_s, notes=())`, `interruptions(cid)`, `packets`, `outbox`; `HandoffPacket(contact_id, status, sitrep, markdown, channel, path, t_s, audit_seq, fixture_key, violation, interruption, unreachable, inputs)`; `evidence_table(rows)`.
+- `soundings/ladder/audit.py`: `AuditSink(audit, run_id, clock=None)` (probe, transition, guard, approval token-hash, action rows); `SitrepPayload` gains optional `path`, `fixture_key`, `violation_reason`, `channel` (dropped from the stored payload when unset, so part A rows hash as before); `SITREP_PATHS`.
+- `soundings/ladder/driver.py`: one marked WO-042 block in `_render`: a writer with `render_with_rows` gets the contact's rows; others render as before. The driver default stays `StubSitrepWriter`.
+- Fixtures: `tests/fixtures/model_calls/sitrep_writer/` holds the valid reply for the S05-shaped final SITREP (`c-0005`, key `257c4f67…`) and the rung-change reply (`c-0105`, claims `hold`, key `37854101…`); other bad bodies are installed into tmp stores from `tests/support/sitrep_bodies.py`. `tests/support/handoff_runs.py::run_s05` is the reference wiring.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - A 'What we don't know' line for a missing feature carries a `missing:` prefix and is exempt from the evidence-id citation rule; every other line cites ≥ 1 existing row id.
