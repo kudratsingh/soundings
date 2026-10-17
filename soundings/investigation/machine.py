@@ -851,14 +851,20 @@ class InvestigationMachine:
         return cp
 
     def _append_rows(self, rows: Sequence[EvidenceRow]) -> tuple[EvidenceRow, ...]:
-        added: list[EvidenceRow] = []
-        for row in rows:
+        """Append the probe's rows not yet in the table; return every row it produced.
+
+        A wired executor (WO-031 ``run_probe``) appends its rows itself, so the rows the
+        checkpoint carries are the ones the probe produced, not only the ones appended
+        here; ``resume`` appends whichever of them a fresh table lacks (WO-033 part B).
+        """
+        produced: list[EvidenceRow] = []
+        for row in dict.fromkeys(rows):
             if row.contact_id != self.contact_id:
                 raise ProbeError(f"probe row for {row.contact_id}, not {self.contact_id}")
             if row.row_id not in self.table:
                 self.table.append(row)
-                added.append(row)
-        return tuple(added)
+            produced.append(row)
+        return tuple(produced)
 
     def _probe_key(self, choice: ProbeChoice, tick: int) -> str:
         bucket = tick_bucket(tick, self.tick_s)
@@ -1004,17 +1010,48 @@ class InvestigationMachine:
         # Each probe round is three transitions; one more round scores and stops.
         return 3 * (self.budgets.probes_per_contact + 1) + 2
 
+    @property
+    def done(self) -> bool:
+        return self.state in TERMINAL_INVESTIGATION_STATES
+
+    @property
+    def recommendation(self) -> Recommendation | None:
+        """The frozen recommendation once ``STOPPED`` (``None`` before, or on error)."""
+        return self._recommendation
+
+    @property
+    def pending_tick(self) -> int | None:
+        """The tick the selected probe lands at, while ``PROBING``; else ``None``."""
+        if self.state is not InvestigationState.PROBING or self._pending is None:
+            return None
+        return self.tick + latency_ticks(self._pending.latency_s, self.tick_s)
+
+    def _step_once(self) -> None:
+        if len(self.checkpoints) > self._bound():
+            raise IllegalTransition("investigation exceeded its transition bound")
+        if self.state is InvestigationState.SCORING:
+            self._score()
+        elif self.state is InvestigationState.DECIDING:
+            self._decide()
+        else:
+            self._probe()
+
+    def advance(self, until_tick: int) -> tuple[InvestigationCheckpoint, ...]:
+        """Run transitions until terminal, or until the selected probe would land after
+        ``until_tick`` (a scenario driver calls this once per sim tick). Returns the
+        checkpoints written by this call."""
+        start = len(self.checkpoints)
+        while not self.done:
+            landing = self.pending_tick
+            if landing is not None and landing > until_tick:
+                break
+            self._step_once()
+        return tuple(self.checkpoints[start:])
+
     def run(self) -> InvestigationResult:
         """Run (or continue) until ``STOPPED`` or ``ERRORED``; bounded by the budgets."""
-        while self.state not in TERMINAL_INVESTIGATION_STATES:
-            if len(self.checkpoints) > self._bound():
-                raise IllegalTransition("investigation exceeded its transition bound")
-            if self.state is InvestigationState.SCORING:
-                self._score()
-            elif self.state is InvestigationState.DECIDING:
-                self._decide()
-            else:
-                self._probe()
+        while not self.done:
+            self._step_once()
         return self.result()
 
     def result(self) -> InvestigationResult:
