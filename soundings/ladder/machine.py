@@ -115,6 +115,27 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+# --- WO-042 audit semantics ---
+@dataclass(frozen=True)
+class _Saved:
+    """Machine memory and timers as they were before an uncommitted step."""
+
+    state: LadderState
+    rung: Rung
+    last_tick: int
+    latest_rows: dict[FeatureName, EvidenceRow]
+    threat_mass: float | None
+    benign_mass: float | None
+    basin: str | None
+    hold_scope: ActionScope | None
+    requested: ActionScope | None
+    backup_paged: bool
+    timers: tuple[Timer, ...]
+
+
+# --- WO-042 audit semantics end ---
+
+
 class LadderMachine:
     """One contact's ladder. ``guards`` decide, ``ledger`` executes, ``store`` remembers."""
 
@@ -243,6 +264,7 @@ class LadderMachine:
         """
         if self._state is TIMER_OWNER.get(timer.name):
             return result
+        before = self._save()  # WO-042 audit semantics: restored if the audit write fails
         self.timers.cancel(timer.name, self.contact_id)
         actions: tuple[LadderAction, ...] = ()
         records: tuple[ActionRecord, ...] = ()
@@ -259,10 +281,16 @@ class LadderMachine:
                 self._state,
                 event,
             )
+            # --- WO-042 audit semantics ---
             self._hold_scope = None
             actions = (action,)
+            try:
+                self._notify(None, actions, ())
+            except BaseException:
+                self._load(before)
+                raise
             records = (self._ledger.execute(action),)
-            self._notify(None, actions, ())
+            # --- WO-042 audit semantics end ---
         return StepResult(
             transitioned=False,
             reason=TIMER_DROPPED,
@@ -372,40 +400,53 @@ class LadderMachine:
     ) -> StepResult:
         row = TRANSITIONS[index]
         src = self._state
-        self._commit_payload(event)
-        fired_timer = event.payload.extra.get("timer")
-        if isinstance(fired_timer, str):
-            self.timers.cancel(fired_timer, self.contact_id)
-        actions = tuple(
-            self._act(kind, row, permit, event, now_s) for kind in self._action_kinds(row, event)
-        )
-        if row.dst in HANDLING_TERMINAL_STATES:
-            self.timers.cancel_contact(self.contact_id)
-        if src is LadderState.ADVISING_SLOW and row.dst is not LadderState.ADVISING_SLOW:
-            self.timers.cancel(SLOW_LIMIT, self.contact_id)
-        self._state = row.dst
-        self._rung = rung_after(self._rung, row.dst)
-        self._last_tick = max(self._last_tick, event.tick)
+        # --- WO-042 audit semantics ---
+        # Audit-or-no-commit: the listeners (the audit sink) see the step before it is
+        # committed. If one raises, machine memory and timers are restored, nothing goes
+        # to the ledger or the checkpoint store, and the exception reaches the caller.
+        saved = self._save() if write else None
+        try:
+            self._commit_payload(event)
+            fired_timer = event.payload.extra.get("timer")
+            if isinstance(fired_timer, str):
+                self.timers.cancel(fired_timer, self.contact_id)
+            actions = tuple(
+                self._act(kind, row, permit, event, now_s)
+                for kind in self._action_kinds(row, event)
+            )
+            if row.dst in HANDLING_TERMINAL_STATES:
+                self.timers.cancel_contact(self.contact_id)
+            if src is LadderState.ADVISING_SLOW and row.dst is not LadderState.ADVISING_SLOW:
+                self.timers.cancel(SLOW_LIMIT, self.contact_id)
+            self._state = row.dst
+            self._rung = rung_after(self._rung, row.dst)
+            self._last_tick = max(self._last_tick, event.tick)
+            checkpoint = LadderCheckpoint.build(
+                seq=self._seq,
+                contact_id=self.contact_id,
+                tick=event.tick,
+                now_s=round6(now_s),
+                from_state=src,
+                event=event,
+                guard_decisions=decisions,
+                to_state=row.dst,
+                rung=self._rung,
+                action_keys=tuple(a.idempotency_key for a in actions),
+                prev_hash=self._head,
+            )
+            if write:
+                self._notify(checkpoint, actions, decisions)
+        except BaseException:
+            if saved is not None:
+                self._load(saved)
+            raise
         records = tuple(self._ledger.execute(a) for a in actions)
-        checkpoint = LadderCheckpoint.build(
-            seq=self._seq,
-            contact_id=self.contact_id,
-            tick=event.tick,
-            now_s=round6(now_s),
-            from_state=src,
-            event=event,
-            guard_decisions=decisions,
-            to_state=row.dst,
-            rung=self._rung,
-            action_keys=tuple(a.idempotency_key for a in actions),
-            prev_hash=self._head,
-        )
         self._seq += 1
         self._head = checkpoint.hash
         self._checkpoints.append(checkpoint)
         if write:
             self._store.append(checkpoint)
-            self._notify(checkpoint, actions, decisions)
+        # --- WO-042 audit semantics end ---
         return StepResult(
             transitioned=True,
             reason=TRANSITIONED,
@@ -418,6 +459,42 @@ class LadderMachine:
             checkpoint=checkpoint,
             row_index=index,
         )
+
+    # --- WO-042 audit semantics ---
+    def _save(self) -> _Saved:
+        """Everything a step may change before it commits (see ``_fire``)."""
+        return _Saved(
+            state=self._state,
+            rung=self._rung,
+            last_tick=self._last_tick,
+            latest_rows=dict(self._latest_rows),
+            threat_mass=self._threat_mass,
+            benign_mass=self._benign_mass,
+            basin=self._basin,
+            hold_scope=self._hold_scope,
+            requested=self._requested,
+            backup_paged=self._backup_paged,
+            timers=self.timers.pending(),
+        )
+
+    def _load(self, saved: _Saved) -> None:
+        """Put back what ``_save`` took: the step that failed to audit never happened."""
+        self._state = saved.state
+        self._rung = saved.rung
+        self._last_tick = saved.last_tick
+        self._latest_rows = dict(saved.latest_rows)
+        self._threat_mass = saved.threat_mass
+        self._benign_mass = saved.benign_mass
+        self._basin = saved.basin
+        self._hold_scope = saved.hold_scope
+        self._requested = saved.requested
+        self._backup_paged = saved.backup_paged
+        for timer in self.timers.pending():
+            self.timers.cancel(timer.name, timer.contact_id)
+        for timer in saved.timers:
+            self.timers.arm(timer)
+
+    # --- WO-042 audit semantics end ---
 
     def _action_kinds(self, row: TransitionRow, event: LadderEvent) -> list[ActionKind]:
         """The row's actions, plus the ``strict_holds`` release rules (module docstring)."""

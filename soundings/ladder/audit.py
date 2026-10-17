@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping, Sequence
+import re
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -68,6 +69,10 @@ Hex64 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RowIdRef = Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]
 Key = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:|#=-]*$")]
 """Idempotency keys and fixture keys: non-empty, no whitespace."""
+
+# --- WO-042 audit semantics ---
+_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:|#=-]*$")
+# --- WO-042 audit semantics end ---
 
 
 class AuditKind(StrEnum):
@@ -287,6 +292,49 @@ class VerifyResult:
     head: str
 
 
+# --- WO-042 audit semantics ---
+# Idempotency claims live in their own table, outside the hash chain, so the chained row
+# format (and every part A row hash) is unchanged. A claim names (run_id, kind, key) and
+# the sha256 of the canonical payload it was first written with; the claim and its row
+# are inserted in the same SQLite transaction as every other row of the batch.
+
+AUDIT_KEY_TABLE = "audit_key"
+
+
+class AuditKeyRow(SQLModel, table=True):
+    """One idempotency claim: the first row written under ``(run_id, kind, key)``."""
+
+    __tablename__ = AUDIT_KEY_TABLE
+
+    run_id: str = SQLField(primary_key=True)
+    kind: str = SQLField(primary_key=True)
+    key: str = SQLField(primary_key=True)
+    body_sha256: str
+    seq: int
+
+
+class IdempotencyConflict(AuditError):
+    """A key already claimed for this run and kind was re-used with a different payload."""
+
+
+@dataclass(frozen=True)
+class AuditEntry:
+    """One row to write. ``idempotency_key`` (when set) makes a re-delivery a no-op."""
+
+    kind: AuditKind | str
+    payload: BaseModel | Mapping[str, Any]
+    contact_id: str = ""
+    idempotency_key: str | None = None
+
+
+def body_sha256(body: Mapping[str, Any]) -> str:
+    """sha256 of a payload's canonical JSON (sorted keys, fixed separators)."""
+    return hashlib.sha256(canonical_json(dict(body)).encode("utf-8")).hexdigest()
+
+
+# --- WO-042 audit semantics end ---
+
+
 _TRIGGERS = (
     f"CREATE TRIGGER IF NOT EXISTS {AUDIT_TABLE}_no_update BEFORE UPDATE ON {AUDIT_TABLE} "
     f"BEGIN SELECT RAISE(ABORT, '{APPEND_ONLY_MESSAGE}'); END",
@@ -342,7 +390,10 @@ class AuditLog:
     def __init__(self, db: Path | str | None = None) -> None:
         self.db: Path | str = db if db is not None else db_path_from_env()
         self.engine = _make_engine(self.db)
-        SQLModel.metadata.create_all(self.engine, tables=[AuditRow.__table__])  # type: ignore[attr-defined]
+        # --- WO-042 audit semantics ---
+        tables = [AuditRow.__table__, AuditKeyRow.__table__]  # type: ignore[attr-defined]
+        SQLModel.metadata.create_all(self.engine, tables=tables)
+        # --- WO-042 audit semantics end ---
         with self.engine.begin() as conn:
             for ddl in _TRIGGERS:
                 conn.execute(text(ddl))
@@ -355,6 +406,7 @@ class AuditLog:
     def close(self) -> None:
         self.engine.dispose()
 
+    # --- WO-042 audit semantics ---
     def append(
         self,
         kind: AuditKind | str,
@@ -363,45 +415,110 @@ class AuditLog:
         run_id: str,
         t_s: float,
         contact_id: str = "",
+        idempotency_key: str | None = None,
     ) -> AuditRow:
-        """Validate ``payload`` against the kind's schema, chain it, and insert it."""
-        try:
-            k = AuditKind(kind)
-        except ValueError as exc:
-            raise AuditError(f"unknown audit kind {kind!r}") from exc
+        """Validate ``payload`` against the kind's schema, chain it, and insert it.
+
+        With ``idempotency_key``, a second append of the same key and payload returns the
+        first row and writes nothing; the same key with another payload raises
+        ``IdempotencyConflict``.
+        """
+        (row,) = self.append_many(
+            [AuditEntry(kind, payload, contact_id, idempotency_key)], run_id=run_id, t_s=t_s
+        )
+        return row
+
+    def append_many(
+        self, entries: Sequence[AuditEntry], *, run_id: str, t_s: float
+    ) -> list[AuditRow]:
+        """Write ``entries`` as one SQLite transaction: every row, or none of them.
+
+        Every payload is validated before the database is touched. Keyed entries whose key
+        is already claimed with the same payload return the stored row and add nothing; a
+        claimed key with a different payload aborts the whole batch. Any error (including
+        a failing database) leaves the log exactly as it was and propagates to the caller,
+        so the step that asked for these rows can refuse to commit.
+        """
         if not run_id:
             raise AuditError("run_id must be non-empty")
         t = round6(float(t_s))
         if t < 0.0:
             raise AuditError("t_s is run-clock seconds and cannot be negative")
-        body = _payload_dict(k, payload)
+        prepared: list[tuple[AuditKind, dict[str, Any], AuditEntry]] = []
+        for entry in entries:
+            try:
+                k = AuditKind(entry.kind)
+            except ValueError as exc:
+                raise AuditError(f"unknown audit kind {entry.kind!r}") from exc
+            if entry.idempotency_key is not None and not _KEY_RE.match(entry.idempotency_key):
+                raise AuditError(f"malformed idempotency key {entry.idempotency_key!r}")
+            prepared.append((k, _payload_dict(k, entry.payload), entry))
         with self._session() as session:
             last = session.exec(
                 select(AuditRow).order_by(col(AuditRow.seq).desc()).limit(1)
             ).first()
-            seq = 1 if last is None else last.seq + 1
+            seq = 0 if last is None else last.seq
             prev = GENESIS_HASH if last is None else last.row_hash
-            row = AuditRow(
-                seq=seq,
-                run_id=run_id,
-                contact_id=contact_id,
-                kind=k.value,
-                t_s=t,
-                payload_json=canonical_json(body),
-                prev_hash=prev,
-                row_hash=chain_hash(
-                    prev,
+            out: list[AuditRow] = []
+            claimed: dict[tuple[str, str], tuple[str, AuditRow]] = {}
+            for k, body, entry in prepared:
+                key = entry.idempotency_key
+                digest = body_sha256(body)
+                if key is not None:
+                    known = claimed.get((k.value, key))
+                    if known is None:
+                        stored = session.get(AuditKeyRow, (run_id, k.value, key))
+                        if stored is not None:
+                            first = session.get(AuditRow, stored.seq)
+                            if first is None:  # pragma: no cover - the chain forbids deletes
+                                raise AuditError(f"claim {key!r} points at a missing row")
+                            known = (stored.body_sha256, first)
+                    if known is not None:
+                        if known[0] != digest:
+                            raise IdempotencyConflict(
+                                f"{k.value} key {key!r} was already used with another payload"
+                            )
+                        out.append(known[1])
+                        continue
+                seq += 1
+                row = AuditRow(
                     seq=seq,
                     run_id=run_id,
-                    contact_id=contact_id,
+                    contact_id=entry.contact_id,
                     kind=k.value,
                     t_s=t,
-                    payload=body,
-                ),
-            )
-            session.add(row)
+                    payload_json=canonical_json(body),
+                    prev_hash=prev,
+                    row_hash=chain_hash(
+                        prev,
+                        seq=seq,
+                        run_id=run_id,
+                        contact_id=entry.contact_id,
+                        kind=k.value,
+                        t_s=t,
+                        payload=body,
+                    ),
+                )
+                prev = row.row_hash
+                session.add(row)
+                if key is not None:
+                    session.add(
+                        AuditKeyRow(
+                            run_id=run_id, kind=k.value, key=key, body_sha256=digest, seq=seq
+                        )
+                    )
+                    claimed[(k.value, key)] = (digest, row)
+                out.append(row)
             session.commit()
-            return row
+            return out
+
+    def claimed(self, run_id: str, kind: AuditKind | str, key: str) -> AuditRow | None:
+        """The row first written under ``(run_id, kind, key)``, or ``None``."""
+        with self._session() as session:
+            stored = session.get(AuditKeyRow, (run_id, AuditKind(kind).value, key))
+            return None if stored is None else session.get(AuditRow, stored.seq)
+
+    # --- WO-042 audit semantics end ---
 
     def rows(
         self, *, run_id: str | None = None, kind: AuditKind | str | None = None
@@ -462,22 +579,40 @@ class AuditLog:
 class AuditSink:
     """A WO-040 ``LadderListener`` that writes every step to an ``AuditLog``.
 
-    Per listener call, in this order: probe rows from the event's ``probe_calls`` (once per
-    idempotency key; calls that do not fit ``ProbePayload`` are skipped), the transition row
-    (when a checkpoint was written), one guard row per ``GuardDecision``, the approval row
-    for an ``approval`` event (``token_hash`` only), then one row per action. ``t_s`` is
-    the run clock (``clock.now_s()``; the checkpoint's ``now_s`` when there is one).
+    Per listener call, in this order: probe rows from the event's ``probe_calls``, the
+    transition row (when a checkpoint was written), one guard row per ``GuardDecision``,
+    the approval row for an ``approval`` event (``token_hash`` only), then one row per
+    action. ``t_s`` is the run clock (``clock.now_s()``; the checkpoint's ``now_s`` when
+    there is one).
 
     A ``GuardDecision`` carries only ``inputs_hash`` and the granted scope, so the guard
-    row's ``inputs`` holds exactly those; the full ``GuardInputs`` dump needs the guard
-    port to expose its inputs (an open item for WO-043 part B).
+    row's ``inputs`` holds exactly those unless ``guard_inputs`` (a lookup from
+    ``inputs_hash`` to the dumped inputs, e.g. ``RecordingGuards.inputs_for``) knows more.
     """
 
-    def __init__(self, audit: AuditLog, run_id: str, clock: TickClock | None = None) -> None:
+    # --- WO-042 audit semantics ---
+    # All rows of one call are one ``AuditLog.append_many`` transaction, and it runs while
+    # the ladder step is still uncommitted (``LadderMachine`` notifies listeners before it
+    # commits): if the write fails, nothing is recorded, the exception propagates and the
+    # machine rolls the step back. Every mutation row carries an idempotency key, so a
+    # re-delivered step writes no second row:
+    #   probe       the probe's own key (a call without one is refused: fail closed);
+    #   transition  "<contact>#<checkpoint seq>" (a different checkpoint at a seq conflicts);
+    #   approval    the transition key of the approval event;
+    #   action      the action's ledger key;
+    #   guard       "<contact>:<guard>:<inputs_hash>" (one row per decision on given inputs).
+
+    def __init__(
+        self,
+        audit: AuditLog,
+        run_id: str,
+        clock: TickClock | None = None,
+        guard_inputs: Callable[[str], Mapping[str, Any] | None] | None = None,
+    ) -> None:
         self.audit = audit
         self.run_id = run_id
         self.clock = clock
-        self._probe_keys: set[str] = set()
+        self.guard_inputs = guard_inputs
 
     def _t_s(self, checkpoint: LadderCheckpoint | None) -> float:
         if checkpoint is not None:
@@ -486,80 +621,114 @@ class AuditSink:
             return float(self.clock.now_s())
         return 0.0
 
+    def entries(
+        self,
+        checkpoint: LadderCheckpoint | None,
+        actions: Sequence[LadderAction],
+        decisions: Sequence[GuardDecision],
+    ) -> list[AuditEntry]:
+        """The rows one listener call writes, in order (pure: nothing is written)."""
+        cid = ""
+        if checkpoint is not None:
+            cid = checkpoint.contact_id
+        elif actions:
+            cid = actions[0].contact_id
+        out: list[AuditEntry] = []
+        step_key: str | None = None
+        if checkpoint is not None:
+            event = checkpoint.event
+            row_ids = tuple(r.row_id for r in event.payload.rows)
+            step_key = f"{cid}#{checkpoint.seq}"
+            for call in event.payload.extra.get("probe_calls", ()) or ():
+                probe = probe_payload(call)
+                out.append(AuditEntry(AuditKind.PROBE, probe, cid, probe.idempotency_key))
+            transition = TransitionPayload(
+                from_state=checkpoint.from_state,
+                to_state=checkpoint.to_state,
+                event=event.kind.value,
+                arg=event.arg,
+                rung=checkpoint.rung,
+                checkpoint_hash=checkpoint.hash,
+                evidence_row_ids=row_ids,
+            )
+            out.append(AuditEntry(AuditKind.TRANSITION, transition, cid, step_key))
+        for decision in decisions:
+            dumped: dict[str, Any] = {
+                "inputs_hash": decision.inputs_hash,
+                "granted_scope": None
+                if decision.granted_scope is None
+                else decision.granted_scope.model_dump(mode="json"),
+            }
+            known = None if self.guard_inputs is None else self.guard_inputs(decision.inputs_hash)
+            if known is not None:
+                dumped["read"] = dict(known)
+            key = f"{cid}:{decision.guard.value}:{decision.inputs_hash}"
+            guard_row = guard_decision_payload(decision, dumped)
+            out.append(AuditEntry(AuditKind.GUARD_DECISION, guard_row, cid, key))
+        if checkpoint is not None and checkpoint.event.kind.value == "approval":
+            out.append(AuditEntry(AuditKind.APPROVAL, _approval_row(checkpoint), cid, step_key))
+        for action in actions:
+            action_row = ActionPayload(
+                action=action.kind.value,
+                idempotency_key=action.idempotency_key,
+                rung=None if checkpoint is None else checkpoint.rung,
+            )
+            out.append(
+                AuditEntry(
+                    AuditKind.ACTION, action_row, action.contact_id or cid, action.idempotency_key
+                )
+            )
+        return out
+
     def __call__(
         self,
         checkpoint: LadderCheckpoint | None,
         actions: Sequence[LadderAction],
         decisions: Sequence[GuardDecision],
     ) -> None:
-        t_s = self._t_s(checkpoint)
-        cid = ""
-        if checkpoint is not None:
-            cid = checkpoint.contact_id
-        elif actions:
-            cid = actions[0].contact_id
-        put = self.audit.append
-        if checkpoint is not None:
-            event = checkpoint.event
-            row_ids = tuple(r.row_id for r in event.payload.rows)
-            for call in event.payload.extra.get("probe_calls", ()) or ():
-                try:
-                    probe = ProbePayload.model_validate(dict(call))
-                except (ValueError, TypeError):
-                    continue
-                if probe.idempotency_key in self._probe_keys:
-                    continue
-                self._probe_keys.add(probe.idempotency_key)
-                put(AuditKind.PROBE, probe, run_id=self.run_id, t_s=t_s, contact_id=cid)
-            put(
-                AuditKind.TRANSITION,
-                TransitionPayload(
-                    from_state=checkpoint.from_state,
-                    to_state=checkpoint.to_state,
-                    event=event.kind.value,
-                    arg=event.arg,
-                    rung=checkpoint.rung,
-                    checkpoint_hash=checkpoint.hash,
-                    evidence_row_ids=row_ids,
-                ),
-                run_id=self.run_id,
-                t_s=t_s,
-                contact_id=cid,
-            )
-        for decision in decisions:
-            dumped = {
-                "inputs_hash": decision.inputs_hash,
-                "granted_scope": None
-                if decision.granted_scope is None
-                else decision.granted_scope.model_dump(mode="json"),
-            }
-            put(
-                AuditKind.GUARD_DECISION,
-                guard_decision_payload(decision, dumped),
-                run_id=self.run_id,
-                t_s=t_s,
-                contact_id=cid,
-            )
-        if checkpoint is not None and checkpoint.event.kind.value == "approval":
-            put(
-                AuditKind.APPROVAL,
-                _approval_row(checkpoint),
-                run_id=self.run_id,
-                t_s=t_s,
-                contact_id=cid,
-            )
-        for action in actions:
-            put(
-                AuditKind.ACTION,
-                ActionPayload(
-                    action=action.kind.value,
-                    idempotency_key=action.idempotency_key,
-                    rung=None if checkpoint is None else checkpoint.rung,
-                ),
-                run_id=self.run_id,
-                t_s=t_s,
-                contact_id=action.contact_id or cid,
-            )
+        entries = self.entries(checkpoint, actions, decisions)
+        if entries:
+            self.audit.append_many(entries, run_id=self.run_id, t_s=self._t_s(checkpoint))
+
+
+class GuardInputsLog:
+    """What each guard decision read, by ``inputs_hash`` (a ``BoundaryGuards.observer``).
+
+    ``record`` is the observer; calling the log looks an ``inputs_hash`` up for the sink.
+    """
+
+    def __init__(self) -> None:
+        self._read: dict[str, dict[str, Any]] = {}
+
+    def record(self, inputs_hash: str, read: dict[str, Any]) -> None:
+        self._read[inputs_hash] = json.loads(canonical_json(read))
+
+    def __call__(self, inputs_hash: str) -> Mapping[str, Any] | None:
+        return self._read.get(inputs_hash)
+
+
+PROBE_CALL_DISPLAY_FIELDS = frozenset({"contact_id", "tick", "cached", "source"})
+"""Fields of an investigation ``ProbeCall`` that the probe row does not store."""
+
+
+def probe_payload(call: Mapping[str, Any] | BaseModel) -> ProbePayload:
+    """A probe row from a probe call (a mapping or an investigation ``ProbeCall``).
+
+    Display-only fields are dropped and ``row_ids`` is read as ``evidence_row_ids``; any
+    other field, or a call without an idempotency key, is refused with ``AuditError`` so
+    no probe reaches the ladder unrecorded.
+    """
+    raw = call.model_dump(mode="json") if isinstance(call, BaseModel) else dict(call)
+    data = {k: v for k, v in raw.items() if k not in PROBE_CALL_DISPLAY_FIELDS}
+    if "row_ids" in data and "evidence_row_ids" not in data:
+        data["evidence_row_ids"] = data.pop("row_ids")
+    try:
+        return ProbePayload.model_validate_json(canonical_json(data))
+    except (ValueError, TypeError) as exc:
+        raise AuditError(f"probe call cannot be audited: {exc}") from exc
+
+
+# --- WO-042 audit semantics end ---
 
 
 def _approval_row(checkpoint: LadderCheckpoint) -> ApprovalPayload:
@@ -583,18 +752,24 @@ __all__ = [
     "SITREP_PATHS",
     "ActionPayload",
     "ApprovalPayload",
+    "AuditEntry",
     "AuditError",
+    "AuditKeyRow",
     "AuditKind",
     "AuditLog",
     "AuditRow",
     "AuditSink",
     "GuardDecisionPayload",
+    "GuardInputsLog",
+    "IdempotencyConflict",
     "LlmCallPayload",
     "ProbePayload",
     "SitrepPayload",
     "TransitionPayload",
     "VerifyResult",
     "approval_payload",
+    "body_sha256",
     "chain_hash",
     "guard_decision_payload",
+    "probe_payload",
 ]
