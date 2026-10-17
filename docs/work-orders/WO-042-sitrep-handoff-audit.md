@@ -135,7 +135,7 @@ hand to a person (the SITREP and the handoff packet); slow and hold (cited as ac
 - §2.6: the citation and section tests.
 
 ## Done
-PR: part A #18; part B see the WO-042 part B PR (`wo/042b-sitrep-writer-handoff`) · Merged commit: squash on merge · Test summary: 1682 passed, 1 skipped (part B adds 17 in tests/test_sitrep.py and 4 in tests/test_audit.py) · STATE.md updated: yes (WO-042 row)
+PR: part A #18; part B #37 (`wo/042b-sitrep-writer-handoff`) · Merged commit: squash on merge · Test summary: 1734 passed, 1 skipped after rebase (part B adds 17 in tests/test_sitrep.py and 4 in tests/test_audit.py) · STATE.md updated: yes (WO-042 row)
 
 Part B (2026-10-17 07:30 PDT, `wo/042b-sitrep-writer-handoff`). No model was called; both committed fixture bodies are hand-written.
 - `soundings/llm/sitrep_writer.py`: `ROLE_SITREP_WRITER`, `SITREP_PROMPT_VERSION = "s1.0"`, `SITREP_WRITER_PROMPT`, `sitrep_writer_prompt(inputs)` (part A `sitrep_inputs` minus the full row list, plus `prompt_rows`: latest row per feature, assumption rows, posterior/decision/action/search-box rows; `missing_features`), `SitrepWriterOutput` (strict, extra keys refused), `SitrepViolation` (schema, recommended_rung_mismatch, citation, probability_in_prose, denylist, sections), `guard_sitrep(raw, inputs) -> SitrepGuardResult`, `template_sitrep(inputs)` (= `build_sitrep`), `SitrepPath` (template, fixture-replay, fallback-after-rejection, live reserved for WO-087), `SitrepOutcome`, `SitrepWriterRole(client, violations_path).write(inputs, when=)`.
