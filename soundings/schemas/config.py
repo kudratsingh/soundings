@@ -139,6 +139,7 @@ class LadderConfig(StrictModel):
     budgets: dict[HarborId, NonNegInt]
     costs: dict[HarborId, float]
     watch_after_handoff: dict[HarborId, float]
+    approval: dict[HarborId, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _rungs(self) -> LadderConfig:
