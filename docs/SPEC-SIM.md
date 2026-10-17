@@ -79,3 +79,38 @@ The `expected` block is what the investigation tests assert. A twist adds a scen
 ## 5. Judge injection
 
 The UI can create a scenario on the fly: click a point on the map, pick a behavior and acoustic profile, pick filed/unfiled, press go. It is written as a scenario file under `scenarios/live/` with a timestamp and run through the same pipeline, so a judge's contact is reproducible afterwards.
+
+---
+
+## Amendments (2026-10-17)
+
+Appended; the text above is unchanged. Each item names its source. Where an item differs from the text above, the item wins.
+
+**Surface traffic and AIS (WO-080; supersedes DECISIONS 2026-10-16 22:25 "no vessel/surface traffic").**
+- New behavior `vessel_transit`: constant speed along waypoint legs, depth 0, stops at the last waypoint; speed outside the allowed band, depth > 0 or no waypoint is rejected at load.
+- A vessel is never detected by the subsurface model: it adds a `truth_paths` entry and zero detections, observed ids or `contact_truth` rows.
+- Vessels are reported only on an AIS-style feed, `SimRun.ais_tracks` (`AisReport` with `sog_mps`, `cog_deg`) at a fixed interval. Consumers (WO-083) read the feed, never `truth_paths`.
+- `ais_surface_correlation` may be filled from the feed through `extract_context` only (WO-080 cut-line item 1); catalog `evidence.table_hash()` stays unchanged.
+- Schema additions are additive: `ScenarioId` accepts `BT-\d{2}`; contacts gain `start_tick`/`end_tick` bounds and a `hypothesis` override; plans gain `job_type` (`JobType`, incl. `other`). Catalog track hashes for S01..S08 × seeds 1–3 are pinned in `tests/fixtures/sim_hashes_pre_wo080.json`.
+
+**BT-01 and the scenario generator (WO-080; DECISIONS 06:37).**
+- `python -m soundings.sim.generate --jobs 40 --vessels 3 --seed 7 --out scenarios/BT-01.yaml` writes the busy day deterministically (same seed → same bytes; `--check` verifies the committed file).
+- BT-01: 40 plans incl. one no-show (39 filed contacts clear at ask), 3 vessel transits, biologic false alarms at the configured rate, one rogue whose fields equal S05's `gt-1`; jobs ≥ 250 m from the rogue's path; peak concurrency ≥ 30.
+- tick_s 5 over 8 h (fallback tick_s 10 for BT-01 only, logged in DECISIONS if used). The committed BT-01 is surge-free; WO-085 builds the surge variant in memory.
+- Generator, AIS and grading code read no clock and use no module-level RNG; `grading.py` is never imported by the runner.
+
+**Detection model (WO-089; CLAUDE.md §8 A3; DECISIONS 07:51, 07:53).** Specified in §2a above (passive sonar equation, `config/physics.yaml` demo values, vessel-noise ambient and sea state, hail latency 2r/1500 m/s, camera visibility exp(−k·depth)·exp(−turbidity), responder battery ∝ v³). §2 remains the `detection.model: gaussian` comparison model; CLAUDE.md §4's "No sonar physics beyond that" is superseded by A3. Catalog outcomes stay unchanged except where the eval report explains why.
+
+**Responder vehicle as a mobile probe (WO-088; CLAUDE.md §8 A2; DECISIONS 07:51).**
+- One simulated responder vehicle per harbor, dispatched **to look** at a contact; it is a sensor carrier at rung ask, never an action against anything.
+- Vocabulary: look, station, standoff, dispatch to look, return to dock. Its states are named from this vocabulary in the WO-088 file.
+- Station-keeping invariants (enforced every tick, property-tested): standoff ≥ 25 m (it orbits at standoff, never inside); stays inside the declared security-zone geofence; re-stations if the contact moves; never closes faster than the contact; never places itself between the contact and an asset; one dispatch per contact.
+- Battery drain ∝ v³ (A3). Planner requests a look, never a position.
+
+**Prefix stability and tick skipping (DECISIONS 2026-10-16 23:05; WO-011; WO-080).**
+- The sim is prefix-stable: a run truncated at tick N equals the first N ticks of the full run (the runner may extend the sim tail ≤ 2× until terminal).
+- `skip_idle_ticks` (opt-in) never changes an outcome: identical `transition_log_text`, cases and notices with and without skipping over S01..S08 × seeds 1–3 and a truncated BT-01 (`tests/test_tick_skipping.py`). Runner states past ASKING force per-tick stepping.
+
+**Scenario families and trap scenarios (WO-051 part B; WO-051 addendum; owner directive 2026-10-17).**
+- Eval families: `catalog` (S01..S08), `twist0N` (`twists/0N/suite.yaml` or `scenarios/`), mis-specified (±20 % perturbed tables, scorer keeps the originals), toggle sweep (every twist toggle × catalog), threshold sensitivity (`threat_mass_handoff` 0.25→0.45 in 0.05 steps, report only; `config/ladder.yaml` never edited), scale (BT-01 at 40/100/200 jobs), seeds 1–20 (mean and min–max).
+- Trap scenarios TR-01..TR-04 (planned): known-answer scenarios that calibrate the `threat_mass` thresholds and feed the sensitivity curve. Ids reserved; contents and `expected` blocks are defined in WO-051 part B, not here.

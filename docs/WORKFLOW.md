@@ -79,3 +79,15 @@ Suggested paid-run moments (owner decides): once after Phase 3 to record probe-p
 - `docs/log/DECISIONS.md` — one line per decision that changed scope, a threshold, or the cost model.
 - `docs/log/PAID-RUNS.md` — every paid run.
 - `docs/log/VIOLATIONS.md` — every rejected model output (role, reason, fixture key). This is also demo material: "here is every time the model tried to do something it isn't allowed to."
+
+## 10. Coordinator practice (2026-10-17)
+
+Appended 2026-10-17; §1–§9 are unchanged. Sources: STATE.md (directives, WO table), CLAUDE.md §8, DECISIONS.md rows cited.
+
+- **Part A / part B split.** A WO whose upstream is still in flight is split by the coordinator: part A lands what needs only `main` (pure functions, schemas, unit tests, local adapter types); part B wires it to the upstream once that merges. Each part is its own branch and PR (`wo/NNNa-…`, `wo/NNNb-…`). Part B of every split is completed by the dependency-driven workflow (STATE.md).
+- **Coordinator addenda bind.** A "Coordinator addenda (…, binding)" section, or a `WO-NNN-ADDENDUM-*.md` file, is part of the WO. It overrides the WO body where they differ, and its rulings get a DECISIONS.md row.
+- **One STATE row per WO.** Each agent edits only its own row in `docs/STATE.md` → "Work-order status"; the coordinator edits everything else in STATE.md (STATE.md table header).
+- **Code on `main` is authoritative over WO text.** When a WO's interface text disagrees with what merged, follow `main` and record the choice in the WO's Done section or a DECISIONS row (e.g. WO-021 "Code on main absorbed"; DECISIONS 07:03 "the geojson is authoritative over WO text").
+- **Browser smokes are opt-in locally.** Playwright smokes run with `SOUNDINGS_E2E=1` (`SOUNDINGS_E2E_REQUIRED=1` where a WO's exit test demands one); CI skips them. WOs with a browser exit test run it with the flag and paste the output (CLAUDE.md §8 A7; DECISIONS 07:10).
+- **Timestamps from `date`.** Every stamp in STATE.md, DECISIONS.md, WO Done sections and commit bodies comes from `date "+%Y-%m-%d %H:%M %Z"`, never from memory (DECISIONS 2026-10-16 23:35).
+- **No external references.** Nothing in this repository names or links the owner's other repositories: no repo names, paths, NOTICE lines or links in code, comments, docs, DECISIONS, STATE, README, deck, Devpost text or commit messages. Where the lineage matters, write "a state-machine agent design the owner has used before". Patterns may be reused only as fresh code against Soundings' own types (owner directive 2026-10-17).
