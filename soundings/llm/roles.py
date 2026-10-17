@@ -28,7 +28,7 @@ from typing import Any, Literal, cast
 from soundings.canonical import round6
 from soundings.investigation.evidence import EvidenceTable
 from soundings.investigation.posterior import PosteriorReport
-from soundings.llm.client import ModelClient, fixture_key
+from soundings.llm.client import LlmCallRecord, ModelClient, fixture_key
 from soundings.llm.fallback import fallback_probe_plan, template_hypotheses
 from soundings.llm.guard import (
     DEFAULT_VIOLATIONS_PATH,
@@ -63,6 +63,7 @@ __all__ = [
     "build_hypothesis_writer_inputs",
     "build_probe_planner_inputs",
     "evidence_summary",
+    "llm_call_fields",
     "run_guarded_role",
 ]
 
@@ -194,6 +195,27 @@ class RoleOutcome[T]:
     violation: ViolationCode | None
     fixture_key: str
     detail: str = ""
+    # --- WO-087 begin: the client's record of the call (None when no call was made) ---
+    call: LlmCallRecord | None = None
+    # --- WO-087 end ---
+
+
+# --- WO-087 begin: which call a role just made ---
+def new_call(client: ModelClient, before: int) -> LlmCallRecord | None:
+    """The record ``client.call`` appended after ``before`` entries, if any."""
+    log = getattr(client, "call_log", None)
+    if not isinstance(log, list) or len(log) <= before:
+        return None
+    last = log[-1]
+    return last if isinstance(last, LlmCallRecord) else None
+
+
+def call_log_size(client: ModelClient) -> int:
+    log = getattr(client, "call_log", None)
+    return len(log) if isinstance(log, list) else 0
+
+
+# --- WO-087 end ---
 
 
 def run_guarded_role[T](
@@ -210,17 +232,21 @@ def run_guarded_role[T](
 ) -> RoleOutcome[T]:
     """One model call through the guard; the fallback on a miss or a rejection."""
     key = fixture_key(role, inputs)
+    before = call_log_size(client)
     raw = client.call(role, inputs, system=system)
+    call = new_call(client, before)
     if raw is None:
-        return RoleOutcome("fallback", fallback(), REPLAY_MISS, None, key)
+        # WO-087: a live fallback (budget, timeout, error) keeps its own reason
+        reason = call.reason if call is not None and call.reason else REPLAY_MISS
+        return RoleOutcome("fallback", fallback(), reason, None, key, call=call)
     result = check(raw)
     if not result.accepted or result.violation is not None:
         code = result.violation or ViolationCode.SCHEMA_INVALID
         append_violation(
             ViolationRow(when, role, key, code, fallback_name, result.detail), violations_path
         )
-        return RoleOutcome("fallback", fallback(), code.value, code, key, result.detail)
-    return RoleOutcome("llm", cast(T, result.value), None, None, key)
+        return RoleOutcome("fallback", fallback(), code.value, code, key, result.detail, call)
+    return RoleOutcome("llm", cast(T, result.value), None, None, key, call=call)
 
 
 def _llm_calls_per_contact() -> int:
@@ -334,3 +360,38 @@ class HypothesisWriter:
             violations_path=self.violations_path,
             system=HYPOTHESIS_WRITER_PROMPT,
         )
+
+
+# --- WO-087 begin: an outcome as llm_call audit fields ---
+LlmCallOutcome = Literal["accepted", "rejected", "fallback_no_fixture", "fallback"]
+
+
+def llm_call_fields(role: str, outcome: RoleOutcome[Any]) -> dict[str, Any]:
+    """Keyword arguments for ``soundings.ladder.audit.llm_call_payload`` for one decision.
+
+    ``accepted`` when the guard took the reply; ``rejected`` with the lower-cased
+    ``ViolationCode`` when it did not; ``fallback_no_fixture`` on a replay miss; and
+    ``fallback`` when no reply came for any other reason (spent role or live budget,
+    timeout, transport error), with that reason. The client's call record supplies the
+    path (``live | replay | fallback``), tokens and latency.
+    """
+    kind: LlmCallOutcome
+    if outcome.source == "llm":
+        kind = "accepted"
+    elif outcome.violation is not None:
+        kind = "rejected"
+    elif outcome.fallback_reason == REPLAY_MISS:
+        kind = "fallback_no_fixture"
+    else:
+        kind = "fallback"
+    return {
+        "role": role,
+        "fixture_key": outcome.fixture_key,
+        "outcome": kind,
+        "violation_reason": None if outcome.violation is None else outcome.violation.value.lower(),
+        "call": outcome.call,
+        "reason": outcome.fallback_reason if outcome.call is None else None,
+    }
+
+
+# --- WO-087 end ---
