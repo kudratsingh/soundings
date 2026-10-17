@@ -57,6 +57,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
 | 087 | bounded live mode (stage) | WO written | wo/087-bounded-live-mode | | | |
+| 089 | physics cards (sonar-equation detection, sourced physics config, About -> Physics, live range rings) | WO written (owner numbered it WO-088; renumbered); P1 wo/089a-physics-core + P2 wo/089b-physics-ui-deck | wo/089a-physics-core, wo/089b-physics-ui-deck | | | |
 | 090 | deck + Devpost fields | in review | wo/090-deck-devpost | | | 1515 passed (28 tests/test_deck.py) |
 | 092 | mentor brief | in review | wo/092-mentor-brief | | | see PR (test_mentor_brief 8) |
 | 091 | README for the review committee | in review | wo/091-readme-committee | | | README + docs/architecture.svg + 3 UI screenshots; fresh-clone `make setup && make demo` verified |
