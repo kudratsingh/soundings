@@ -18,6 +18,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+# --- WO-086 begin ---
+from soundings.eval.policies import LedgerBucket
+from soundings.investigation.kalman import ProjectionView
+
+# --- WO-086 end ---
 from soundings.runner import LostVehicleNotice
 from soundings.schemas.enums import Hypothesis, LadderState, Rung, ToggleName
 from soundings.schemas.evidence import EvidenceRow
@@ -53,6 +58,11 @@ class TickContact(_Model):
     depth_m: float
     confidence: float
     sensor_id: str
+    # --- WO-086 begin ---
+    projection: ProjectionView | None = None
+    """WO-084's 60 s projection from the observed track up to this reading (None below two
+    readings). A stress-test estimate: it assumes the contact holds its velocity."""
+    # --- WO-086 end ---
 
 
 class TickPayload(_Model):
@@ -157,6 +167,36 @@ class SensorRangesPayload(_Model):
 
 
 # --- WO-089 end ---
+
+
+# --- WO-086 begin: rung ledger and blunt-policy counter ---
+BLUNT_LABEL: Literal["counterfactual: bang baseline"] = "counterfactual: bang baseline"
+
+
+class BluntPayload(_Model):
+    """Berth closures the bang baseline would have asked for on the same seeded contact
+    stream (WO-050). Counterfactual: the approvals are assumed, nothing here happened."""
+
+    berth_closures: Annotated[int, Field(ge=0)]
+    """One per unknown contact a closure covers (DECISIONS 2026-10-17 06:37)."""
+    episodes: Annotated[int, Field(ge=0)]
+    """Distinct closure episodes (one per closure request); the secondary number."""
+    closure_minutes: Annotated[float, Field(ge=0.0)]
+    available: bool
+    """False when the counter's sim run does not match the stream (shown as unavailable)."""
+    label: Literal["counterfactual: bang baseline"] = BLUNT_LABEL
+
+
+class LedgerPayload(_Model):
+    """Contacts per ledger bucket so far (each contact once, at its max rung) and the
+    blunt counter. Display only: nothing reads it back into the ladder."""
+
+    counts: dict[LedgerBucket, Annotated[int, Field(ge=0)]]
+    contacts_seen: Annotated[int, Field(ge=0)]
+    blunt: BluntPayload
+
+
+# --- WO-086 end ---
 
 
 # --- envelopes ----------------------------------------------------------------------------
@@ -273,6 +313,13 @@ class ResponderEvent(EventEnvelope):
 
 
 # --- WO-088 end ---
+# --- WO-086 begin ---
+class LedgerEvent(EventEnvelope):
+    type: Literal["ledger"] = "ledger"
+    payload: LedgerPayload
+
+
+# --- WO-086 end ---
 
 
 StreamEvent = Annotated[
@@ -289,8 +336,11 @@ StreamEvent = Annotated[
     | ErrorEvent
     | SensorRangesEvent  # WO-089
     # --- WO-088 begin ---
-    | ResponderEvent,
+    | ResponderEvent
     # --- WO-088 end ---
+    # --- WO-086 begin ---
+    | LedgerEvent,
+    # --- WO-086 end ---
     Field(discriminator="type"),
 ]
 
@@ -310,6 +360,9 @@ EVENT_TYPES: tuple[str, ...] = (
     # --- WO-088 begin ---
     "responder",
     # --- WO-088 end ---
+    # --- WO-086 begin ---
+    "ledger",
+    # --- WO-086 end ---
 )
 
 STREAM_ADAPTER: TypeAdapter[StreamEvent] = TypeAdapter(StreamEvent)
@@ -347,6 +400,10 @@ __all__ = [
     "PosteriorEvent",
     "RunFinished",
     "RunStarted",
+    "BLUNT_LABEL",  # WO-086
+    "BluntPayload",  # WO-086
+    "LedgerEvent",  # WO-086
+    "LedgerPayload",  # WO-086
     "ResponderEvent",
     "ResponderPayload",
     "ResponderTrailPoint",

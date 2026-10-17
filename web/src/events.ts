@@ -61,6 +61,10 @@ export interface TickContact {
   depth_m: number
   confidence: number
   sensor_id: string
+  // --- WO-086 begin ---
+  /** WO-084's 60 s projection from the observed track (null below two readings). */
+  projection?: ProjectionView | null
+  // --- WO-086 end ---
 }
 
 export interface TickPayload {
@@ -215,6 +219,50 @@ export interface ResponderPayload {
   trail: ResponderTrailPoint[]
 }
 // --- WO-088 end ---
+// --- WO-086 begin: projected track, rung ledger and blunt-policy counter ---
+export interface ProjectionEllipse {
+  semi_major_m: number
+  semi_minor_m: number
+  /** Compass bearing of the major axis, [0, 180). */
+  orientation_deg: number
+  p: number
+}
+
+/** A stress-test estimate: where the contact is in 60 s if it holds its velocity. */
+export interface ProjectionView {
+  contact_id: string
+  tick: number
+  lat: number
+  lon: number
+  /** East velocity, m/s. */
+  vx: number
+  /** North velocity, m/s. */
+  vy: number
+  speed_mps: number
+  heading_deg: number
+  proj_lat: number
+  proj_lon: number
+  ellipse: ProjectionEllipse
+}
+
+export type LedgerBucket = 'resolved_at_watch' | 'cleared_at_ask' | 'advisories' | 'holds' | 'handed_off'
+export const LEDGER_BUCKETS: LedgerBucket[] = ['resolved_at_watch', 'cleared_at_ask', 'advisories', 'holds', 'handed_off']
+
+/** Counterfactual: the bang baseline on the same seeded contacts (approvals assumed). */
+export interface BluntPayload {
+  berth_closures: number
+  episodes: number
+  closure_minutes: number
+  available: boolean
+  label: 'counterfactual: bang baseline'
+}
+
+export interface LedgerPayload {
+  counts: Record<LedgerBucket, number>
+  contacts_seen: number
+  blunt: BluntPayload
+}
+// --- WO-086 end ---
 
 interface Envelope<T extends string, P> {
   v: 1
@@ -241,7 +289,10 @@ export type StreamEvent =
   | Envelope<'sensor_ranges', SensorRangesPayload> // WO-089
   // --- WO-088 begin ---
   | Envelope<'responder', ResponderPayload>
-// --- WO-088 end ---
+  // --- WO-088 end ---
+  // --- WO-086 begin ---
+  | Envelope<'ledger', LedgerPayload>
+// --- WO-086 end ---
 
 export const RUNG_LABEL: Record<Rung, string> = {
   watch: 'watch',
