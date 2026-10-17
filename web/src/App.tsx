@@ -19,6 +19,10 @@ import { autoSelect, useRun } from './useRun'
 // --- WO-062P begin ---
 import PresenterMode from './components/PresenterMode'
 // --- WO-062P end ---
+// --- WO-089 begin ---
+import type { PhysicsInfo } from './api'
+import { fetchPhysics } from './api'
+// --- WO-089 end ---
 
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
@@ -49,6 +53,15 @@ function App() {
   const [sitrepOpen, setSitrepOpen] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const run = useRun(runId)
+  // --- WO-089 begin: physics cards; rings fall back to base-noise ranges before a run ---
+  const [physics, setPhysics] = useState<PhysicsInfo | null>(null)
+  useEffect(() => {
+    fetchPhysics().then(setPhysics).catch((e: unknown) => setProblem(String(e)))
+  }, [])
+  const ranges = Object.keys(run.sensorRanges).length
+    ? run.sensorRanges
+    : Object.fromEntries((physics?.nodes ?? []).map((n) => [n.node_id, n]))
+  // --- WO-089 end ---
 
   const begin = (scenario: string, seed: number | null, speed: number | null) => {
     setPicked(null)
@@ -121,6 +134,7 @@ function App() {
           contacts={visible}
           selected={selected}
           onSelect={(id) => setPicked(id)}
+          ranges={ranges} // WO-089
         />
         <div className="side">
           <RungIndicator active={activeRung} livesOn={boundary?.lives_on ?? ['ask', 'hand_to_person']} />
@@ -146,7 +160,7 @@ function App() {
           setHighlight(rowId)
         }}
       />
-      <AboutPanel open={aboutOpen} about={about} boundary={boundary} onClose={() => setAboutOpen(false)} />
+      <AboutPanel open={aboutOpen} about={about} boundary={boundary} onClose={() => setAboutOpen(false)} physics={physics} /* WO-089 */ />
       {/* --- WO-061 block (judge panel) --- */}
       {/* --- end WO-061 block --- */}
       {/* --- WO-062 block (demo runner) --- */}

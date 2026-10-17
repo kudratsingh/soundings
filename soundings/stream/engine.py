@@ -34,6 +34,8 @@ from soundings.schemas.scenario import Scenario
 from soundings.sim.hashing import track_hash
 from soundings.sim.scenario import resolve_scenario
 from soundings.stream.config import ui_config
+
+# --- WO-089 begin: live sensor range rings ---
 from soundings.stream.events import (
     ApprovalResultEvent,
     EvidenceRowEvent,
@@ -44,6 +46,9 @@ from soundings.stream.events import (
     RungPayload,
     RunStarted,
     RunStartedPayload,
+    SensorRangeRow,
+    SensorRangesEvent,
+    SensorRangesPayload,
     SitrepEvent,
     SitrepPayload,
     StreamEvent,
@@ -53,6 +58,36 @@ from soundings.stream.events import (
     TransitionEvent,
     TransitionPayload,
 )
+
+
+def sensor_range_events_at(sim: object, n_ticks: int) -> dict[int, SensorRangesPayload]:
+    """The ``sensor_ranges`` payload of every tick: each node's passive-sonar p = 0.5 range
+    at its current noise (base + sea state + the run's AIS vessel fixes, WO-080, when
+    present), sorted by node id. Computed when a ring changes and repeated in between."""
+    from soundings.physics_view import sensor_range_series
+
+    ais = getattr(sim, "ais_tracks", None) or {}
+    tick_s = float(getattr(sim, "tick_s", 1.0))
+    series = sensor_range_series(ais, n_ticks, tick_s)
+    out: dict[int, SensorRangesPayload] = {}
+    current: SensorRangesPayload | None = None
+    for tick in range(max(1, n_ticks)):
+        rings = series.get(tick)
+        if rings is not None:
+            current = SensorRangesPayload(
+                nodes=[
+                    SensorRangeRow(
+                        node_id=r.node_id, effective_range_m=r.effective_range_m, nl_db=r.nl_db
+                    )
+                    for r in rings
+                ]
+            )
+        if current is not None:
+            out[tick] = current
+    return out
+
+
+# --- WO-089 end ---
 
 MAX_POLL_S = 0.25
 """Longest a subscriber sleeps before re-checking the pacing clock."""
@@ -124,6 +159,9 @@ def batch_events(
 
     candidates = [sim.n_ticks - 1, *transitions_at, *rows_at, *(n.tick for n in result.notices)]
     last_tick = max(0, *candidates)
+    # --- WO-089 begin ---
+    ranges_at = sensor_range_events_at(sim, last_tick + 1)
+    # --- WO-089 end ---
 
     events.append(
         RunStarted.model_validate(
@@ -165,6 +203,12 @@ def batch_events(
                 {**stamp(tick), "payload": TickPayload(contacts=readings.get(tick, []))}
             )
         )
+        # --- WO-089 begin ---
+        if tick in ranges_at:
+            events.append(
+                SensorRangesEvent.model_validate({**stamp(tick), "payload": ranges_at[tick]})
+            )
+        # --- WO-089 end ---
         for row in rows_at.get(tick, []):
             send_row(row, tick)
         for t in transitions_at.get(tick, []):
@@ -486,6 +530,7 @@ __all__ = [
     "batch_events",
     "get_engine",
     "register_source",
+    "sensor_range_events_at",  # WO-089
     "source_names",
     "stream_events",
 ]

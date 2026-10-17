@@ -430,3 +430,62 @@ button {
     flex: 0 0 50vh;
   }
 }
+
+/* --- WO-089 begin: About -> Physics cards --- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+
+.tabs button.on {
+  font-weight: 700;
+  border-bottom: 2px solid var(--accent);
+}
+
+.physics-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.physics-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.physics-card h4 {
+  margin: 0 0 4px;
+}
+
+.physics-card .equation {
+  display: block;
+  margin: 4px 0 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.physics-card .params td {
+  vertical-align: top;
+}
+
+.physics-card .params td.num {
+  white-space: nowrap;
+}
+
+.demo-label {
+  display: inline-block;
+  border: 1px solid var(--assumption);
+  color: var(--assumption);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.not-modeled {
+  margin: 6px 0 0;
+}
+/* --- WO-089 end --- */
