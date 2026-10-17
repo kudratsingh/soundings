@@ -1103,6 +1103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 # of the frozen recommendation; nothing here can edit it. runner.py imports nothing from
 # ``soundings.llm``: the model roles are built inside ``soundings.investigation_wiring``.
 
+import dataclasses  # noqa: E402  # WO-088
 from collections.abc import Mapping  # noqa: E402
 from types import MappingProxyType  # noqa: E402
 from typing import Any  # noqa: E402
@@ -1122,12 +1123,23 @@ from soundings.investigation.posterior import (  # noqa: E402
     load_likelihood_tables,
     load_prior_config,
 )
+from soundings.investigation.probes import (  # noqa: E402  # WO-088
+    ResponderPort,
+    run_probe,
+    search_position,
+)
 from soundings.investigation_wiring import (  # noqa: E402
     DEFAULT_VIOLATIONS_PATH,
     InvestigationHandle,
     ProbeWorld,
     make_kit,
+    responder_available,  # WO-088
 )
+
+# --- WO-088 begin ---
+RESPONDER_SOURCE = "responder"
+"""``ProbeCall.source`` of a dispatch the runner makes itself (the S02 search beat)."""
+# --- WO-088 end ---
 
 OUTCOME_STATES: dict[StopOutcome, LadderState] = {
     StopOutcome.RESOLVED_BENIGN: S.RESOLVED_BENIGN,
@@ -1212,6 +1224,7 @@ class _V2Run(_V1Run):
         llm_roles: bool,
         violations_path: Path,
         fixture_store: Any,
+        responder: ResponderPort | None = None,  # WO-088
     ) -> None:
         super().__init__(runner)
         sc = runner.scenario
@@ -1225,6 +1238,7 @@ class _V2Run(_V1Run):
             hail=self.hail,
             match_cfg=self.cfg,
             known=runner.known,
+            responder=responder,  # WO-088
         )
         self.kit = make_kit(
             world,
@@ -1248,13 +1262,77 @@ class _V2Run(_V1Run):
     # --- entering the investigation -----------------------------------------------------
 
     def ask_reply(self, case: _Case, c: _Contact, tick: int, hail: HailResult) -> None:
+        sent = len(self.notices)  # WO-088
         super().ask_reply(case, c, tick, hail)
+        if len(self.notices) > sent and case.state is S.LOST_VEHICLE:  # WO-088
+            self.responder_search_beat(case, c, self.notices[-1], tick)
         if case.state is S.INVESTIGATING and case.case_id not in self.handles:
             # Budget scope (DECISIONS 23:05): the ask-rung hails count as paid probes.
             ledger = InvestigationLedger(paid_used=len(set(case.hail_keys)))
             self.handles[case.case_id] = self.kit.handle(
                 c.cid, self.table, max_tick=self.sim.n_ticks - 1, ledger=ledger
             )
+
+    # --- WO-088 begin ---
+    def responder_search_beat(
+        self, case: _Case, c: _Contact, notice: LostVehicleNotice, tick: int
+    ) -> None:
+        """The S02 search beat (CLAUDE.md section 8 A2): with a responder, a LOST_VEHICLE
+        case sends it over the drift box (rung ask, one dispatch per contact, guard-checked)
+        and the plan's operator gets a follow-up notice, stamped at the tick the search
+        result lands, with what it found. Not an interruption (A5); the case stays closed."""
+        world = self.kit.world
+        if world.responder is None or not responder_available(world, c.cid, self.table, tick):
+            return
+        ctx = world.context(c.cid, tick, self.kit.rung)
+        ctx = dataclasses.replace(ctx, search_box=notice.search_box)
+        res = run_probe(ProbeId.RESPONDER_SEARCH_BOX, ctx, self.table, cache=self.kit.cache)
+        self.calls.append(
+            ProbeCall(
+                case_id=case.case_id,
+                contact_id=c.cid,
+                probe_id=res.probe_id,
+                tick=res.landed_tick,
+                idempotency_key=res.key,
+                cost_usd=0.0,
+                cached=res.cached,
+                source=RESPONDER_SOURCE,
+            )
+        )
+        ids = tuple(sorted({r.row_id for r in res.rows}))
+        line = {
+            "case_id": case.case_id,
+            "contact_id": c.cid,
+            "probe_id": res.probe_id,
+            "sent_tick": res.sent_tick,
+            "landed_tick": res.landed_tick,
+            "rows": list(ids),
+        }
+        self.nested.append(canonical_json({"responder": line}))
+        if not ids:
+            return
+        found = search_position(res.rows)
+        where = (
+            f"found the vehicle at {found[0]:.6f}, {found[1]:.6f}"
+            if found is not None
+            else "did not find the vehicle in the box"
+        )
+        text = (
+            f"responder searched the drift box (dispatched at tick {tick}, result at tick "
+            f"{res.landed_tick}): {where}"
+        )
+        extra = NoticeLine(section="Search box", text=text, evidence_row_ids=ids)
+        self.notices.append(
+            notice.model_copy(
+                update={
+                    "tick": res.landed_tick,
+                    "lines": (*notice.lines, extra),
+                    "evidence_row_ids": tuple(sorted({*notice.evidence_row_ids, *ids})),
+                }
+            )
+        )
+
+    # --- WO-088 end ---
 
     # --- log --------------------------------------------------------------------------------
 
@@ -1333,6 +1411,7 @@ class _V2Run(_V1Run):
                 notice = self.notice(case, c, view, outcome, tick)
                 self.notices.append(notice)
                 cited += list(notice.evidence_row_ids)
+                self.responder_search_beat(case, c, notice, tick)  # WO-088
         self.advance(
             case,
             tick,
@@ -1444,13 +1523,17 @@ class ScenarioRunnerV2(ScenarioRunner):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
+        responder: ResponderPort | None = None,
     ) -> RunResultV2:
-        """``llm_roles`` defaults to False (DECISIONS 23:05); when on, replay only."""
+        """``llm_roles`` defaults to False (DECISIONS 23:05); when on, replay only.
+        ``responder`` (WO-088, default None: the catalog run) adds the S02 search beat
+        and lets the planner dispatch the responder to look."""
         run = _V2Run(
             self,
             llm_roles=llm_roles,
             violations_path=violations_path,
             fixture_store=fixture_store,
+            responder=responder,
         )
         result = run.execute()
         assert isinstance(result, RunResultV2)

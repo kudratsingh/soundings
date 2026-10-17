@@ -701,3 +701,107 @@ def evidence_guard_read(ctx: GuardContext) -> dict[str, Any]:
 
 
 # --- WO-042 audit semantics end ---
+
+
+# --- WO-088 begin ---
+# Responder platform guards (CLAUDE.md section 8 A2; config/ladder.yaml boundary.ask).
+# A dispatch to look inside the geofence at standoff is "platform decides alone"; leaving
+# the geofence, a standoff below the minimum, or a second vehicle is "a person approves";
+# nothing after the handoff. The planner may request a look, never a position: these
+# inputs come from the responder simulation and the ladder, never from a model.
+
+RESPONDER_LOOK_ACTION = "responder_look_inside_geofence_at_standoff"
+RESPONDER_LEAVE_GEOFENCE = "responder_leave_geofence"
+RESPONDER_STANDOFF_BELOW_MIN = "responder_standoff_below_25m"
+SECOND_RESPONDER = "second_responder"
+RESPONDER_MIN_STANDOFF_M = 25.0
+"""The owner's standoff floor (demo value; config/responder.yaml ``standoff_m``)."""
+
+
+class ResponderDispatchInputs(StrictModel):
+    """What the responder guards read. No free text; ``None`` means unknown and blocks."""
+
+    contact_id: ContactId
+    station_inside_geofence: bool | None = None
+    standoff_m: float | None = None
+    min_standoff_m: float = RESPONDER_MIN_STANDOFF_M
+    other_vehicles_dispatched: NonNegInt | None = None
+    dispatches_for_contact: NonNegInt | None = None
+    dispatch_limit: NonNegInt = 1
+    handed_off: bool = False
+
+    @field_validator("standoff_m", "min_standoff_m", mode="after")
+    @classmethod
+    def _round_m(cls, v: float | None) -> float | None:
+        return None if v is None else round6(v)
+
+
+class ResponderDecision(StrictModel):
+    """A responder guard's verdict: the boundary action it reads and why."""
+
+    action: str
+    verdict: GuardVerdict
+    reason: str
+    needs_person: tuple[str, ...] = ()
+    inputs_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+    @property
+    def permits(self) -> bool:
+        return self.verdict is GuardVerdict.PERMIT
+
+
+def responder_request_needs_person(inputs: ResponderDispatchInputs) -> tuple[str, ...]:
+    """The ``person_approves`` actions this dispatch would need (empty: none).
+
+    Leaving the geofence, a standoff below ``min_standoff_m`` and a second vehicle each
+    need a person. An unknown input counts as needing a person (it blocks)."""
+    needs: list[str] = []
+    if inputs.station_inside_geofence is not True:
+        needs.append(RESPONDER_LEAVE_GEOFENCE)
+    if inputs.standoff_m is None or inputs.standoff_m < inputs.min_standoff_m:
+        needs.append(RESPONDER_STANDOFF_BELOW_MIN)
+    if inputs.other_vehicles_dispatched is None or inputs.other_vehicles_dispatched > 0:
+        needs.append(SECOND_RESPONDER)
+    return tuple(needs)
+
+
+def _responder_decide(
+    inputs: ResponderDispatchInputs, permit: bool, reason: str, needs: tuple[str, ...] = ()
+) -> ResponderDecision:
+    return ResponderDecision(
+        action=RESPONDER_LOOK_ACTION,
+        verdict=GuardVerdict.PERMIT if permit else GuardVerdict.BLOCK,
+        reason=reason,
+        needs_person=needs,
+        inputs_hash=stable_hash(inputs),
+    )
+
+
+def responder_dispatch_permitted(
+    inputs: ResponderDispatchInputs, table: BoundaryTable | None = None
+) -> ResponderDecision:
+    """May the platform dispatch the responder to look, alone, now?
+
+    Blocks after the handoff (``after_handoff``), over the one-dispatch budget
+    (``dispatch_budget``), when the table does not list the look as ``platform_alone``,
+    and whenever ``responder_request_needs_person`` names an action
+    (``person_approves:<action>``; the platform never does those alone).
+    """
+    if inputs.handed_off:
+        return _responder_decide(inputs, False, "after_handoff")
+    if table is not None:
+        if RESPONDER_LOOK_ACTION not in table:
+            return _responder_decide(inputs, False, "unknown_action")
+        if table.cell_of(RESPONDER_LOOK_ACTION) is not BoundaryCell.PLATFORM_ALONE:
+            return _responder_decide(inputs, False, "not_platform_alone")
+    if inputs.dispatches_for_contact is None:
+        return _responder_decide(inputs, False, "unknown_input:dispatches_for_contact")
+    if inputs.dispatches_for_contact + 1 > inputs.dispatch_limit:
+        return _responder_decide(inputs, False, "dispatch_budget")
+    needs = responder_request_needs_person(inputs)
+    if needs:
+        return _responder_decide(inputs, False, f"person_approves:{needs[0]}", needs)
+    return _responder_decide(inputs, True, "platform_alone")
+
+
+# --- WO-088 end ---

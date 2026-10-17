@@ -21,12 +21,16 @@ Check order (the first failing check names the violation):
    ``HYPOTHESIS_OUTSIDE_SET``; one caused by denylisted text is ``DENYLISTED_TEXT``;
    anything else is ``SCHEMA_INVALID``.
 5. ``NOT_IN_ALLOWLIST``, ``ABOVE_CURRENT_RUNG``, ``OVER_BUDGET``, ``ALREADY_RUN``.
+
+WO-088: right after step 2, ``RESPONDER_POSITION_REQUEST`` for a reply naming a position,
+a station point, a standoff or a geofence change (the planner requests looks only).
 """
 
 from __future__ import annotations
 
 import enum
 import functools
+import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,6 +91,9 @@ class ViolationCode(enum.StrEnum):
     ALREADY_RUN = "ALREADY_RUN"
     HYPOTHESIS_OUTSIDE_SET = "HYPOTHESIS_OUTSIDE_SET"
     DENYLISTED_TEXT = "DENYLISTED_TEXT"
+    # --- WO-088 begin ---
+    RESPONDER_POSITION_REQUEST = "RESPONDER_POSITION_REQUEST"
+    # --- WO-088 end ---
 
 
 # --- output schemas ----------------------------------------------------------------------
@@ -353,6 +360,62 @@ def _forbidden_key(raw: dict[str, Any]) -> GuardResult | None:
     return None
 
 
+# --- WO-088 begin ---
+# The planner may request a look, never a position (CLAUDE.md section 8 A2): a reply that
+# names a position, a station point, a standoff or a geofence change is rejected with
+# ``RESPONDER_POSITION_REQUEST`` and logged like every other violation.
+
+POSITION_KEYS: frozenset[str] = frozenset(
+    {
+        "position",
+        "lat",
+        "lon",
+        "latitude",
+        "longitude",
+        "coordinates",
+        "station",
+        "station_point",
+        "waypoint",
+        "waypoints",
+        "destination",
+        "heading",
+        "heading_deg",
+        "speed_mps",
+        "standoff",
+        "standoff_m",
+        "geofence",
+        "geofence_zone_ids",
+    }
+)
+_COORDINATES = re.compile(r"-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}")
+_STANDOFF_OR_FENCE = re.compile(r"\b(standoff|geofence|geo-fence|station point)\b", re.I)
+_CHANGE = re.compile(
+    r"\d|\b(change|reduce|lower|shrink|expand|widen|leave|outside|move|closer|set)\b", re.I
+)
+
+
+def _position_request(raw: dict[str, Any]) -> GuardResult | None:
+    """A key, coordinate pair or standoff/geofence change anywhere in the raw reply."""
+    keys = sorted({_norm(k) for k in _walk_keys(raw)} & POSITION_KEYS)
+    if keys:
+        return GuardResult.reject(
+            ViolationCode.RESPONDER_POSITION_REQUEST, f"names a position key {keys[0]!r}"
+        )
+    for text in _walk_strings(raw):
+        if _COORDINATES.search(text):
+            return GuardResult.reject(
+                ViolationCode.RESPONDER_POSITION_REQUEST, "names a coordinate pair"
+            )
+        if _STANDOFF_OR_FENCE.search(text) and _CHANGE.search(text):
+            return GuardResult.reject(
+                ViolationCode.RESPONDER_POSITION_REQUEST, "asks for a standoff or geofence change"
+            )
+    return None
+
+
+# --- WO-088 end ---
+
+
 def _classify_probe_value(value: str) -> GuardResult | None:
     """Reject a ``next_probe`` that is a call, an approval or a rung, not a probe."""
     norm = _norm(value)
@@ -398,6 +461,9 @@ def check_probe_plan(raw: Any, ctx: GuardContext) -> GuardResult:
     found = _forbidden_key(raw)
     if found is not None:
         return found
+    found = _position_request(raw)  # WO-088
+    if found is not None:
+        return found
     probe_value = raw.get("next_probe")
     if isinstance(probe_value, str):
         found = _classify_probe_value(probe_value)
@@ -437,6 +503,9 @@ def check_hypothesis_set(raw: Any) -> GuardResult:
     if not isinstance(raw, dict):
         return GuardResult.reject(ViolationCode.SCHEMA_INVALID, "reply is not a JSON object")
     found = _forbidden_key(raw)
+    if found is not None:
+        return found
+    found = _position_request(raw)  # WO-088
     if found is not None:
         return found
     entries = raw.get("hypotheses")

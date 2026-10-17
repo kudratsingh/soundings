@@ -11,9 +11,11 @@ boundary:
     standing_orders: []
     person_approves: []
   ask:
-    platform_alone: [registry_lookup, acoustic_hail, camera_cue, request_watch_officer_look]
+    platform_alone: [registry_lookup, acoustic_hail, camera_cue, request_watch_officer_look,
+                     responder_look_inside_geofence_at_standoff]   # WO-088
     standing_orders: []
-    person_approves: []
+    person_approves: [responder_leave_geofence, responder_standoff_below_25m,
+                      second_responder]                            # WO-088
   slow:
     platform_alone: []
     standing_orders: [advisory_one_basin]       # scope in standing_orders.yaml
@@ -50,6 +52,9 @@ budgets:
   paid_probes_per_contact: 2
   human_interruptions_per_contact: 1
   llm_calls_per_contact: 4
+  # --- WO-088 begin ---
+  responder_dispatches_per_contact: 1   # one responder dispatch (look or search) per contact
+  # --- WO-088 end ---
 
 costs:
   shutdown_usd_per_min_default: 0        # set from a mentor-validated figure; 0 until then, and labeled
