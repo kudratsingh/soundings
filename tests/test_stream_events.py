@@ -182,6 +182,16 @@ def test_envelope_seq_and_sim_time(s02_stream: list[StreamEvent]) -> None:
 
 def test_tick_events_carry_no_ground_truth(s02_stream: list[StreamEvent]) -> None:
     fields = set(ev.TickContact.model_fields)
-    assert fields == {"contact_id", "lat", "lon", "depth_m", "confidence", "sensor_id"}
+    # --- WO-086 begin: the projection is computed from the observed track (WO-084) ---
+    assert fields == {
+        "contact_id",
+        "lat",
+        "lon",
+        "depth_m",
+        "confidence",
+        "sensor_id",
+        "projection",
+    }
+    # --- WO-086 end ---
     text = "".join(event_json(e) for e in s02_stream[:2000])
     assert "truth" not in text and "ground_truth" not in text

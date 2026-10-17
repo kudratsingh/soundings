@@ -1383,3 +1383,74 @@ button.link:hover {
   color: #374151;
 }
 /* --- WO-088 end --- */
+
+/* --- WO-086 begin: rung ledger, blunt-policy counter, projection ellipse --- */
+.rung-ledger {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ledger-counts {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-counts li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: var(--raised);
+  text-align: center;
+}
+
+.rung-ledger .label {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.ledger-n {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.rung-ledger .blunt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--blunt);
+  background: var(--raised);
+}
+
+.rung-ledger .blunt .label {
+  font-size: var(--fs-label);
+}
+
+.rung-ledger .blunt-count {
+  color: var(--blunt);
+}
+
+.rung-ledger .blunt-sub {
+  white-space: nowrap;
+}
+
+.leaflet-container path.projection-ellipse {
+  pointer-events: none;
+}
+/* --- WO-086 end --- */

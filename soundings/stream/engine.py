@@ -60,6 +60,11 @@ from soundings.stream.events import (
     TransitionPayload,
 )
 
+# --- WO-086 begin ---
+from soundings.stream.ledger import BluntCounter, with_ledger
+from soundings.stream.projection import projection_series
+
+# --- WO-086 end ---
 # --- WO-088 begin ---
 from soundings.stream.responder import (
     ResponderSnapshotLike,
@@ -68,6 +73,15 @@ from soundings.stream.responder import (
 )
 
 # --- WO-088 end ---
+
+
+# --- WO-086 begin: projection per reading, rung ledger and blunt counter ---
+def ledger_stream(events: Sequence[StreamEvent], blunt: BluntCounter) -> builtins.list[StreamEvent]:
+    """The stream with WO-086 ``ledger`` events, the blunt worker joined first."""
+    return with_ledger(events, blunt)
+
+
+# --- WO-086 end ---
 
 
 def sensor_range_events_at(sim: object, n_ticks: int) -> dict[int, SensorRangesPayload]:
@@ -150,7 +164,10 @@ def batch_events(
 
     readings: dict[int, list[TickContact]] = defaultdict(list)
     for cid in sorted(sim.tracks):
-        for p in sim.tracks[cid].points:
+        # --- WO-086 begin ---
+        projections = projection_series(sim.tracks[cid])
+        # --- WO-086 end ---
+        for p, projection in zip(sim.tracks[cid].points, projections, strict=True):
             readings[p.tick].append(
                 TickContact(
                     contact_id=cid,
@@ -159,6 +176,7 @@ def batch_events(
                     depth_m=round6(p.depth_m),
                     confidence=round6(p.confidence),
                     sensor_id=p.sensor_id,
+                    projection=projection,  # WO-086
                 )
             )
     rows: dict[str, EvidenceRow] = {}
@@ -461,6 +479,9 @@ class RunEngine:
         n = next(self._counter)
         run_seed = sc.seed if seed is None else int(seed)
         run_id = f"run-{n:04d}-{sc.id}-s{run_seed}"
+        # --- WO-086 begin: the blunt counter runs while the source builds its stream ---
+        blunt = BluntCounter(sc, run_seed).start()
+        # --- WO-086 end ---
         src = factory(
             SourceRequest(
                 scenario=sc,
@@ -472,6 +493,7 @@ class RunEngine:
             )
         )
         events = src.events()
+        events = ledger_stream(events, blunt)  # WO-086
         self._evict()
         handle = RunHandle(
             run_id=run_id,
@@ -543,7 +565,10 @@ def stream_events(
     """The unpaced event stream of one batch run (the CLI and the determinism diff)."""
     sc = resolve_scenario(scenario) if isinstance(scenario, str) else scenario
     req = SourceRequest(scenario=sc, seed=sc.seed if seed is None else seed, run_id=run_id, speed=0)
-    return BatchReplaySource(req).events()
+    # --- WO-086 begin ---
+    blunt = BluntCounter(sc, req.seed).start()
+    return ledger_stream(BatchReplaySource(req).events(), blunt)
+    # --- WO-086 end ---
 
 
 __all__ = [
@@ -557,6 +582,7 @@ __all__ = [
     "UnsupportedOption",
     "batch_events",
     "get_engine",
+    "ledger_stream",  # WO-086
     "register_source",
     "sensor_range_events_at",  # WO-089
     "source_names",

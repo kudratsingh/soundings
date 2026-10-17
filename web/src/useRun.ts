@@ -22,6 +22,9 @@ import type {
 // --- WO-088 begin ---
 import type { ResponderPayload } from './events'
 // --- WO-088 end ---
+// --- WO-086 begin ---
+import type { LedgerPayload } from './events'
+// --- WO-086 end ---
 import { RUNGS } from './events'
 // --- WO-060 design pass begin ---
 import type { CaseIndex } from './cases'
@@ -80,6 +83,10 @@ export interface RunState {
   /** How many dispatches to look the stream has shown (the sound cue counts these). */
   responderDispatches: number
   // --- WO-088 end ---
+  // --- WO-086 begin ---
+  /** The latest rung ledger and blunt-policy counter (null before the first change). */
+  ledger: LedgerPayload | null
+  // --- WO-086 end ---
 }
 
 export const initialRunState = (runId: string | null): RunState => ({
@@ -109,6 +116,9 @@ export const initialRunState = (runId: string | null): RunState => ({
   responder: null,
   responderDispatches: 0,
   // --- WO-088 end ---
+  // --- WO-086 begin ---
+  ledger: null,
+  // --- WO-086 end ---
 })
 
 /** Fold a batch of events into a new state (pure: the input state is not mutated). */
@@ -195,6 +205,11 @@ export function reduceEvents(prev: RunState, events: StreamEvent[]): RunState {
         if (e.payload.dispatched) s.responderDispatches += 1
         break
       // --- WO-088 end ---
+      // --- WO-086 begin ---
+      case 'ledger':
+        s.ledger = e.payload
+        break
+      // --- WO-086 end ---
     }
   }
   s.cases = foldCases(prev.cases, fresh) // WO-060 design pass

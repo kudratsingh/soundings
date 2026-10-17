@@ -65,6 +65,20 @@ A paid run is any live model call, anywhere. The procedure, every time:
 
 Suggested paid-run moments (owner decides): once after Phase 3 to record probe-planner fixtures for S04–S08 (~40 calls); once after Phase 4 for SITREPs (~10 calls); once before the demo for the judge-injection paths (~20 calls). Everything else runs on fixtures and fallbacks. Estimated total under $5 at current rates; the agent must still compute and show the number each time.
 
+**How to run it (the fixture run, WO-093).** Commands only; each step waits for the one before.
+
+```bash
+uv run python -m soundings.llm.fixtures plan          # replay, zero network: table + gate line
+export MODEL_NAME=<model> SOUNDINGS_USD_PER_MTOK_IN=<usd> SOUNDINGS_USD_PER_MTOK_OUT=<usd>
+uv run python -m soundings.llm.fixtures plan          # again, now with the USD estimate
+uv run python scripts/paid-run-gate.py --role fixture_run --calls N --in-tokens A --out-tokens B --desc "<desc the plan printed>"
+# owner types: approve paid run <desc>   (API key in the shell env; nothing reads .env)
+MODEL_MODE=record SOUNDINGS_PAID_RUN_APPROVED="approve paid run <desc>" uv run python -m soundings.llm.fixtures record
+uv run python -m soundings.llm.fixtures verify        # back in replay: zero misses, no regressions
+bash scripts/denylist-check.sh && uv run pytest -q
+uv run python -m soundings.eval.ablation --planners llm,deterministic,random --scenarios S04-S08,BT-01 --mode replay
+```
+
 ## 8. Determinism checklist
 
 - All randomness via `numpy.random.default_rng(seed)` or `random.Random(seed)` passed explicitly; no module-level global RNG.

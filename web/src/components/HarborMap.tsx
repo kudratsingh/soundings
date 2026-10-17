@@ -15,6 +15,9 @@ import type { AboutInfo, HarborGeoJson } from '../api'
 import type { Tone } from '../cases'
 import type { ContactView } from '../useRun'
 import type { SensorRangeRow } from '../events' // WO-089
+// --- WO-086 begin ---
+import { ellipseLatLngs, leaderEnd as projectedLeaderEnd } from '../radar'
+// --- WO-086 end ---
 
 const CENTER: [number, number] = [33.736, -118.262]
 export const TRAIL_FIXES = 60
@@ -138,6 +141,7 @@ const ContactLayer = memo(function ContactLayer({
   label,
   tickS,
   onSelect,
+  projected = false, // WO-086
 }: {
   c: ContactView
   selected: boolean
@@ -145,6 +149,8 @@ const ContactLayer = memo(function ContactLayer({
   label: string
   tickS: number
   onSelect(id: string): void
+  /** WO-086: draw WO-084's 60 s projection ellipse for this contact. */
+  projected?: boolean
 }) {
   const ref = useRef<LCircleMarker | null>(null)
   useEffect(() => {
@@ -159,9 +165,23 @@ const ContactLayer = memo(function ContactLayer({
   const third = Math.max(1, Math.floor(trail.length / 3))
   const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
   const pos: [number, number] = [c.last.lat, c.last.lon]
-  const lead = leaderEnd(c.track, tickS)
+  // --- WO-086 begin: leader from WO-084's smoothed velocity when it is streamed ---
+  const proj = c.last.projection ?? null
+  const lead = proj ? projectedLeaderEnd(pos[0], pos[1], proj.vx, proj.vy, LEADER_S) : leaderEnd(c.track, tickS)
+  const ellipse = projected && proj ? ellipseLatLngs([proj.proj_lat, proj.proj_lon], proj.ellipse.semi_major_m, proj.ellipse.semi_minor_m, proj.ellipse.orientation_deg) : null
+  // --- WO-086 end ---
   return (
     <>
+      {/* --- WO-086 begin --- */}
+      {ellipse && (
+        <Polygon
+          positions={ellipse}
+          interactive={false}
+          className="projection-ellipse"
+          pathOptions={{ color, weight: 1, opacity: 0.8, dashArray: '4 3', fillOpacity: 0.06 }}
+        />
+      )}
+      {/* --- WO-086 end --- */}
       {segs.map((s, i) =>
         s.length > 1 ? (
           <Polyline
@@ -213,6 +233,11 @@ function Legend() {
       <div>
         <i className="lg dash" /> 60 s velocity leader
       </div>
+      {/* --- WO-086 begin --- */}
+      <div>
+        <i className="lg ring" /> 60 s projection, 95% ellipse (stress-test estimate)
+      </div>
+      {/* --- WO-086 end --- */}
       <div>
         <i className="lg zone" /> security zone
       </div>
@@ -275,6 +300,16 @@ export default function HarborMap({
     const c = contacts.find((x) => isSel(x.contact_id) && x.contact_id === selected) ?? contacts.find((x) => isSel(x.contact_id))
     return c ? ([c.last.lat, c.last.lon] as [number, number]) : null
   }, [contacts, selected, selectedIds])
+  // --- WO-086 begin: the selected case's most recent member that has a projection ---
+  const projectedId = useMemo(() => {
+    let best: ContactView | null = null
+    for (const c of contacts) {
+      if (!isSel(c.contact_id) || !c.last.projection) continue
+      if (!best || c.lastTick > best.lastTick || (c.lastTick === best.lastTick && c.contact_id === selected)) best = c
+    }
+    return best?.contact_id ?? null
+  }, [contacts, selected, selectedIds])
+  // --- WO-086 end ---
 
   return (
     <div className={`map-wrap ${mapStyle}`}>
@@ -338,6 +373,7 @@ export default function HarborMap({
             label={caseLabel[c.contact_id] && caseLabel[c.contact_id] !== c.contact_id ? `${caseLabel[c.contact_id]} (${c.contact_id})` : c.contact_id}
             tickS={tickS}
             onSelect={onSelect}
+            projected={c.contact_id === projectedId} // WO-086
           />
         ))}
         {overlay}
