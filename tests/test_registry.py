@@ -370,6 +370,13 @@ REJECT_CASES: list[tuple[str, dict[str, Any], RejectReason]] = [
         },
         RejectReason.WINDOW_INVERTED,
     ),
+    # WO-081: new reason, checked after WINDOW_INVERTED
+    (
+        "depth_inverted",
+        {"depth_min_m": 20.0, "depth_max_m": 5.0},
+        RejectReason.DEPTH_BAND_INVERTED,
+    ),
+    ("depth_half_band", {"depth_min_m": 5.0}, RejectReason.DEPTH_BAND_INVERTED),
     ("bad_modem", {"modem_id": "4471"}, RejectReason.BAD_MODEM_ID),
     ("bad_modem_short", {"modem_id": "MOD-12"}, RejectReason.BAD_MODEM_ID),
     ("duplicate", {"plan_id": "P-EXISTING"}, RejectReason.DUPLICATE_PLAN_ID),
