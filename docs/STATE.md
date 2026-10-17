@@ -27,7 +27,7 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
-| 040 | ladder machine | pending | wo/040-ladder-machine | | | |
+| 040 | ladder machine | PR open, auto-merge on green CI | wo/040-ladder-machine | [#6](https://github.com/kudratsingh/soundings/pull/6) | squash commit on main (see PR #6) | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | pending | wo/041-guards-standing-orders | | | |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
