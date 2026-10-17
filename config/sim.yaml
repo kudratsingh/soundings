@@ -1,0 +1,28 @@
+# Simulator constants (docs/SPEC-SIM.md section 2). Loaded by
+# soundings.sim.detection.load_detection_params and
+# soundings.sim.acoustics.load_acoustic_defaults. Config, not code: tune here.
+#
+# gap_mean_ticks, track_timeout_ticks and false_alarm_mean_ticks are WO-011's
+# choice (the SPEC gives none); see docs/log/DECISIONS.md 2026-10-16 22:25.
+
+detection:
+  p_max: 0.95                    # peak per-tick detection probability
+  r0_m: 400.0                    # falloff range; a sensor node's own range_m overrides it
+  max_range_factor: 2.0          # nothing is detected beyond max_range_factor * r0
+  noise_sigma_base_m: 5.0        # position noise per axis: base + per_m * range
+  noise_sigma_per_m: 0.03
+  gap_rate_per_tick: 0.08        # chance a detected tick starts a track gap
+  gap_mean_ticks: 5              # gap length is geometric with this mean
+  track_timeout_ticks: 15        # undetected run longer than this closes the observed track
+  false_alarms_per_node_hour: 6.0  # biologic false alarms, Poisson per node
+  false_alarm_click_prob: 0.7    # chance a false alarm carries breathing or clicks
+  false_alarm_mean_ticks: 20     # false-alarm track lifetime is geometric with this mean
+  false_alarm_max_depth_m: 3.0   # false alarms are shallow: depth uniform in [0, this]
+
+# Per tonal band, the detector's cavitation index (0-1) and broadband level (dB,
+# arbitrary reference). Stand-in values for a simulated detector, not acoustics.
+acoustic_defaults:
+  none: {cavitation_index: 0.0, broadband_level_db: 100.0}
+  low: {cavitation_index: 0.1, broadband_level_db: 112.0}
+  mid: {cavitation_index: 0.35, broadband_level_db: 122.0}
+  high: {cavitation_index: 0.7, broadband_level_db: 132.0}
