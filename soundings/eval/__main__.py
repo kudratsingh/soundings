@@ -37,6 +37,7 @@ from soundings.eval.archive import (
     write_archive,
 )
 from soundings.eval.harness import (
+    CATALOG_SUITE,
     SeedsError,
     SuiteError,
     default_out,
@@ -92,11 +93,15 @@ def main(
         str | None, typer.Option("--stamp", help="archive stamp YYYYMMDDTHHMMSSZ (UTC)")
     ] = None,
     sweeps: Annotated[
-        bool,
-        typer.Option("--sweeps/--no-sweeps", help="addendum sweeps 2a-2e (default on)"),
-    ] = True,
+        bool | None,
+        typer.Option(
+            "--sweeps/--no-sweeps",
+            help="addendum sweeps 2a-2e and the planner ablation (default: on for catalog)",
+        ),
+    ] = None,
 ) -> None:
     cfg = load_eval_config()
+    sweeps = (suite == CATALOG_SUITE) if sweeps is None else sweeps
     try:
         run_stamp = check_stamp(stamp) if stamp is not None else utc_stamp()
         seed_tuple = parse_seeds(seeds) if seeds is not None else tuple(sorted(set(cfg.eval.seeds)))
