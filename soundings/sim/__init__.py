@@ -1,9 +1,8 @@
-"""Seeded, tick-based simulator. Same seed, same inputs, byte-identical output.
+"""Seeded, tick-based simulator (docs/SPEC-SIM.md). Same seed, same inputs, same bytes.
 
-Phase 0 ships only the ``smoke`` scenario; Phase 1 replaces it with the world model
-described in docs/SPEC-SIM.md.
+Entry points: ``soundings.sim.run.run_scenario`` (a ``Scenario`` to a ``SimRun``),
+``soundings.sim.scenario.resolve_scenario`` / ``catalog_paths``, and the CLI
+``python -m soundings.sim``. ``SimRun.tracks`` is observed data; ground truth lives in
+``contact_truth``, ``truth_paths`` and ``detections`` and is never read by the
+investigation.
 """
-
-from soundings.sim.smoke import COLUMNS, SmokeRow, format_rows, run_smoke
-
-__all__ = ["COLUMNS", "SmokeRow", "format_rows", "run_smoke"]
