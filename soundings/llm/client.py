@@ -15,6 +15,15 @@ Binding rules (CLAUDE.md):
 
 The model name comes only from the ``MODEL_NAME`` environment variable. The vendor SDK
 is imported lazily, inside the live path, never at module import time.
+
+Bounded live mode (WO-087, CLAUDE.md section 8 A4): ``live`` spends one unit of a
+``LiveBudget`` (``LIVE_CALL_BUDGET``, persisted to ``artifacts/live_calls.json``) before
+each transport call, runs the call under a per-call timeout (6 s), and turns a spent
+budget, a timeout or **any** transport error into ``None`` so the caller uses its
+deterministic fallback; nothing propagates. Configuration refusals (no transport,
+``SOUNDINGS_CI``, no ``MODEL_NAME``) still raise before any transport call. Every call in
+every mode leaves one ``LlmCallRecord`` (role, path in {live, replay, fallback}, reason,
+fixture key, tokens in/out, latency) on ``ModelClient.call_log`` and in the module log.
 """
 
 from __future__ import annotations
@@ -23,19 +32,42 @@ import enum
 import hashlib
 import json
 import logging
+import math
 import os
 import re
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Final, Literal, Protocol
 
-from soundings.canonical import FLOAT_DECIMALS, _normalize, canonical_json
+from soundings.canonical import FLOAT_DECIMALS, _normalize, canonical_json, round6
+
+# --- WO-087 begin: live budget import ---
+from soundings.llm.live_budget import LiveBudget, budget_total_from_env
+
+# --- WO-087 end ---
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "DEFAULT_TIMEOUT_S",
     "FLOAT_DECIMALS",
+    "REASON_BUDGET_EXHAUSTED",
+    "REASON_ERROR",
+    "REASON_REPLAY_MISS",
+    "REASON_TIMEOUT",
+    "CallPath",
     "FixtureStore",
+    "LiveBudget",
     "LiveCallRefused",
+    "LlmCallRecord",
+    "TransportReply",
+    "estimate_tokens",
+    "last_path",
+    "live_client_from_env",
+    "reset_last_path",
     "ModelClient",
     "ModelMode",
     "ModelOutput",
@@ -95,15 +127,95 @@ class LiveCallRefused(RuntimeError):
     """A ``record`` or ``live`` call was refused (CI, or no model name configured)."""
 
 
+# --- WO-087 begin: call records and the process-wide last path ---
+CallPath = Literal["live", "replay", "fallback"]
+DEFAULT_TIMEOUT_S: Final = 6.0
+REASON_BUDGET_EXHAUSTED: Final = "budget_exhausted"
+REASON_TIMEOUT: Final = "timeout"
+REASON_ERROR: Final = "error"
+REASON_REPLAY_MISS: Final = "replay_miss"
+
+
+@dataclass(frozen=True)
+class TransportReply:
+    """A transport result with the provider's token usage (a bare dict is also accepted)."""
+
+    output: ModelOutput
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+
+
+@dataclass(frozen=True)
+class LlmCallRecord:
+    """One model call as the audit log and ``/api/model_mode`` see it.
+
+    ``path`` says what produced the caller's answer: ``live`` (a hosted reply), ``replay``
+    (a recorded fixture) or ``fallback`` (``None`` to the caller, who uses its
+    deterministic fallback; ``reason`` says why). ``latency_ms`` is measured only around a
+    transport call; replayed and budget-refused calls record 0.0 so replay runs stay
+    byte-identical. Tokens are the provider's usage when the transport reports it,
+    otherwise ``estimate_tokens`` of the canonical text (``tokens_estimated``).
+    """
+
+    role: str
+    path: CallPath
+    reason: str | None
+    fixture_key: str
+    tokens_in: int
+    tokens_out: int
+    latency_ms: float
+    tokens_estimated: bool = True
+
+
+def estimate_tokens(text: str) -> int:
+    """A coarse, deterministic token estimate: ``ceil(len(text) / 4)``."""
+    return int(math.ceil(len(text) / 4))
+
+
+_last_path_lock = threading.Lock()
+_last_path: CallPath | None = None
+
+
+def last_path() -> CallPath | None:
+    """The path of the most recent model call in this process (``None`` before any)."""
+    with _last_path_lock:
+        return _last_path
+
+
+def reset_last_path() -> None:
+    """Forget the last path (tests, and a fresh demo run)."""
+    global _last_path
+    with _last_path_lock:
+        _last_path = None
+
+
+def _set_last_path(path: CallPath) -> None:
+    global _last_path
+    with _last_path_lock:
+        _last_path = path
+
+
+class _LiveTimeout(TimeoutError):
+    """A transport call outlived ``timeout_s``."""
+
+
+# --- WO-087 end ---
+
+
 class Transport(Protocol):
-    """One hosted-model request. Tests inject a stub; nothing here defaults to the network."""
+    """One hosted-model request. Tests inject a stub; nothing here defaults to the network.
+
+    It returns the parsed JSON object, or a ``TransportReply`` carrying token usage too.
+    """
 
     def __call__(
         self, *, model: str, role: str, system: str | None, inputs: Any
-    ) -> ModelOutput: ...
+    ) -> ModelOutput | TransportReply: ...
 
 
-def anthropic_transport(*, model: str, role: str, system: str | None, inputs: Any) -> ModelOutput:
+def anthropic_transport(
+    *, model: str, role: str, system: str | None, inputs: Any
+) -> TransportReply:
     """The vendor transport: one request, no SDK retries, a JSON object back.
 
     The SDK is imported here, inside the live path only. Credentials come from the SDK's
@@ -113,7 +225,7 @@ def anthropic_transport(*, model: str, role: str, system: str | None, inputs: An
     """
     import anthropic  # lazy: never imported at module import time
 
-    client = anthropic.Anthropic(max_retries=0)
+    client = anthropic.Anthropic(max_retries=0, timeout=DEFAULT_TIMEOUT_S + 1.0)
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": _LIVE_MAX_TOKENS,
@@ -128,7 +240,14 @@ def anthropic_transport(*, model: str, role: str, system: str | None, inputs: An
     parsed = json.loads("".join(texts))
     if not isinstance(parsed, dict):
         raise ValueError(f"role={role}: model reply is not a JSON object")
-    return parsed
+    usage = getattr(response, "usage", None)
+    tokens_in = getattr(usage, "input_tokens", None)
+    tokens_out = getattr(usage, "output_tokens", None)
+    return TransportReply(
+        parsed,
+        tokens_in if isinstance(tokens_in, int) else None,
+        tokens_out if isinstance(tokens_out, int) else None,
+    )
 
 
 class ReplayMiss(LookupError):
@@ -187,45 +306,186 @@ class FixtureStore:
 
 
 class ModelClient:
-    """Mode-aware model gateway. Callers supply a deterministic fallback for ``None``."""
+    """Mode-aware model gateway. Callers supply a deterministic fallback for ``None``.
+
+    ``live_budget`` caps live calls (WO-087). In ``live`` mode with no budget passed, the
+    client reads ``LIVE_CALL_BUDGET``; when that is unset too the injected transport is
+    uncapped, which only a test can reach: the one constructor that wires the vendor
+    transport, ``live_client_from_env``, refuses without ``LIVE_CALL_BUDGET``.
+    """
 
     def __init__(
         self,
         mode: ModelMode | None = None,
         store: FixtureStore | None = None,
         model_name: str | None = None,
+        *,
+        live_budget: LiveBudget | None = None,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
         transport: Transport | None = None,
     ) -> None:
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be > 0")
         self.mode = mode if mode is not None else ModelMode.from_env()
         self.store = store if store is not None else FixtureStore()
         self.model_name = model_name if model_name is not None else model_name_from_env()
         self.transport = transport
+        self.timeout_s = float(timeout_s)
+        if live_budget is None and self.mode is ModelMode.LIVE:
+            live_budget = LiveBudget.from_env()
+        self.live_budget = live_budget
+        self.call_log: list[LlmCallRecord] = []
+
+    @property
+    def last_call(self) -> LlmCallRecord | None:
+        """The record of this client's most recent call."""
+        return self.call_log[-1] if self.call_log else None
+
+    @property
+    def last_path(self) -> CallPath | None:
+        last = self.last_call
+        return None if last is None else last.path
 
     def call(self, role: str, inputs: Any, *, system: str | None = None) -> ModelOutput | None:
-        """Return the model output for (role, inputs).
+        """Return the model output for (role, inputs), or ``None`` for the caller's fallback.
 
         Replay: the recorded fixture; on a miss, raise ``ReplayMiss`` in CI, otherwise
         log a warning and return ``None`` so the caller uses its fallback.
 
         Record: a recorded fixture is returned without a call; on a miss, one transport
         call, the fixture is written, and the written output is returned. Live: one
-        transport call, nothing written. Both raise ``NotImplementedError`` with no
-        injected transport and ``LiveCallRefused`` in CI or without ``MODEL_NAME``.
-        Neither retries.
+        bounded transport call, nothing written; a spent budget, a timeout or any error
+        returns ``None``. Both raise ``NotImplementedError`` with no injected transport
+        and ``LiveCallRefused`` in CI or without ``MODEL_NAME``. Neither retries.
         """
         _check_role(role)
+        key = fixture_key(role, inputs)
         if self.mode is ModelMode.REPLAY:
-            return self._replay(role, inputs)
+            output = self._replay(role, inputs)
+            if output is None:
+                self._record(role, "fallback", REASON_REPLAY_MISS, key, inputs, system, None)
+            else:
+                self._record(role, "replay", None, key, inputs, system, output)
+            return output
         if self.mode is ModelMode.RECORD:
             hit = self.store.load(role, inputs)
             if hit is not None:
+                self._record(role, "replay", None, key, inputs, system, hit)
                 return hit
-            output = self._transport_call(role, inputs, system)
+            self._refuse_unless_ready()
+            started = time.perf_counter()
+            reply = self._invoke(role, inputs, system)
+            output = _reply_output(role, reply)
             self.store.save(role, inputs, output)
-            return self.store.load(role, inputs)
-        return self._transport_call(role, inputs, system)
+            saved = self.store.load(role, inputs)
+            self._record(
+                role, "live", None, key, inputs, system, saved, reply=reply, started=started
+            )
+            return saved
+        return self._live(role, inputs, system, key)
 
-    def _transport_call(self, role: str, inputs: Any, system: str | None) -> ModelOutput:
+    # --- WO-087 begin: the bounded live path ---
+    def _live(self, role: str, inputs: Any, system: str | None, key: str) -> ModelOutput | None:
+        self._refuse_unless_ready()
+        budget = self.live_budget
+        if budget is not None and not budget.spend():
+            self._record(role, "fallback", REASON_BUDGET_EXHAUSTED, key, inputs, system, None)
+            return None
+        started = time.perf_counter()
+        try:
+            reply = self._with_timeout(role, lambda: self._invoke(role, inputs, system))
+            output = _reply_output(role, reply)
+        except _LiveTimeout:
+            self._record(
+                role, "fallback", REASON_TIMEOUT, key, inputs, system, None, started=started
+            )
+            return None
+        except Exception as exc:  # any transport failure falls back; nothing propagates
+            reason = f"{REASON_ERROR}:{type(exc).__name__}"
+            log.warning("live call role=%s failed (%s): %s; caller falls back", role, reason, exc)
+            self._record(role, "fallback", reason, key, inputs, system, None, started=started)
+            return None
+        self._record(role, "live", None, key, inputs, system, output, reply=reply, started=started)
+        return output
+
+    def _with_timeout(
+        self, role: str, fn: Callable[[], ModelOutput | TransportReply]
+    ) -> ModelOutput | TransportReply:
+        """Run ``fn`` on a daemon thread and give up after ``timeout_s`` seconds.
+
+        A call that outlives the timeout keeps running on its thread (a blocking SDK call
+        cannot be interrupted) but its result is discarded; the thread is a daemon, so it
+        never holds the process open.
+        """
+        box: dict[str, Any] = {}
+        done = threading.Event()
+
+        def target() -> None:
+            try:
+                box["value"] = fn()
+            except BaseException as exc:
+                box["error"] = exc
+            finally:
+                done.set()
+
+        threading.Thread(target=target, name=f"live-call-{role}", daemon=True).start()
+        if not done.wait(self.timeout_s):
+            raise _LiveTimeout(f"role={role}: no reply within {self.timeout_s} s")
+        if "error" in box:
+            raise box["error"]
+        value: ModelOutput | TransportReply = box["value"]
+        return value
+
+    def _record(
+        self,
+        role: str,
+        path: CallPath,
+        reason: str | None,
+        key: str,
+        inputs: Any,
+        system: str | None,
+        output: ModelOutput | None,
+        *,
+        reply: ModelOutput | TransportReply | None = None,
+        started: float | None = None,
+    ) -> LlmCallRecord:
+        tokens_in: int | None = None
+        tokens_out: int | None = None
+        if isinstance(reply, TransportReply):
+            tokens_in, tokens_out = reply.tokens_in, reply.tokens_out
+        estimated = tokens_in is None or tokens_out is None
+        if tokens_in is None:
+            tokens_in = estimate_tokens((system or "") + canonical_json(inputs))
+        if tokens_out is None:
+            tokens_out = 0 if output is None else estimate_tokens(canonical_json(output))
+        latency_ms = 0.0 if started is None else round6((time.perf_counter() - started) * 1000.0)
+        record = LlmCallRecord(
+            role=role,
+            path=path,
+            reason=reason,
+            fixture_key=key,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=latency_ms,
+            tokens_estimated=estimated,
+        )
+        self.call_log.append(record)
+        _set_last_path(path)
+        log.info(
+            "llm_call role=%s path=%s reason=%s tokens_in=%d tokens_out=%d latency_ms=%.3f key=%s",
+            role,
+            path,
+            reason or "-",
+            tokens_in,
+            tokens_out,
+            latency_ms,
+            key,
+        )
+        return record
+
+    # --- WO-087 end ---
+
+    def _refuse_unless_ready(self) -> None:
         if self.transport is None:
             raise NotImplementedError(
                 "no live calls in Phase 0 defaults: record/live need an explicitly "
@@ -235,10 +495,13 @@ class ModelClient:
             raise LiveCallRefused(f"MODEL_MODE={self.mode.value} refused: SOUNDINGS_CI is set")
         if self.model_name is None:
             raise LiveCallRefused(f"MODEL_MODE={self.mode.value} refused: MODEL_NAME is not set")
-        output = self.transport(model=self.model_name, role=role, system=system, inputs=inputs)
-        if not isinstance(output, dict):
-            raise ValueError(f"role={role}: transport returned a non-object output")
-        return output
+
+    def _invoke(self, role: str, inputs: Any, system: str | None) -> ModelOutput | TransportReply:
+        transport = self.transport
+        model = self.model_name
+        if transport is None or model is None:  # _refuse_unless_ready ran first
+            raise LiveCallRefused(f"role={role}: no transport or model name")
+        return transport(model=model, role=role, system=system, inputs=inputs)
 
     def _replay(self, role: str, inputs: Any) -> ModelOutput | None:
         output = self.store.load(role, inputs)
@@ -249,3 +512,40 @@ class ModelClient:
             raise ReplayMiss(role, key)
         log.warning("replay miss role=%s key=%s; caller falls back", role, key)
         return None
+
+
+# --- WO-087 begin: reply unwrap and the stage constructor ---
+def _reply_output(role: str, reply: ModelOutput | TransportReply) -> ModelOutput:
+    output = reply.output if isinstance(reply, TransportReply) else reply
+    if not isinstance(output, dict):
+        raise ValueError(f"role={role}: transport returned a non-object output")
+    return output
+
+
+def live_client_from_env(store: FixtureStore | None = None) -> ModelClient:
+    """The client a stage or demo process uses: ``MODEL_MODE`` from the environment.
+
+    ``replay`` (the default) gets no transport. ``live`` gets the vendor transport only
+    with ``LIVE_CALL_BUDGET`` set (the owner's ``approve paid run stage live budget N``
+    sets it); without it, or under ``SOUNDINGS_CI``, this raises ``LiveCallRefused``
+    before any client exists. ``record`` stays a recording-script concern and is refused.
+    """
+    mode = ModelMode.from_env()
+    if mode is ModelMode.REPLAY:
+        return ModelClient(mode=mode, store=store)
+    if mode is ModelMode.RECORD:
+        raise LiveCallRefused("MODEL_MODE=record is for the fixture recording script only")
+    if in_ci():
+        raise LiveCallRefused("MODEL_MODE=live refused: SOUNDINGS_CI is set")
+    total = budget_total_from_env()
+    if total is None:
+        raise LiveCallRefused("MODEL_MODE=live refused: LIVE_CALL_BUDGET is not set")
+    return ModelClient(
+        mode=mode,
+        store=store,
+        live_budget=LiveBudget(total=total),
+        transport=anthropic_transport,
+    )
+
+
+# --- WO-087 end ---

@@ -155,3 +155,22 @@ export interface PhysicsInfo {
 
 export const fetchPhysics = () => getJson<PhysicsInfo>('/api/physics')
 // --- WO-089 end ---
+
+// --- WO-087 block (model mode for the judge-panel badge) ---
+// The badge reads `last_path`: "live" -> "model: live", "fallback" -> "model: fallback",
+// "replay" or null -> "model: replay". It never claims live unless a live reply was used.
+export type ModelCallPath = 'live' | 'replay' | 'fallback'
+
+export interface ModelModeInfo {
+  mode: string
+  live_budget_total: number
+  live_budget_remaining: number
+  last_path: ModelCallPath | null
+}
+
+export const fetchModelMode = () => getJson<ModelModeInfo>('/api/model_mode')
+
+export function modelBadge(info: ModelModeInfo): string {
+  return `model: ${info.last_path ?? 'replay'}`
+}
+// --- end WO-087 block ---

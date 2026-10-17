@@ -53,7 +53,7 @@ from soundings.ladder.sitrep import (
     sitrep_inputs,
     validate_sitrep,
 )
-from soundings.llm.client import ModelClient, ModelMode, fixture_key
+from soundings.llm.client import LlmCallRecord, ModelClient, ModelMode, fixture_key
 from soundings.llm.guard import (
     DEFAULT_VIOLATIONS_PATH,
     ViolationCode,
@@ -120,7 +120,7 @@ class SitrepPath(StrEnum):
     FIXTURE_REPLAY = "fixture-replay"
     FALLBACK_AFTER_REJECTION = "fallback-after-rejection"
     LIVE = "live"
-    """Reserved for WO-087's bounded live mode; nothing in this WO produces it."""
+    """A guard-accepted reply from a live call (WO-087's bounded live mode)."""
 
 
 # --- output schema ------------------------------------------------------------------------
@@ -368,9 +368,12 @@ class SitrepOutcome:
     sitrep: Sitrep
     path: SitrepPath
     fixture_key: str | None
-    llm_outcome: Literal["accepted", "rejected", "fallback_no_fixture"] | None
+    llm_outcome: Literal["accepted", "rejected", "fallback_no_fixture", "fallback"] | None
     violation: SitrepViolation | None = None
     detail: str = ""
+    # --- WO-087 begin: the client's record of the call ---
+    call: LlmCallRecord | None = None
+    # --- WO-087 end ---
 
 
 class SitrepWriterRole:
@@ -385,11 +388,21 @@ class SitrepWriterRole:
     def write(self, inputs: SitrepInputs, *, when: str) -> SitrepOutcome:
         prompt = sitrep_writer_prompt(inputs)
         key = fixture_key(ROLE_SITREP_WRITER, prompt)
+        log_size = len(getattr(self.client, "call_log", ()))
         raw = self.client.call(ROLE_SITREP_WRITER, prompt, system=SITREP_WRITER_PROMPT)
+        # --- WO-087 begin: keep the call record; a live fallback is not a missing fixture ---
+        calls = getattr(self.client, "call_log", [])
+        call = calls[-1] if len(calls) > log_size else None
         if raw is None:
+            live_fallback = call is not None and call.reason not in (None, "replay_miss")
             return SitrepOutcome(
-                template_sitrep(inputs), SitrepPath.TEMPLATE, key, "fallback_no_fixture"
+                template_sitrep(inputs),
+                SitrepPath.TEMPLATE,
+                key,
+                "fallback" if live_fallback else "fallback_no_fixture",
+                call=call,
             )
+        # --- WO-087 end ---
         result = guard_sitrep(raw, inputs)
         if not result.accepted or result.value is None:
             code = result.violation or SitrepViolation.SCHEMA
@@ -411,11 +424,19 @@ class SitrepWriterRole:
                 "rejected",
                 code,
                 result.detail,
+                call,
             )
-        path = (
-            SitrepPath.FIXTURE_REPLAY if self.client.mode is ModelMode.REPLAY else SitrepPath.LIVE
-        )
-        return SitrepOutcome(result.value, path, key, "accepted")
+        # --- WO-087 begin: the path is what produced the reply, not the configured mode ---
+        if call is not None:
+            path = SitrepPath.LIVE if call.path == "live" else SitrepPath.FIXTURE_REPLAY
+        else:
+            path = (
+                SitrepPath.FIXTURE_REPLAY
+                if self.client.mode is ModelMode.REPLAY
+                else SitrepPath.LIVE
+            )
+        # --- WO-087 end ---
+        return SitrepOutcome(result.value, path, key, "accepted", call=call)
 
 
 __all__ = [
