@@ -151,7 +151,7 @@ def _ais_tracks(sim: Any) -> Mapping[str, Sequence[AisReportLike]]:
 def vessel_fixes(sim: Any, tick: int, *, interval_s: float | None = None) -> list[VesselFix]:
     """Every vessel with a fresh report at ``tick``, sorted by ``vessel_id``.
 
-    Reads ``sim.ais_tracks`` only (never ``truth_paths``): the latest report at or before
+    Reads ``sim.ais_tracks`` only (never the ground-truth paths): the latest report at or before
     ``tick``, dead-reckoned with its ``sog_mps``/``cog_deg`` to ``tick * sim.tick_s``, and
     skipped when older than ``STALE_REPORT_INTERVALS x report_interval_s``.
     """
