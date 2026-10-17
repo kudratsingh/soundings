@@ -250,6 +250,51 @@ def anthropic_transport(
     )
 
 
+# --- WO-093 begin: the recording transport (owner-approved fixture run only) ---
+RECORD_TIMEOUT_S: Final = 60.0
+"""SDK timeout for one fixture-run request: a SITREP reply can outlast the 7 s stage cap,
+and in record mode a timeout stops the whole run (never retried)."""
+
+
+def anthropic_record_transport(
+    *, model: str, role: str, system: str | None, inputs: Any
+) -> TransportReply:
+    """``anthropic_transport`` with ``RECORD_TIMEOUT_S`` instead of the stage timeout.
+
+    Used only by ``python -m soundings.llm.fixtures record`` after the owner's approval;
+    one request, no SDK retries, the SDK imported here (lazily). Never unit-tested
+    against the network.
+    """
+    import anthropic  # lazy: never imported at module import time
+
+    client = anthropic.Anthropic(max_retries=0, timeout=RECORD_TIMEOUT_S)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": _LIVE_MAX_TOKENS,
+        "messages": [{"role": "user", "content": canonical_json(inputs)}],
+    }
+    if system:
+        kwargs["system"] = system
+    response = client.messages.create(**kwargs)
+    if getattr(response, "stop_reason", None) == "refusal":
+        raise ValueError(f"role={role}: the model declined the request")
+    texts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+    parsed = json.loads("".join(texts))
+    if not isinstance(parsed, dict):
+        raise ValueError(f"role={role}: model reply is not a JSON object")
+    usage = getattr(response, "usage", None)
+    tokens_in = getattr(usage, "input_tokens", None)
+    tokens_out = getattr(usage, "output_tokens", None)
+    return TransportReply(
+        parsed,
+        tokens_in if isinstance(tokens_in, int) else None,
+        tokens_out if isinstance(tokens_out, int) else None,
+    )
+
+
+# --- WO-093 end ---
+
+
 class ReplayMiss(LookupError):
     """No recorded fixture for this (role, inputs) pair while in replay mode."""
 
