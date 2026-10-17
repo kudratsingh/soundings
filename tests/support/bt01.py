@@ -1,9 +1,11 @@
 """BT-01 helpers for the WO-085 surge-triage tests.
 
-``bt01()`` loads ``scenarios/BT-01.yaml`` (WO-080 part A). Until that file is on main the
-helpers fall back to ``tests/fixtures/triage_bt_synthetic.yaml``: eleven filed jobs that
-clear at ask and one unfiled ``rogue-1`` closing on ``fuel_berth_2`` (S05's track). The
-same assertions run on either; ``BT01_SOURCE`` says which one is in use.
+``bt01()`` loads ``tests/fixtures/triage_bt_synthetic.yaml`` (eleven filed jobs that clear
+at ask and one unfiled ``rogue-1`` closing on ``fuel_berth_2``, S05's track) because
+BT-01 (WO-080 part A) was not on main when WO-085 merged. ``SOUNDINGS_TRIAGE_BT01=1``
+runs the same assertions on ``scenarios/BT-01.yaml`` once it exists (opt-in: two BT-01
+runs take minutes and the WO-085 Done section records how the clauses read there).
+``BT01_SOURCE`` says which scenario is in use.
 
 ``python -c "from tests.support.bt01 import main; main()"`` prints the triage log of
 ``bt01_with_surge(25)`` and both hashes (the PYTHONHASHSEED diff of the exit test).
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -28,15 +31,16 @@ from soundings.triage import TriageConfig, load_triage_config, triage_log_text
 REPO = Path(__file__).resolve().parents[2]
 BT01_PATH = REPO / "scenarios" / "BT-01.yaml"
 SYNTHETIC_PATH = REPO / "tests" / "fixtures" / "triage_bt_synthetic.yaml"
-BT01_SOURCE = "BT-01" if BT01_PATH.exists() else "synthetic"
+USE_BT01 = os.environ.get("SOUNDINGS_TRIAGE_BT01") == "1" and BT01_PATH.exists()
+BT01_SOURCE = "BT-01" if USE_BT01 else "synthetic"
 ROGUE = "rogue-1"
 RUN_SEED = 7
 SURGE_LEAD_S = 60.0  # the surge lands one minute before the rogue starts (WO-085)
 
 
 def bt01() -> Scenario:
-    """``scenarios/BT-01.yaml``, or the synthetic stand-in until WO-080 part A merges."""
-    path = BT01_PATH if BT01_PATH.exists() else SYNTHETIC_PATH
+    """The synthetic stand-in, or ``scenarios/BT-01.yaml`` with ``SOUNDINGS_TRIAGE_BT01=1``."""
+    path = BT01_PATH if USE_BT01 else SYNTHETIC_PATH
     return resolve_scenario(str(path), load_harbor())
 
 
