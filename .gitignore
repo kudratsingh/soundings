@@ -7,7 +7,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
-artifacts/
+artifacts/*
 !artifacts/.gitkeep
 web/node_modules/
 web/dist/

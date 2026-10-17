@@ -1,0 +1,58 @@
+[project]
+name = "soundings"
+version = "0.1.0"
+description = "Resolve every unknown underwater contact at the gentlest rung that works."
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.15.0",
+    "fastapi>=0.143.3",
+    "numpy>=2.5.4",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "sqlmodel>=0.0.48",
+    "typer>=0.27.3",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "hypothesis>=6.170.1",
+    "mypy>=2.4.0",
+    "playwright>=1.64.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+    "types-pyyaml>=6.0.12.20260906",
+]
+
+[tool.uv]
+# The dev group is synced by default, so CI's `uv sync --all-extras` installs it too.
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "sqlmodel.*", "playwright.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

@@ -8,6 +8,7 @@ ALLOW_RE='^(config/denylist.txt|docs/SPEC-LADDER.md|CLAUDE.md|scripts/denylist-c
 hits=$(grep -rinEf config/denylist.txt \
   --include='*.py' --include='*.ts' --include='*.tsx' --include='*.md' --include='*.yaml' --include='*.yml' --include='*.json' \
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.venv \
+  --exclude-dir=.mypy_cache --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache \
   . 2>/dev/null | grep -vE "^\./($(echo "$ALLOW_RE" | sed 's/[()^$]//g; s/|/|/g'))" || true)
 
 # filter allowed files precisely

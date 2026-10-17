@@ -10,6 +10,7 @@ Then run the recording command only if this exits 0.
 Pricing: set SOUNDINGS_USD_PER_MTOK_IN / _OUT in the environment from the
 provider's current price list; the script refuses to estimate without them.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,7 +37,11 @@ def main() -> int:
         usd_in = float(os.environ["SOUNDINGS_USD_PER_MTOK_IN"])
         usd_out = float(os.environ["SOUNDINGS_USD_PER_MTOK_OUT"])
     except KeyError:
-        print("set SOUNDINGS_USD_PER_MTOK_IN and SOUNDINGS_USD_PER_MTOK_OUT from the provider price list first", file=sys.stderr)
+        print(
+            "set SOUNDINGS_USD_PER_MTOK_IN and SOUNDINGS_USD_PER_MTOK_OUT"
+            " from the provider price list first",
+            file=sys.stderr,
+        )
         return 2
 
     model = os.environ.get("MODEL_NAME", "<MODEL_NAME unset>")
@@ -62,8 +67,14 @@ def main() -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().astimezone().isoformat(timespec="minutes")
     with log.open("a") as f:
-        f.write(f"| {stamp} | {a.role} | {a.calls} | ${est:.4f} | {model} | {a.desc} | approved by owner |\n")
-    print("approved; logged to docs/log/PAID-RUNS.md. Run the recording command now with MODEL_MODE=record.")
+        f.write(
+            f"| {stamp} | {a.role} | {a.calls} | ${est:.4f} | {model} | {a.desc}"
+            " | approved by owner |\n"
+        )
+    print(
+        "approved; logged to docs/log/PAID-RUNS.md."
+        " Run the recording command now with MODEL_MODE=record."
+    )
     return 0
 
 
