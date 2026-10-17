@@ -1,0 +1,59 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# CI never calls a hosted model. MODEL_MODE is pinned to replay and no API key
+# is exposed to the job. A replay miss fails the job (see soundings/llm/client.py).
+env:
+  MODEL_MODE: replay
+  SOUNDINGS_CI: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Python deps
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+
+      - name: Types
+        run: uv run mypy soundings
+
+      - name: Denylist (no out-of-scope vocabulary outside its definitions)
+        run: bash scripts/denylist-check.sh
+
+      - name: Tests (replay only)
+        run: uv run pytest -q --maxfail=1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Web deps
+        run: pnpm -C web install --frozen-lockfile
+
+      - name: Web typecheck + build
+        run: pnpm -C web exec tsc --noEmit && pnpm -C web build
+
+      - name: Assert no live-mode leak
+        run: |
+          if grep -rn "MODEL_MODE *= *['\"]live" .github soundings scripts Makefile 2>/dev/null; then
+            echo "live mode must never be set in repo config"; exit 1; fi

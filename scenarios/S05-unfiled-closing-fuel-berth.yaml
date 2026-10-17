@@ -1,0 +1,21 @@
+# Harbor Night. The scenario the pitch is built around.
+id: S05
+name: Unfiled contact closing on fuel berth
+seed: 11
+duration_ticks: 600
+tick_s: 2
+ground_truth: UNAUTHORIZED_UUV
+hour_of_day: 2
+contacts:
+  - id: gt-1
+    start: {lat: 33.7350, lon: -118.2620, depth_m: 6}
+    behavior: {type: transit, target_asset: fuel_berth_2, speed_mps: 1.0}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HANDED_OFF
+  passes_through: [HOLDING]      # under signed standing orders
+  min_threat_mass: 0.6
+  max_human_interruptions: 1
+  max_probes: 4

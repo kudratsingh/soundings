@@ -1,0 +1,133 @@
+# Spec — detection and investigation of unverified contacts
+
+This is the part the owner wants as sophisticated as the clock allows. It is also the part most likely to be over-built. The order below is the order of value: everything in §1–§5 ships before anything in §7.
+
+Principle: **detection is assumed, investigation is the product.** The brief says detecting small underwater vehicles is getting easier; handling one safely is not. We spend our sophistication on turning a track into a defensible decision with the fewest, cheapest probes, and on being honest about uncertainty.
+
+---
+
+## 1. Hypothesis set (fixed)
+
+Every unverified contact is scored against these mutually exclusive hypotheses. The LLM may *not* add hypotheses at runtime; new ones go through the catalog and a test.
+
+| id | hypothesis | ordinary-day frequency (prior) |
+|---|---|---|
+| `FILED_ON_PLAN` | a vehicle or diver with a registry plan, behaving per plan | 0.45 |
+| `FILED_OFF_PLAN` | filed, but outside its area/window or gone silent (lost vehicle) | 0.08 |
+| `UNFILED_KNOWN_OPERATOR` | replies to hail with a modem id we know, but no plan filed | 0.07 |
+| `BIOLOGIC` | sea lion, dolphin, large fish school | 0.20 |
+| `DEBRIS_OR_DRIFT` | drifting object, lost container, mooring debris | 0.10 |
+| `SURFACE_VESSEL_AIS_OFF` | small boat with AIS off, mis-tracked as subsurface | 0.05 |
+| `UNAUTHORIZED_UUV` | self-propelled, unfiled, non-responsive, purposeful | 0.03 |
+| `UNAUTHORIZED_DIVER` | human diver, unfiled, non-responsive | 0.02 |
+
+Priors live in `config/priors.yaml` and are conditioned on zone and hour-of-day via the pattern-of-life table (§4). They are stress-test numbers for the demo and are labeled as such in the UI.
+
+---
+
+## 2. Evidence table (columns are fixed; values typed)
+
+One row per (contact, feature, source, time). Every decision reads only this table. Columns: `contact_id, t, feature, value, unit, source, confidence, kind ∈ {fact, assumption, derived}, probe_id | null`.
+
+Features, grouped:
+
+**Kinematic (derived from the track, deterministic)**
+- `speed_over_ground` (m/s), `speed_variance`, `depth`, `depth_variance`, `heading_persistence` (0–1, how straight), `turn_rate`, `closing_rate_to_nearest_critical_asset` (m/s), `time_to_nearest_critical_asset` (s), `dwell_time_in_zone` (s), `track_gap_ratio`.
+- `drift_consistency` (0–1): correlation between the track and the predicted drift from the configured current/wind field. High → debris. Low with sustained speed → self-propelled.
+- `loiter_score` (0–1): fraction of the last N minutes spent within R metres of one point near an asset.
+- `transit_pattern` ∈ {straight, lawnmower, orbit, random, stationary}: classified deterministically from heading/turn statistics. `lawnmower` and `orbit` are survey/loiter signatures.
+
+**Acoustic (from the simulated detector; stubbed features, not signal processing)**
+- `propeller_tonal_present` (bool, confidence), `tonal_band` ∈ {none, low, mid, high}, `cavitation_index`, `breathing_or_click_present` (biologic signature), `broadband_level`.
+
+**Registry / identity**
+- `registry_match` ∈ {exact, area_mismatch, window_mismatch, none}, `plan_id | null`, `modem_id | null`, `hail_sent_at`, `hail_reply` ∈ {valid, invalid, none, timeout}, `operator_known` (bool).
+
+**Context**
+- `zone_id`, `zone_criticality` (0–1), `nearest_asset_id`, `hour_of_day`, `pattern_of_life_anomaly` (0–1, §4), `ais_surface_correlation` (0–1: is there a surface track at the same place), `sensor_health` (0–1 per sensor), `visibility_for_camera` (0–1).
+
+Rules: a row of kind `assumption` must name what it assumes (e.g., "current field is the configured default; no live gauge"). Derived rows name the rows they derive from. The UI shows facts and assumptions in different colours.
+
+---
+
+## 3. Posterior (deterministic)
+
+Naive-Bayes-style update over discretized features with likelihood tables in `config/likelihoods.yaml`. Not because it is optimal, but because every number in it can be shown to a judge and edited by a mentor. Each feature has `P(bucket | hypothesis)`; missing features are skipped, not imputed. Output: posterior over the 8 hypotheses, Shannon entropy, and the top-2 margin.
+
+Two aggregate scores feed the ladder (§5):
+- `threat_mass = P(UNAUTHORIZED_UUV) + P(UNAUTHORIZED_DIVER)`
+- `benign_mass = P(FILED_ON_PLAN) + P(BIOLOGIC) + P(DEBRIS_OR_DRIFT) + P(SURFACE_VESSEL_AIS_OFF)`
+
+Required tests: posterior sums to 1; each feature's likelihood row sums to 1 across buckets; adding `hail_reply=valid` must move mass to `FILED_*`/`UNFILED_KNOWN_OPERATOR`; adding `drift_consistency=high` must move mass to `DEBRIS_OR_DRIFT`; adding `propeller_tonal_present=true` + `drift_consistency=low` must move mass to `UNAUTHORIZED_UUV` or `FILED_*`; conflicting evidence increases entropy.
+
+---
+
+## 4. Pattern of life (deterministic)
+
+A table `pol[zone][hour][weekday]` of expected contact density and expected hypothesis mix, generated by the simulator from a seeded "normal month" (Phase 1) and persisted. `pattern_of_life_anomaly` = 1 − percentile of the current contact's feature vector under the zone-hour distribution (a simple z-score over `speed`, `depth`, `transit_pattern`, `dwell_time`). This is also what the false-alarm memory stretch item extends.
+
+---
+
+## 5. Probes (allowlisted, costed, idempotent)
+
+A probe is the only way new evidence enters the table during investigation. Each has `cost_usd`, `latency_s`, `rung_required` (the ladder rung it may be used at), `idempotency_key = hash(contact_id, probe_id, args, tick_bucket)`.
+
+| probe | rung | cost | latency | returns |
+|---|---|---|---|---|
+| `registry_lookup` | watch | 0 | 0 | registry_match, plan_id |
+| `kinematics_profile` | watch | 0 | 0 | all kinematic features |
+| `drift_check` | watch | 0 | 0 | drift_consistency |
+| `pattern_of_life_check` | watch | 0 | 0 | pattern_of_life_anomaly |
+| `ais_surface_correlate` | watch | 0 | 1 | ais_surface_correlation |
+| `acoustic_feature_read` | watch | 0 | 2 | acoustic features |
+| `acoustic_hail` | ask | 0.01 | 20 | hail_reply, modem_id |
+| `camera_cue` | ask | 0.05 | 30 | visibility, optional visual class |
+| `second_sensor_dwell` | ask | 0.10 | 60 | reduced variance on depth/speed |
+| `ask_operator_by_phone` | ask | 0 | 120 | operator confirmation (simulated) |
+| `request_watch_officer_look` | ask | 0 | 60 | human eyes-on (counts as an interruption) |
+
+No probe exists at or above `slow`. Investigation never climbs the ladder by itself; it only produces evidence and a recommendation.
+
+---
+
+## 6. Probe planner
+
+**Deterministic planner (always available, used as fallback and as the baseline).** For each allowlisted probe not yet run, estimate expected information gain = expected entropy reduction of the posterior under the likelihood table, divided by (cost + λ·latency + μ·interruption). Pick the max. Stop per §8.
+
+**LLM planner (optional, replayed by default).** Input: the evidence table, the posterior, the allowlist with costs, the budget remaining, the asset context. Output (strict JSON, schema-validated): `{"next_probe": <allowlisted id>, "why": <one line>, "hypotheses_to_discriminate": [ids], "question_for_human": <string | null>}`. The guard rejects any `next_probe` not in the allowlist, any probe above the current rung, any probe over budget, and anything that is not a probe (a rung, an action, free text). On rejection the deterministic planner's choice is used and a violation is logged. The LLM planner's value is in *why* and in the question for the human; the eval reports where it chose differently from the deterministic planner and whether that helped.
+
+Budget: ≤ 4 probes per contact by default, ≤ 2 paid probes, ≤ 1 human interruption. Budgets live in `config/ladder.yaml`.
+
+---
+
+## 7. Stopping rule and outcomes
+
+Stop when any of:
+- `benign_mass ≥ 0.85` and no critical asset within `time_to_nearest_critical_asset < 300 s` → `RESOLVED_BENIGN` (or `HAZARD_NOTICE` if top hypothesis is `DEBRIS_OR_DRIFT`).
+- `registry_match = exact` and `hail_reply = valid` → `CLEARED_AT_ASK`.
+- Top hypothesis `FILED_OFF_PLAN` with `hail_reply ∈ {none, timeout}` and silence > `lost_vehicle_minutes` → `LOST_VEHICLE` (SITREP with search box).
+- `threat_mass ≥ 0.35` **or** `time_to_nearest_critical_asset < 180 s` with `benign_mass < 0.6` → recommend handoff now (the ladder decides whether `slow`/`hold` under standing orders happens first).
+- Budget exhausted → recommend handoff with the current posterior and an explicit "uncertain" flag.
+
+Every outcome produces a SITREP whose "recommended rung" is computed here, deterministically, and cannot be altered by the SITREP writer.
+
+---
+
+## 8. Honesty requirements (shown in the UI)
+
+- The detection model's assumptions (range falloff, biologic false-alarm rate, track-gap rate) are listed on the About panel with the words "simulated for this demonstration."
+- Probabilities are labeled "stress-test estimate."
+- Every SITREP has a "what we don't know" section generated from the `assumption` rows and the missing features.
+
+---
+
+## 9. Sophistication ladder (in order; stop when the clock says so)
+
+1. §2 kinematic + registry + context features, §3 posterior, §6 deterministic planner, §7 stopping rule. **Ship this first; it is already more than most teams will have.**
+2. §4 pattern-of-life anomaly.
+3. `drift_check` with a configured current field (tide-phase lookup from a static table is enough).
+4. LLM planner with the guard and recorded fixtures; hypothesis writer that produces the question for the human.
+5. `transit_pattern` classifier (straight / lawnmower / orbit / random / stationary) from heading statistics.
+6. Multi-contact correlation: two contacts with coordinated headings raise `UNAUTHORIZED_UUV` for both (this is a likely twist).
+7. Sensor-health weighting: evidence confidence scaled by `sensor_health`; a dropped sensor widens entropy rather than silently removing rows (another likely twist).
+8. Stretch items from `BUILD-PLAN.md`.

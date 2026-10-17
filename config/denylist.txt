@@ -1,0 +1,13 @@
+\bintercept(s|ed|ing|or|ors)?\b
+\binterdict(s|ed|ing|ion)?\b
+\bhalt(s|ed|ing)?\b
+\bpursue(s|d)?\b
+\bpursuit\b
+\bneutrali[sz](e|es|ed|ing|ation)\b
+\bnet gun\b
+\bjam(s|med|ming|mer|mers)?\b
+\bdisable(s|d)?\b
+\bram(s|med|ming)?\b
+\bstrike(s|d)?\b
+\bweapon(s|ized|ry)?\b
+\btorpedo(es)?\b

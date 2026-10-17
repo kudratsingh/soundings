@@ -1,0 +1,61 @@
+# The boundary table and thresholds. Changing a threshold requires owner approval
+# and a line in docs/log/DECISIONS.md. Every value here is a stress-test setting
+# for the demonstration, not an operational forecast.
+
+rungs: [watch, ask, slow, hold, hand_to_person]
+lives_on: [ask, hand_to_person]   # what we claim on stage; watch is the floor
+
+boundary:
+  watch:
+    platform_alone: [track, score, pattern_of_life_compare]
+    standing_orders: []
+    person_approves: []
+  ask:
+    platform_alone: [registry_lookup, acoustic_hail, camera_cue, request_watch_officer_look]
+    standing_orders: []
+    person_approves: []
+  slow:
+    platform_alone: []
+    standing_orders: [advisory_one_basin]       # scope in standing_orders.yaml
+    person_approves: [harbor_wide_slowdown]
+  hold:
+    platform_alone: []
+    standing_orders: [hold_one_gate_or_berth]   # scope in standing_orders.yaml
+    person_approves: [hold_longer, hold_wider, second_hold]
+  hand_to_person:
+    platform_alone: [sitrep_with_evidence_and_recommended_rung]
+    standing_orders: []
+    person_approves: [external_call_uscg_eod, any_closure, anything_after_handoff]
+
+criteria:
+  slow:
+    threat_mass_min: 0.25
+    time_to_critical_asset_max_s: 600
+  hold:
+    threat_mass_min: 0.35
+    time_to_critical_asset_max_s: 300
+    zone_criticality_min: 0.7
+    active_holds_max: 0
+
+stopping:
+  benign_mass_resolve: 0.85
+  benign_time_guard_s: 300
+  threat_mass_handoff: 0.35
+  imminent_time_s: 180
+  imminent_benign_mass_max: 0.6
+  lost_vehicle_silence_min: 10
+
+budgets:
+  probes_per_contact: 4
+  paid_probes_per_contact: 2
+  human_interruptions_per_contact: 1
+  llm_calls_per_contact: 4
+
+costs:
+  shutdown_usd_per_min_default: 0        # set from a mentor-validated figure; 0 until then, and labeled
+  interruption_cost_weight: 0.5
+  latency_cost_weight_per_s: 0.001
+
+watch_after_handoff:
+  sitrep_update_interval_s: 300
+  departed_after_s_outside_zone: 120

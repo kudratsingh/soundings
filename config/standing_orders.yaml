@@ -1,0 +1,25 @@
+# Standing orders: what the platform may do under a watch commander's signature
+# when nobody is reachable. Unsigned or expired => nothing above `ask` executes.
+# The signature field is a sha256 over the canonical YAML of `orders` and is
+# verified at load time (see soundings/ladder/standing_orders.py).
+
+orders:
+  signed_by: "Watch Commander (demo)"
+  signed_at: "2026-10-16T21:00:00-07:00"
+  valid_until: "2026-10-18T23:59:00-07:00"
+  scope:
+    slow:
+      basins: [inner_harbor_west]
+      max_minutes: 30
+    hold:
+      max_gates: 1
+      max_minutes: 15
+  approvers:
+    primary: {name: "Watch Officer", channel: "ui", timeout_s: 120}
+    backup:  {name: "Duty Supervisor", channel: "sms_sim", timeout_s: 180}
+  degraded_mode:
+    when: [network_down, approver_unreachable]
+    allowed_rungs: [watch, ask, slow, hold]   # within scope above; never beyond
+    never: [harbor_closure, external_call]
+
+signature: "REPLACE_WITH_SHA256_AT_PHASE_4"
