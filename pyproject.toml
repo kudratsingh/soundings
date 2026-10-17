@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
+    "shapely>=2.2.0", # WO-081
     "sqlmodel>=0.0.48",
     "typer>=0.27.3",
     "uvicorn>=0.54.0",
@@ -53,6 +54,12 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 module = ["anthropic.*", "sqlmodel.*", "playwright.*"]
 ignore_missing_imports = true
+
+# --- WO-081 begin ---
+[[tool.mypy.overrides]]  # WO-081
+module = ["shapely.*"]
+ignore_missing_imports = true
+# --- WO-081 end ---
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,3 +6,16 @@ registry:
   sim_epoch_utc_offset: "-07:00"          # Pacific daylight time on the demo weekend
   retention_days: 30                      # CLAUDE.md section 6: no retention beyond 30 days
   plan_id_prefix: "P"                     # auto-assigned ids look like P-20261017-001
+
+# WO-081: conflict detection at filing. Read by soundings.registry.models.load_conflict_config.
+# A conflict needs overlap in all three of area (buffered zone polygons), depth band and
+# time window. The depth bands are STRESS-TEST ASSUMPTIONS per job type, not survey data
+# (DECISIONS 2026-10-17 06:37); they apply only when a plan gives no depth band.
+conflicts:
+  area_buffer_m: 50          # every zone widened by 50 m before the area test
+  depth_defaults_m:          # [min, max] metres below the surface (stress-test values)
+    survey: [0, 30]
+    hull_cleaning: [0, 12]
+    pile_inspection: [0, 20]
+    dredge: [5, 25]
+    other: [0, 30]

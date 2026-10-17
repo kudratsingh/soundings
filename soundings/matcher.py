@@ -35,7 +35,7 @@ from pydantic import Field, StrictBool, StrictStr, model_validator
 
 from soundings.canonical import round6
 from soundings.investigation.evidence import EvidenceTable
-from soundings.registry.models import PlanStatus, PlanView
+from soundings.registry.models import IN_FORCE, PlanView
 from soundings.schemas._base import (
     CONFIG_DIR,
     NonNegFloat,
@@ -422,7 +422,7 @@ def in_window(plan: PlanView, tick: int) -> bool:
 
 def _active(plans: Sequence[PlanView]) -> list[PlanView]:
     return sorted(
-        (p for p in plans if p.status is PlanStatus.ACTIVE),
+        (p for p in plans if p.status in IN_FORCE),  # WO-081: conflicted plans stay in force
         key=lambda p: p.plan_id,
     )
 
