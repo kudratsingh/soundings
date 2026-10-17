@@ -1584,7 +1584,6 @@ def main_v2(argv: Sequence[str] | None = None) -> int:
 # end. CLAUDE.md 2.1: after HANDED_OFF only watching happens. 2.2: the driver passes only
 # guard decisions to the machine; runner.py still imports nothing from ``soundings.llm``.
 
-import dataclasses  # noqa: E402
 from collections import Counter  # noqa: E402
 
 from soundings.investigation.posterior import score_contact  # noqa: E402
@@ -1863,6 +1862,7 @@ class RunSession:
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
+        responder: ResponderPort | None = None,
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
@@ -1880,6 +1880,7 @@ class RunSession:
             llm_roles=llm_roles,
             violations_path=violations_path,
             fixture_store=fixture_store,
+            responder=responder,
         )
         names = sorted({ToggleName(t.name) for t in sc.toggles} | {ToggleName(t) for t in toggles})
         self.toggles = tuple(names)
@@ -2258,6 +2259,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
+        responder: ResponderPort | None = None,
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
@@ -2273,6 +2275,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
             llm_roles=llm_roles,
             violations_path=violations_path,
             fixture_store=fixture_store,
+            responder=responder,
             orders_path=orders_path,
             unsigned=unsigned,
             approver=approver,
@@ -2290,6 +2293,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
+        responder: ResponderPort | None = None,
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
@@ -2304,6 +2308,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
             llm_roles=llm_roles,
             violations_path=violations_path,
             fixture_store=fixture_store,
+            responder=responder,
             orders_path=orders_path,
             unsigned=unsigned,
             approver=approver,
