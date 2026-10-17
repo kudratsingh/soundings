@@ -169,7 +169,7 @@ PR: · Merged commit: · Test summary: · STATE.md updated:
 - `llm_roles` defaults to False in the runner until recorded fixtures exist; eval and demo CLIs refuse `--mode record|live` (exit 3).
 
 ## Part A done (coordinator split)
-Landed 2026-10-17 05:54 PDT on `wo/032a-llm-guard-core` (PR PRNUM). No model was called; every test uses hand-written fixtures, an empty store, or a stub transport.
+Landed 2026-10-17 05:54 PDT on `wo/032a-llm-guard-core` (PR #17). No model was called; every test uses hand-written fixtures, an empty store, or a stub transport.
 
 Built:
 - `soundings/llm/guard.py`: `ProbePlanOutput`, `HypothesisEntry`, `HypothesisSetOutput` (with `.ids()`), `ViolationCode`, `ProbeTerms(rung_required, cost_usd, latency_s=0, interruption=0)`, `RemainingBudget(probes, paid_probes, interruptions)` (with `.allows(terms)`), `GuardContext(allowlist, current_rung, remaining, contact_id, tick, already_run=frozenset(), rung_order=<config/ladder.yaml rungs>)`, `GuardResult` (`accept`/`reject`), `check_probe_plan(raw, ctx)`, `check_hypothesis_set(raw)`, `ViolationRow(when, role, fixture_key, violation, fallback_used, detail="")`, `format_violation_row`, `append_violation(row, path=DEFAULT_VIOLATIONS_PATH)`, `DEFAULT_VIOLATIONS_PATH`, `VIOLATIONS_HEADER`, and the key vocabularies `TOOL_CALL_KEYS`, `APPROVAL_KEYS`, `RUNG_KEYS`, `RUNG_SPOKEN_FORMS`. All ten codes are implemented (no cut-line merge).
