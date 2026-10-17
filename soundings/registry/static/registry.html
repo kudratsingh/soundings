@@ -20,7 +20,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 17px; margin: 28px 0 10px; }
   p.lede { margin: 0 0 18px; color: var(--muted); }
@@ -28,7 +28,7 @@
          padding: 18px; display: grid; gap: 14px;
          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
-  input, select { font: inherit; color: var(--ink); background: var(--bg);
+  input, select { width: 100%; min-width: 0; font: inherit; color: var(--ink); background: var(--bg);
                   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
   fieldset { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: 6px;
              margin: 0; padding: 10px 12px; display: grid; gap: 12px;
@@ -46,8 +46,9 @@
   .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
                 border-radius: 8px; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
-           white-space: nowrap; }
+  th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  td code, td button { white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; }
   tr:last-child td { border-bottom: 0; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -133,6 +134,10 @@
     return base + offset;
   }
 
+  function shortTime(iso) {
+    return iso.slice(0, 10) + " " + iso.slice(11, 16) + " " + iso.slice(19);
+  }
+
   function intOrNull(v) { return v === "" ? null : Number(v); }
 
   function cell(row, text) {
@@ -182,8 +187,8 @@
           cell(tr, p.operator);
           cell(tr, p.vehicle);
           cell(tr, p.modem_id);
-          cell(tr, p.start_at);
-          cell(tr, p.end_at);
+          cell(tr, shortTime(p.start_at));
+          cell(tr, shortTime(p.end_at));
           cell(tr, p.start_tick === null ? "-" : p.start_tick + "-" + p.end_tick);
           var actions = cell(tr, "");
           var btn = document.createElement("button");

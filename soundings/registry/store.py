@@ -137,7 +137,7 @@ class RegistryStore:
         if draft.area not in zones:
             raise PlanRejected(
                 RejectReason.AREA_NOT_SECURITY_ZONE,
-                f"area {draft.area!r} is not a declared security zone; valid: {zones}",
+                f"area {draft.area!r} is not a declared security zone; valid: {', '.join(zones)}",
             )
         ticks = (draft.start_tick, draft.end_tick)
         times = (draft.start_at, draft.end_at)
