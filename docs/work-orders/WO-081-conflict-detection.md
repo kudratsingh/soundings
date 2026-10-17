@@ -124,7 +124,12 @@ ask (the matcher's plan set now includes `conflicted` plans; outcomes unchanged)
 - §6: no new retention. Conflict rows go with their plan in `purge_older_than` (asserted in `test_conflicts_api.py::test_purge_removes_conflicts`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see branch `wo/081-conflict-detection` · Merged commit: (squash, see STATE) · Test summary: `1462 passed, 2 skipped` (make check exit 0; 51 WO-081 tests, BT-01 runner check skipped until WO-080 part A) · STATE.md updated: yes
+- Dependency: `uv add shapely>=2.2.0` (installed 2.2.0; approved DECISIONS 2026-10-17 06:37); `shapely.*` mypy override in its own `# WO-081` table.
+- Filing time (stand-in 40 plans, all conflicted, 276 pairs): about 72 ms best of 3 on a loaded laptop; `conflicts_among` about 11 ms.
+- Deviations (DECISIONS 2026-10-17 07:03): `JobTypeName` Literal adapter in `models.py` until `soundings.schemas.enums.JobType` lands (swap the alias; values identical); nested-zone test uses `fuel_berths` in `main_channel` (geojson); `ConflictView.reasons` is a tuple; `tests/support/busy_plans.bt01_or_standin()` returns a seeded 40-plan stand-in until `scenarios/BT-01.yaml` exists, then the real one (automatic); `test_bt01_cases_unchanged_by_conflict_detection` skips until then.
+- `tests/test_registry.py` REJECT_CASES gained two `DEPTH_BAND_INVERTED` rows (the cover-every-reason test requires each reason; nothing removed).
+- e2e: `tests/e2e/test_registry_conflicts.py` carries its own uvicorn fixture (WO-060's conftest is not on main) and runs with `SOUNDINGS_E2E=1` or `SOUNDINGS_E2E_REQUIRED=1`; Playwright chromium v1248 was installed locally for it.
 
 ## Notes for downstream
 - WO-082 reads `PlanView.conflicts`, the `IN_FORCE` set, `PlanView.tick_s` and `PlanView.job_type`. After an accepted proposal it calls `store.recompute_conflicts(component)` and then `store.set_conflict_resolution(component, proposal_id)`. A plan's status is `conflicted` iff it has at least one conflict row with `resolved_by IS NULL`.
