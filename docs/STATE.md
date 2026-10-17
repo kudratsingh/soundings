@@ -18,7 +18,7 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 |---|---|---|---|---|---|---|
 | 000 | repo + scaffold | merged (direct, pre-protection) | main | — | 25e7dbb | 31 passed |
 | 010 | schemas + harbor map | PR open, auto-merge on green CI | wo/010-schemas-and-harbor-map | [#1](https://github.com/kudratsingh/soundings/pull/1) | squash commit on main (see PR #1) | 64 passed |
-| 011 | sim + scenario catalog | pending | wo/011-sim-and-scenario-catalog | | | |
+| 011 | sim + scenario catalog | PR open, auto-merge on green CI | wo/011-sim-and-scenario-catalog | [#3](https://github.com/kudratsingh/soundings/pull/3) | squash commit on main (see PR) | 273 passed |
 | 012 | evidence table + features | pending | wo/012-evidence-table-and-features | | | |
 | 020 | registry | pending | wo/020-registry | | | |
 | 021 | challenge-response | pending | wo/021-challenge-response | | | |
