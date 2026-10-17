@@ -664,19 +664,19 @@ def test_llm_path_planner_choices(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     from soundings.llm.roles import ROLE_PROBE_PLANNER, llm_call_fields
     from tests.support.live_runs import (
         STUB_MODEL,
-        LlmMachinePlanner,
+        RecordingLlmPlanner,
         ScriptedTransport,
         investigate,
     )
 
-    slot: list[LlmMachinePlanner] = []
+    slot: list[RecordingLlmPlanner] = []
     client = ModelClient(
         mode=ModelMode.LIVE,
         model_name=STUB_MODEL,
         live_budget=LiveBudget(tmp_path / "calls.json", total=2),
         transport=ScriptedTransport(lambda role, inputs: slot[0].deterministic_reply(role, inputs)),
     )
-    inv = investigate("S05", client, tmp_path / "v.md", transport_slot=slot)
+    inv = investigate("S05", client, tmp_path / "v.md", planner_slot=slot)
     log = AuditLog(tmp_path / "audit.db")
     for i, outcome in enumerate(inv.planner.outcomes):
         payload = llm_call_payload(**llm_call_fields(ROLE_PROBE_PLANNER, outcome))
@@ -686,7 +686,8 @@ def test_llm_path_planner_choices(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert [r["path"] for r in rows] == ["live", "live"] + ["fallback"] * (len(rows) - 2)
     assert [r["outcome"] for r in rows[:2]] == ["accepted", "accepted"]
     assert all(r["outcome"] == "fallback" for r in rows[2:])
-    assert all(r["reason"] == "budget_exhausted" for r in rows[2:])
+    assert rows[2]["reason"] == "budget_exhausted"
+    assert {r["reason"] for r in rows[2:]} <= {"budget_exhausted", "llm_budget_spent"}
     assert log.verify().ok
 
     replay_log = AuditLog(tmp_path / "replay.db")
@@ -696,9 +697,10 @@ def test_llm_path_planner_choices(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         payload = llm_call_payload(**llm_call_fields(ROLE_PROBE_PLANNER, outcome))
         replay_log.append(AuditKind.LLM_CALL, payload, run_id=RUN, t_s=float(i), contact_id=CID)
     replay_rows = [r.payload for r in replay_log.rows(kind="llm_call")]
-    assert {(r["outcome"], r["path"], r.get("reason")) for r in replay_rows} == {
-        ("fallback_no_fixture", "fallback", "replay_miss")
+    assert ("fallback_no_fixture", "fallback", "replay_miss") in {
+        (r["outcome"], r["path"], r.get("reason")) for r in replay_rows
     }
+    assert {r["path"] for r in replay_rows} == {"fallback"}
 
 
 def test_llm_path_rejected_and_role_budget_rows() -> None:

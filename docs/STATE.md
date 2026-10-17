@@ -57,7 +57,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 084 | projected tracks (Kalman) | PR open (flag flipped to kalman for build_evidence; runner stays window) | wo/084-projected-tracks | see PR | | 1436 passed (24 test_kalman*) |
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
-| 087 | bounded live mode (stage) | PR open (auto-merge on green); default stays replay, enabled Sunday only by `approve paid run stage live budget 40` | wo/087-bounded-live-mode | see branch PR | | TBD |
+| 087 | bounded live mode (stage) | PR open (auto-merge on green); default stays replay, enabled Sunday only by `approve paid run stage live budget 40` | wo/087-bounded-live-mode | see branch PR | | 1907 passed, 1 skipped, 2 xfailed (test_live_mode 44, test_api_model_mode 5, test_audit -k llm_path 3) |
 | 089 | physics cards (sonar-equation detection, sourced physics config, About -> Physics, live range rings) | WO written (owner numbered it WO-088; renumbered; docs #40). P2 (API, sensor_ranges stream, About -> Physics, map rings, deck slide 10) PR open, gated: inert until P1's `soundings/physics.py` + `config/physics.yaml` land (P1 code not started at 08:34). Next: P1 code; then `make deck` | wo/089a-physics-core, wo/089b-physics-ui-deck | #40 (docs); P2 see branch PR | 2f10e33 (docs) | P2: 1863 passed, 12 skipped (physics-gated), 2 xfailed |
 | 090 | deck + Devpost fields | in review | wo/090-deck-devpost | | | 1515 passed (28 tests/test_deck.py) |
 | 092 | mentor brief | in review | wo/092-mentor-brief | | | see PR (test_mentor_brief 8) |

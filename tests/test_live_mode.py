@@ -39,7 +39,7 @@ from soundings.llm.client import (
 )
 from soundings.llm.live_budget import LiveBudget, budget_total_from_env
 from soundings.llm.planner import LlmPlanner
-from soundings.llm.roles import ROLE_HYPOTHESIS_WRITER, ROLE_PROBE_PLANNER
+from soundings.llm.roles import LLM_BUDGET_SPENT, ROLE_HYPOTHESIS_WRITER, ROLE_PROBE_PLANNER
 from soundings.llm.sitrep_writer import SitrepPath
 from tests.llm_cases import FIXTURE_ROOT, PLANNER_CASES, TABLES, make_table, threat_report
 from tests.support.handoff_runs import REJECTION_CONTACT
@@ -47,7 +47,7 @@ from tests.support.live_runs import (
     STUB_MODEL,
     ExplodingTransport,
     FailingTransport,
-    LlmMachinePlanner,
+    RecordingLlmPlanner,
     ScriptedTransport,
     SleepyTransport,
     handoff_s05,
@@ -105,11 +105,11 @@ def _spent(path: Path) -> int:
 def test_budget_exhaustion_mid_investigation_falls_back_to_replay_outcome(tmp_path: Path) -> None:
     replay = investigate("S05", _replay_empty(tmp_path), tmp_path / "replay-violations.md")
 
-    slot: list[LlmMachinePlanner] = []
+    slot: list[RecordingLlmPlanner] = []
     transport = ScriptedTransport(lambda role, inputs: slot[0].deterministic_reply(role, inputs))
     budget = LiveBudget(_counter(tmp_path), total=2)
     client = _live(transport, budget)
-    live = investigate("S05", client, tmp_path / "live-violations.md", transport_slot=slot)
+    live = investigate("S05", client, tmp_path / "live-violations.md", planner_slot=slot)
 
     # the hard cap: two transport calls, then nothing reaches the transport
     assert len(transport.requests) == 2
@@ -120,7 +120,11 @@ def test_budget_exhaustion_mid_investigation_falls_back_to_replay_outcome(tmp_pa
     third = live.planner.choices[2]
     assert third.source == "fallback" and third.fallback_reason == REASON_BUDGET_EXHAUSTED
     assert [c.source for c in live.planner.choices[:2]] == ["llm", "llm"]
-    assert all(c.fallback_reason == REASON_BUDGET_EXHAUSTED for c in live.planner.choices[2:])
+    # later decisions stop at the live cap, or at WO-032's per-contact call limit first
+    assert {c.fallback_reason for c in live.planner.choices[2:]} <= {
+        REASON_BUDGET_EXHAUSTED,
+        LLM_BUDGET_SPENT,
+    }
     # the fallback is the deterministic choice, so the investigation ends as replay does
     assert [c.probe_id for c in live.planner.choices] == [
         c.probe_id for c in replay.planner.choices
@@ -268,7 +272,8 @@ def test_error_in_every_decision_still_completes_the_investigation(tmp_path: Pat
     client = _live(FailingTransport(RuntimeError("down")), LiveBudget(_counter(tmp_path), 40))
     live = investigate("S05", client, tmp_path / "l.md")
     assert live.result.events == replay.result.events
-    assert {c.fallback_reason for c in live.planner.choices} == {"error:RuntimeError"}
+    reasons = {c.fallback_reason for c in live.planner.choices}
+    assert "error:RuntimeError" in reasons and reasons <= {"error:RuntimeError", LLM_BUDGET_SPENT}
 
 
 # --- persisted counter -----------------------------------------------------------------------

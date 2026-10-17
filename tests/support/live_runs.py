@@ -2,11 +2,10 @@
 
 * ``ScriptedTransport`` answers like a hosted model from a callable; ``SleepyTransport``
   never answers inside the timeout; ``FailingTransport`` raises.
-* ``investigate(sid, client)`` runs the WO-033 ``InvestigationMachine`` over a catalog
-  scenario with ``LlmMachinePlanner``: WO-032's ``LlmPlanner`` (guard, fallback, the
-  deterministic WO-031 choice) adapted to the machine's ``Planner`` protocol, with a probe
-  runner that adds no rows, so every decision after the free watch evidence goes through
-  the planner until the budget stops the investigation.
+* ``investigate(sid, client)`` runs one catalog investigation through the WO-033 part B
+  wiring (``InvestigationKit``: the guarded ``LlmPlanner`` and ``HypothesisWriter``, the
+  real probe executor) with ``client`` injected, so every planner decision and the
+  writer call go through the client under test.
 * ``handoff_s05(workdir, client)`` is the WO-042 S05 handoff with an injected client, so a
   live client's SITREP path lands in the audit log.
 """
@@ -14,7 +13,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -23,29 +22,19 @@ from typing import Any
 from soundings.investigation.evidence import EvidenceTable
 from soundings.investigation.features import build_evidence
 from soundings.investigation.machine import (
-    BudgetView,
-    InvestigationLedger,
-    InvestigationMachine,
     InvestigationResult,
-    NoRowsProbeRunner,
-    ProbeChoice,
     load_budgets,
     load_stopping_config,
 )
-from soundings.investigation.planner import (
-    BudgetLedger,
-    DeterministicPlanner,
-    PlannerChoice,
-    PlannerState,
-    state_from_table,
-)
+from soundings.investigation.planner import DeterministicPlanner, PlannerChoice, PlannerState
 from soundings.investigation.pol import load_pol_table
 from soundings.investigation.posterior import (
+    LikelihoodTables,
     PosteriorReport,
     load_likelihood_tables,
     load_prior_config,
 )
-from soundings.investigation.probes import ALLOWLIST
+from soundings.investigation_wiring import InvestigationKit, ProbeWorld
 from soundings.ladder.audit import AuditLog
 from soundings.ladder.driver import LadderDriver, LadderRun
 from soundings.ladder.handoff import HandoffService
@@ -54,8 +43,8 @@ from soundings.ladder.watch import DepartureDetector
 from soundings.llm.client import ModelClient, ModelOutput, TransportReply
 from soundings.llm.guard import ProbePlanOutput
 from soundings.llm.planner import LlmPlanner
-from soundings.llm.roles import RoleOutcome
-from soundings.schemas.enums import ProbeId, Rung
+from soundings.llm.roles import HypothesisWriter, RoleOutcome
+from soundings.registry.store import plan_views_from_scenario
 from soundings.schemas.harbor import Harbor, load_harbor
 from soundings.sim.current import load_current_field, tide_phase_for_hour
 from soundings.sim.run import run_scenario
@@ -125,52 +114,33 @@ class ExplodingTransport:
 # --- the investigation driver ------------------------------------------------------------
 
 
-class LlmMachinePlanner:
-    """WO-032 ``LlmPlanner`` behind the WO-033 machine's ``Planner`` protocol."""
+class RecordingLlmPlanner(LlmPlanner):
+    """WO-032 ``LlmPlanner`` that keeps every state, choice and role outcome it saw."""
 
-    def __init__(self, llm: LlmPlanner, contact_id: str, tick_s: float) -> None:
-        self.llm = llm
-        self.contact_id = contact_id
-        self.tick_s = tick_s
-        self.ledger = BudgetLedger()
-        self.ran: list[ProbeId] = []
+    def __init__(self, client: ModelClient, *, violations_path: Path) -> None:
+        super().__init__(client, violations_path=violations_path)
         self.choices: list[PlannerChoice] = []
         self.outcomes: list[RoleOutcome[ProbePlanOutput | None]] = []
         self.state: PlannerState | None = None
 
-    def next_probe(
-        self, table: EvidenceTable, posterior: PosteriorReport, budget: BudgetView, rung: Rung
-    ) -> ProbeChoice | None:
-        self.state = state_from_table(
-            table,
-            self.contact_id,
-            TABLES,
-            PRIORS,
-            current_rung=rung,
-            ledger=self.ledger.copy(),
-            tick=budget.tick,
-            tick_s=self.tick_s,
-            ran_probes=frozenset(self.ran),
-        )
-        choice = self.llm.choose(
-            self.state, TABLES, table=table, report=posterior, when=f"t={budget.tick}"
+    def choose(
+        self,
+        state: PlannerState,
+        tables: LikelihoodTables,
+        *,
+        table: EvidenceTable | None = None,
+        report: PosteriorReport | None = None,
+        asset_context: Mapping[str, Any] | None = None,
+        when: str | None = None,
+    ) -> PlannerChoice:
+        self.state = state
+        choice = super().choose(
+            state, tables, table=table, report=report, asset_context=asset_context, when=when
         )
         self.choices.append(choice)
-        assert self.llm.last_outcome is not None
-        self.outcomes.append(self.llm.last_outcome)
-        if choice.probe_id is None:
-            return None
-        spec = ALLOWLIST[choice.probe_id]
-        self.ledger.record(self.contact_id, choice.probe_id)
-        self.ran.append(choice.probe_id)
-        return ProbeChoice(
-            probe_id=choice.probe_id,
-            cost_usd=spec.cost_usd,
-            latency_s=spec.latency_s,
-            interruption=spec.interruption,
-            rung_required=spec.rung_required,
-            source=choice.source,
-        )
+        assert self.last_outcome is not None
+        self.outcomes.append(self.last_outcome)
+        return choice
 
     def deterministic_reply(self, role: str, inputs: Any) -> ModelOutput:
         """A well-formed planner reply naming the probe the deterministic rules pick."""
@@ -217,7 +187,7 @@ def scenario_contact(run: SimRun) -> str:
 @dataclass
 class Investigation:
     result: InvestigationResult
-    planner: LlmMachinePlanner
+    planner: RecordingLlmPlanner
 
 
 def investigate(
@@ -226,35 +196,46 @@ def investigate(
     violations_path: Path,
     *,
     seed: int | None = None,
-    transport_slot: list[LlmMachinePlanner] | None = None,
+    planner_slot: list[RecordingLlmPlanner] | None = None,
 ) -> Investigation:
-    """One investigation of ``sid`` with ``client`` behind the guarded planner.
+    """One investigation of ``sid`` through the WO-033 part B wiring with ``client``.
 
-    The investigation starts at the first tick of the contact's track (so the stop rule
-    has not fired yet) and may run to the scenario's last tick. ``transport_slot``
-    receives the adapter before the run, so a stub transport can answer from its state.
+    ``InvestigationKit`` with the guarded ``LlmPlanner`` and ``HypothesisWriter`` on
+    ``client`` and the real probe executor over the scenario's ``ProbeWorld``: the same
+    path runner v2 takes with the model roles on, with the client injected instead of the
+    replay-only one. ``planner_slot`` receives the planner before the run, so a stub
+    transport can answer from the state it is deciding on.
     """
     run = _sim(sid, seed)
-    cid = scenario_contact(run)
-    llm = LlmPlanner(client, violations_path=violations_path, call_limit=8)
-    adapter = LlmMachinePlanner(llm, cid, run.tick_s)
-    if transport_slot is not None:
-        transport_slot.append(adapter)
-    machine = InvestigationMachine(
-        cid,
-        _evidence(sid, run),
-        planner=adapter,
-        probe_runner=NoRowsProbeRunner(),
+    scenario = resolve_scenario(sid, _harbor())
+    plans = plan_views_from_scenario(scenario)
+    world = ProbeWorld(
+        run=run,
+        scenario=scenario,
+        harbor=_harbor(),
+        current_field=load_current_field(),
+        pol=load_pol_table(),
+        plans_at=lambda tick: plans,
+    )
+    planner = RecordingLlmPlanner(client, violations_path=violations_path)
+    if planner_slot is not None:
+        planner_slot.append(planner)
+    kit = InvestigationKit(
         tables=TABLES,
         prior_cfg=PRIORS,
         stopping=load_stopping_config(),
         budgets=load_budgets(),
-        tick=run.tracks[cid].points[0].tick,
-        tick_s=run.tick_s,
-        max_tick=run.n_ticks - 1,
-        ledger=InvestigationLedger(),
+        world=world,
+        planner=planner,
+        writer=HypothesisWriter(client, violations_path=violations_path),
+        label=f"{sid}/seed{seed if seed is not None else scenario.seed}/",
     )
-    return Investigation(machine.run(), adapter)
+    cid = scenario_contact(run)
+    last = run.n_ticks - 1
+    handle = kit.handle(cid, _evidence(sid, run), max_tick=last)
+    handle.start(run.tracks[cid].points[0].tick)
+    handle.step(last)
+    return Investigation(handle.result(), planner)
 
 
 # --- the S05 handoff with an injected client ---------------------------------------------
