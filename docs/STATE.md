@@ -66,6 +66,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 042-fix | audit commit semantics (row coverage, write-failure rollback, idempotent re-delivery) | PR open (auto-merge on green) | fix/audit-commit-semantics | see PR | | tests/test_audit_semantics.py 14 new; full suite in PR |
 | fix | boundary (investigator cannot peek) + no-external-references | PR open (auto-merge on green) | fix/boundary-and-no-references | see PR | | tests/test_boundary.py (24) + tests/test_no_external_references.py (3); full suite in PR |
 | 088 | responder platform (mobile probe at rung ask: dispatch to look, 25 m standoff, geofence, battery) | part A (WO, `config/responder.yaml`, `soundings/sim/responder.py`, station-keeping, battery) PR open, auto-merge on green; parts B (probes, guards, planner) and C (UI, SFX, presenter) in parallel | wo/088a-responder-sim | see branch PR | | part A: test_responder 26, test_responder_catalog 43 (catalog x seeds 1-5, zero standoff/geofence/corridor violations) |
+| 094 | re-acquisition carry-over (S04 lineage ends RESOLVED_BENIGN) | PR open (auto-merge on green); catalog verify exits 0 | wo/094-reacquisition-carryover | see branch PR | | 2194 passed, 20 skipped, 0 xfailed (test_reacquisition_carryover 15; S04 xfails flipped) |
 
 ## Team
 | role | name | github | owns |
