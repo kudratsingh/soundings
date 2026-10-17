@@ -22,9 +22,9 @@ the three evidence guards to ``guard_port.evidence_guard``.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 
@@ -32,7 +32,7 @@ from soundings.canonical import round6, stable_hash
 from soundings.schemas import ToggleName
 from soundings.schemas._base import HarborId, NonNegInt, Probability, StrictModel
 
-from .approval import ApprovalToken, parse_token, token_problem
+from .approval import ApprovalToken, parse_token, token_hash, token_problem
 from .boundary import ABSOLUTE_NEVER, BoundaryCell, BoundaryTable, LadderCriteria
 from .guard_port import evidence_guard
 from .standing_orders import StandingOrdersStatus, StandingScope, effective_scope
@@ -630,10 +630,23 @@ class BoundaryGuards:
             backup_paged=ctx.backup_paged,
         )
 
+    # --- WO-042 audit semantics ---
+    observer: GuardObserver | None = None
+    """Told the inputs of every decision (the audit's guard rows); never changes a verdict."""
+
     def decide(self, name: GuardName, ctx: GuardContext) -> GuardDecision:
         if name in EVIDENCE_GUARDS:
-            return evidence_guard(name, ctx)
-        return _PURE[name](self.inputs(ctx), self.boundary.criteria)
+            decision = evidence_guard(name, ctx)
+            if self.observer is not None:
+                self.observer(decision.inputs_hash, evidence_guard_read(ctx))
+            return decision
+        inputs = self.inputs(ctx)
+        decision = _PURE[name](inputs, self.boundary.criteria)
+        if self.observer is not None:
+            self.observer(decision.inputs_hash, guard_inputs_read(inputs))
+        return decision
+
+    # --- WO-042 audit semantics end ---
 
     # --- WO-083 begin: separation ---
     def separation_decision(
@@ -657,3 +670,34 @@ class BoundaryGuards:
         return separation_slow_permitted(inputs, self.boundary.criteria, facts), inputs
 
     # --- WO-083 end ---
+
+
+# --- WO-042 audit semantics ---
+GuardObserver = Callable[[str, dict[str, Any]], None]
+
+
+def guard_inputs_read(inputs: GuardInputs) -> dict[str, Any]:
+    """``GuardInputs`` as the audit stores it: the approval token becomes its hash."""
+    dumped: dict[str, Any] = inputs.model_dump(mode="json")
+    token = inputs.approval_token
+    dumped["approval_token"] = None if token is None else {"token_hash": token_hash(token)}
+    return dumped
+
+
+def evidence_guard_read(ctx: GuardContext) -> dict[str, Any]:
+    """What an evidence guard reads: the event and its rows for this contact (ids only)."""
+    rows = sorted(
+        (r for r in ctx.event.payload.rows if r.contact_id == ctx.contact_id),
+        key=lambda r: (r.t, r.row_id),
+    )
+    return {
+        "contact_id": ctx.contact_id,
+        "state": ctx.state.value,
+        "event": ctx.event.kind.value,
+        "arg": ctx.event.arg,
+        "tick": ctx.event.tick,
+        "evidence_row_ids": [r.row_id for r in rows],
+    }
+
+
+# --- WO-042 audit semantics end ---
