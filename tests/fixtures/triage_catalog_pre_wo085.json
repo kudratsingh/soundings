@@ -24,12 +24,12 @@
     "v3_transition_log_hash": "0e4664768a730ef9cdb9e1367a0402785c55324df293858e87209a23e8223795"
   },
   "S04": {
-    "v2_interruptions": 2,
-    "v2_nested_log_hash": "89f54362fa5f74458ca8859030f170618f185e510bed7fb96cc37c86d15977b9",
-    "v2_transition_log_hash": "1d8f859fd68b9ab9f53f7deca2287e2f76b0d8c86be77c615a438fcb9e7d68b4",
-    "v3_interruptions": 2,
-    "v3_ladder_log_hash": "df364093c24033c6699a46c5bf4a8c610538e51bd0bfec6563cd65e7187ee4d5",
-    "v3_transition_log_hash": "1d8f859fd68b9ab9f53f7deca2287e2f76b0d8c86be77c615a438fcb9e7d68b4"
+    "v2_interruptions": 1,
+    "v2_nested_log_hash": "9895d656e8b696f5f46510ae50f10c9ad7d2443cd6647f8131a8a501a1d2a9a0",
+    "v2_transition_log_hash": "4db5bdf7fc7e3a55f4d7447aae7d2570220decb79ba9916828935fd79dfd9a60",
+    "v3_interruptions": 1,
+    "v3_ladder_log_hash": "9080af95c7686f95cdfeac3e8adee2c2913e700bc57fdbddf5c520c8c7fe1293",
+    "v3_transition_log_hash": "4db5bdf7fc7e3a55f4d7447aae7d2570220decb79ba9916828935fd79dfd9a60"
   },
   "S05": {
     "v2_interruptions": 6,
@@ -49,7 +49,7 @@
   },
   "S07": {
     "v2_interruptions": 2,
-    "v2_nested_log_hash": "1564368eed00a00eaf725fb40719cfe61985ce36ccaeb7f21e10a0c02bbf85ed",
+    "v2_nested_log_hash": "6624d60b59e3011e5c9def52624df7579bd23106bd843f531c8e2b58001c0b89",
     "v2_transition_log_hash": "45133ce3d2a2904302efee0e13d6cb22755efd48a996be952757ec3dc4318e15",
     "v3_interruptions": 2,
     "v3_ladder_log_hash": "e73b7daf653fa9960f268aeff59b868f5302a73f200e85bf4665a4265a890767",
@@ -57,7 +57,7 @@
   },
   "S08": {
     "v2_interruptions": 2,
-    "v2_nested_log_hash": "26b32901015feb7596c76ffff9d14681c05dedb9c5d441c29eaec20cf75e593d",
+    "v2_nested_log_hash": "bfca5b0b1ac32187c442a91ca6798df06204c80c6d0aa0e889c32156238cc2ae",
     "v2_transition_log_hash": "4bea1b9ea753c88206448ec0e235bd4022217ae6e708b2289f04d4d7c01dd5db",
     "v3_interruptions": 2,
     "v3_ladder_log_hash": "9b74a348f321f415bd41529ec6e121963daeb4613bded032936f49ee855e8c6e",
