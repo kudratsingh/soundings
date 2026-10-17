@@ -415,12 +415,24 @@ def run_scenario(
     ticks: int | None = None,
     harbor: Harbor | None = None,
     params: DetectionParams | None = None,
+    likelihoods: LikelihoodSpec | None = None,
 ) -> SimRun:
     """Run one scenario. ``seed=None`` uses ``scenario.seed``; ``ticks=None`` uses
     ``scenario.duration_ticks``; ``harbor=None`` loads ``config/harbor.geojson``;
-    ``params=None`` loads ``config/sim.yaml``. Pure: same arguments, same ``SimRun``."""
-    base = default_config()
-    cfg = base if params is None else replace(base, params=params)
+    ``params=None`` loads ``config/sim.yaml``; ``likelihoods=None`` samples unset acoustic
+    fields from ``config/likelihoods.yaml`` (WO-051 passes a perturbed table instead).
+    Pure: same arguments, same ``SimRun``.
+
+    Prefix-stable: with ``ticks=N`` greater than ``duration_ticks`` the first
+    ``duration_ticks`` ticks are byte-identical to the default run (every stream is per
+    contact, per node or per false alarm and drawn in tick order); compare with
+    ``truncate_run``.
+    """
+    cfg = default_config()
+    if params is not None:
+        cfg = replace(cfg, params=params)
+    if likelihoods is not None:
+        cfg = replace(cfg, likelihoods=likelihoods)
     p = cfg.params
     h = harbor if harbor is not None else _default_harbor()
     run_seed = scenario.seed if seed is None else seed
@@ -491,13 +503,16 @@ def run_scenario(
 
     # Biologic false alarms: Poisson arrivals per node per tick, nodes sorted by id.
     rate = false_alarm_rate_per_tick(p.false_alarms_per_node_hour, tick_s)
+    # Arrivals and spawn draws use separate streams, drawn tick by tick, so a longer run
+    # reproduces a shorter one's prefix exactly (prefix stability).
     spawns = []
     for node, (nx, ny), nss in zip(nodes, node_xy, ss_nodes.spawn(len(nodes)), strict=True):
-        node_rng = np.random.default_rng(nss)
-        arrivals = node_rng.poisson(rate, size=n_ticks) if n_ticks > 0 else np.zeros(0)
+        arrival_ss, spawn_ss = nss.spawn(2)
+        arrival_rng = np.random.default_rng(arrival_ss)
+        spawn_rng = np.random.default_rng(spawn_ss)
         for tick in range(n_ticks):
-            for _ in range(int(arrivals[tick])):
-                fa = sample_false_alarm(node_rng, nx, ny, node.range_m, p)
+            for _ in range(int(arrival_rng.poisson(rate))):
+                fa = sample_false_alarm(spawn_rng, nx, ny, node.range_m, p)
                 if node_health(node.health, node.node_id, tick, dropouts) > 0.0:
                     spawns.append((tick, node.node_id, fa))
     spawns.sort(key=lambda s: (s[0], s[1]))  # stable: arrival order within a node and tick
@@ -528,14 +543,21 @@ def run_scenario(
             is_false_alarm=True,
             node_id=node_id,
         )
-        fa_rng = np.random.default_rng(fss)
+        fa_kin_ss, fa_noise_ss = fss.spawn(2)
         life = min(fa.lifetime_ticks, n_ticks - tick)
         path = simulate_path(
-            truth.behavior, truth.start, life, dt_s=tick_s, current=sampler, rng=fa_rng
+            truth.behavior,
+            truth.start,
+            life,
+            dt_s=tick_s,
+            current=sampler,
+            rng=np.random.default_rng(fa_kin_ss),
         )
         truths.append(truth)
         paths[truth.gt_id] = path
-        readings[truth.gt_id] = _emit_false_alarm(truth, path, node, dropouts, p, fa_rng)
+        readings[truth.gt_id] = _emit_false_alarm(
+            truth, path, node, dropouts, p, np.random.default_rng(fa_noise_ss)
+        )
 
     # Observed ids: split each contact's readings on the timeout, then number segments
     # in order of first detection, ties by ground-truth id.
@@ -579,6 +601,37 @@ def run_scenario(
         contact_truth=contact_truth,
         truth_paths=truth_paths,
         toggle_report=toggle_report(scenario.toggles, [s.contact.id for s in surge]),
+    )
+
+
+def truncate_run(run: SimRun, n_ticks: int) -> SimRun:
+    """The part of ``run`` before tick ``n_ticks``, as a run of that length would report it.
+
+    Points, detections and truth points at ``tick >= n_ticks`` are dropped, gaps after an
+    observed track's last kept point are dropped, and ids left without points disappear.
+    """
+    if n_ticks > run.n_ticks:
+        raise ValueError("cannot truncate to more ticks than the run has")
+    tracks: dict[ContactId, Track] = {}
+    for cid in sorted(run.tracks):
+        track = run.tracks[cid]
+        points = tuple(pt for pt in track.points if pt.tick < n_ticks)
+        if not points:
+            continue
+        gaps = tuple(g for g in track.gaps if g.end_tick < points[-1].tick)
+        tracks[cid] = track.model_copy(update={"points": points, "gaps": gaps})
+    truth_paths: dict[str, list[TruthPoint]] = {}
+    for gt_id in sorted(run.truth_paths):
+        kept = [pt for pt in run.truth_paths[gt_id] if pt.tick < n_ticks]
+        if kept:
+            truth_paths[gt_id] = kept
+    return replace(
+        run,
+        n_ticks=n_ticks,
+        tracks=tracks,
+        detections=[d for d in run.detections if d.tick < n_ticks],
+        contact_truth={c: t for c, t in run.contact_truth.items() if c in tracks},
+        truth_paths=truth_paths,
     )
 
 
