@@ -1,0 +1,17 @@
+{
+  "twist": 1,
+  "kind": "written_response",
+  "facts": [
+    "The organizers asked for the government funding pathway for Soundings (response drafted by the owner; notice text pending verbatim capture).",
+    "Navy SBIR topics N152-113, N252-116 and N252-117 exist and address harbor UUV detection and the steps after a UUV is determined unauthorized.",
+    "DHS S&T funds maritime port security research; the Coast Guard Captain of the Port sets harbor security zones."
+  ],
+  "assumptions": [
+    "Phase II of the Navy 25.2 topics would be classified and need U.S. ownership and facility clearance.",
+    "DIU and NSF SBIR timelines as stated are current as of 2026-10."
+  ],
+  "new_constraints": [],
+  "affected_components": ["docs/DECK-INPUTS.md (twist slide, funding path)", "twists/01/"],
+  "candidate_toggles": [],
+  "build_change": "none"
+}
