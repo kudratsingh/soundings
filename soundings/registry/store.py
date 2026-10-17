@@ -23,10 +23,11 @@ from typing import Any, cast
 
 from sqlalchemy import Engine, event
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, col, create_engine, func, select
+from sqlmodel import Session, SQLModel, col, create_engine, func, select, update
 
 from soundings.registry.conflicts import (
     Conflict,
+    PlanFootprint,
     conflict_view,
     conflicts_among,
     detect_conflicts,
@@ -67,6 +68,8 @@ DEFAULT_DB_PATH: Path = Path("soundings.db")
 MEMORY = ":memory:"
 FREE_TEXT_FIELDS = ("operator", "vehicle", "contact_channel")
 _IN_FORCE_VALUES = sorted(s.value for s in IN_FORCE)
+_PLAN_TABLE: Any = Plan.__table__  # type: ignore[attr-defined]
+_CONFLICT_TABLE: Any = PlanConflict.__table__  # type: ignore[attr-defined]
 
 Clock = Callable[[], datetime]
 
@@ -211,7 +214,7 @@ class RegistryStore:
                 RejectReason.BAD_MODEM_ID,
                 f"modem_id {draft.modem_id!r} does not match {self.config.modem_id_pattern}",
             )
-        if draft.plan_id is not None and self.get(draft.plan_id) is not None:
+        if draft.plan_id is not None and self._exists(draft.plan_id):
             raise PlanRejected(
                 RejectReason.DUPLICATE_PLAN_ID, f"plan_id {draft.plan_id!r} already exists"
             )
@@ -222,6 +225,10 @@ class RegistryStore:
                     RejectReason.DENYLISTED_TEXT,
                     f"{field} contains {len(hits)} denylisted term(s) (CLAUDE.md 2.5)",
                 )
+
+    def _exists(self, plan_id: str) -> bool:
+        with self._session() as session:
+            return session.get(Plan, plan_id) is not None
 
     def _next_plan_id(self, session: Session, start_at: datetime) -> str:
         stem = f"{self.config.plan_id_prefix}-{start_at.strftime('%Y%m%d')}-"
@@ -293,27 +300,39 @@ class RegistryStore:
                 tick_s=stored_tick_s,
             )
             # --- WO-081 begin: conflicts at filing (the plan is still accepted) ---
-            new_fp = footprint_of(PlanView.from_row(row), self.conflict_config)
+            cfg = self.conflict_config
             candidates = self._in_force_overlapping(session, start_at, end_at)
             found = detect_conflicts(
-                new_fp,
-                [footprint_of(PlanView.from_row(c), self.conflict_config) for c in candidates],
+                _row_footprint(row, cfg),
+                [_row_footprint(c, cfg) for c in candidates],
                 self.harbor,
-                self.conflict_config,
+                cfg,
             )
             if found:
                 row.status = PlanStatus.CONFLICTED.value
             session.add(row)
-            partners = {c.plan_id: c for c in candidates}
-            for conflict in found:
-                other = partners[conflict.other_plan_id]
-                session.add(_conflict_row(conflict, created_at))
-                session.add(_conflict_row(mirror(conflict, _tz_of(other)), created_at))
-                if other.status == PlanStatus.ACTIVE.value:
-                    other.status = PlanStatus.CONFLICTED.value
-                    session.add(other)
+            if found:
+                # Core statements on the session's connection: same transaction, no ORM
+                # bookkeeping (the filing path must stay well under 200 ms for 40 plans)
+                partners = {c.plan_id: c for c in candidates}
+                records = []
+                for conflict in found:
+                    other = partners[conflict.other_plan_id]
+                    records.append(_conflict_record(conflict, created_at))
+                    records.append(_conflict_record(mirror(conflict, _tz_of(other)), created_at))
+                conn = session.connection()
+                conn.execute(_CONFLICT_TABLE.insert(), records)
+                conn.execute(
+                    update(_PLAN_TABLE)
+                    .where(
+                        _PLAN_TABLE.c.plan_id.in_(sorted({c.other_plan_id for c in found})),
+                        _PLAN_TABLE.c.status == PlanStatus.ACTIVE.value,
+                    )
+                    .values(status=PlanStatus.CONFLICTED.value)
+                )
             session.commit()
-            return self._view_of(session, row)
+            # the new plan's conflicts are exactly ``found``, already in view order
+            return PlanView.from_row(row, tuple(conflict_view(c) for c in found))
             # --- WO-081 end ---
 
     def expire(self, plan_id: str, *, at: datetime | None = None) -> PlanView:
@@ -725,17 +744,38 @@ def plan_views_from_scenario(
     return sorted(attached, key=lambda v: (v.start_tick or 0, v.plan_id))
 
 
+def _conflict_record(conflict: Conflict, detected_at: datetime) -> dict[str, Any]:
+    """Column values for one direction of a conflict (WO-081)."""
+    return {
+        "plan_id": conflict.plan_id,
+        "other_plan_id": conflict.other_plan_id,
+        "overlap_start": to_utc(conflict.overlap_start),
+        "overlap_end": to_utc(conflict.overlap_end),
+        "overlap_minutes": conflict.overlap_minutes,
+        "reasons": ",".join(sorted(r.value for r in conflict.reasons)),
+        "resolved_by": None,
+        "detected_at": to_utc(detected_at),
+    }
+
+
 def _conflict_row(conflict: Conflict, detected_at: datetime) -> PlanConflict:
     """Storage row for one direction of a conflict (WO-081)."""
-    return PlanConflict(
-        plan_id=conflict.plan_id,
-        other_plan_id=conflict.other_plan_id,
-        overlap_start=to_utc(conflict.overlap_start),
-        overlap_end=to_utc(conflict.overlap_end),
-        overlap_minutes=conflict.overlap_minutes,
-        reasons=",".join(sorted(r.value for r in conflict.reasons)),
-        resolved_by=None,
-        detected_at=to_utc(detected_at),
+    return PlanConflict(**_conflict_record(conflict, detected_at))
+
+
+def _row_footprint(row: Plan, cfg: ConflictConfig) -> PlanFootprint:
+    """``footprint_of`` straight from a stored row (no ``PlanView`` on the filing path)."""
+    if row.depth_min_m is not None and row.depth_max_m is not None:
+        lo, hi = float(row.depth_min_m), float(row.depth_max_m)
+    else:
+        lo, hi = cfg.depth_band(row.job_type)
+    return PlanFootprint(
+        plan_id=row.plan_id,
+        area=row.area,
+        start_at=from_storage(row.start_at, row.start_offset_min),
+        end_at=from_storage(row.end_at, row.end_offset_min),
+        depth_min_m=lo,
+        depth_max_m=hi,
     )
 
 
