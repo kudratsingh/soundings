@@ -5,7 +5,7 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 ## Where we are
 - **Phase 0 complete.** Repo `kudratsingh/soundings` (public), scaffold commit `25e7dbb`. `make check` green locally (ruff, mypy, denylist, 31 tests, web build). `/health` → `{"ok":true,"model_mode":"replay"}`. `python -m soundings.sim --seed 7 --ticks 60 --scenario smoke` is byte-identical across runs.
 - **Phase 1 in progress.** WO-010 (schemas + harbor map) first; WO-011 (sim + catalog) and WO-012 (evidence table + features) run in parallel worktrees once WO-010's interfaces land. Phase 1 target of Fri 11:30 PM has slipped (see `docs/log/DECISIONS.md` 22:25 rows).
-- Phase 2–6 work orders are being drafted in parallel and land as a docs PR.
+- Phase 2–6 work orders WO-020..WO-062 are in docs/work-orders/ with coordinator addenda; merge waves in DECISIONS.md 23:05.
 - Lens declared at submission: Crisis Mitigation (Track 01 Marine, NULL Labs).
 
 ## Owner directives in force (2026-10-16 ~22:00 PT)
