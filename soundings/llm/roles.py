@@ -49,6 +49,7 @@ __all__ = [
     "FALLBACK_DETERMINISTIC_PLANNER",
     "FALLBACK_RULE_ORDER",
     "FALLBACK_TEMPLATE_HYPOTHESES",
+    "HYPOTHESIS_WRITER_CALLS_PER_INVESTIGATION",
     "HYPOTHESIS_WRITER_PROMPT",
     "LLM_BUDGET_SPENT",
     "PROBE_PLANNER_PROMPT",
@@ -287,22 +288,45 @@ class ProbePlannerRole:
         )
 
 
+HYPOTHESIS_WRITER_CALLS_PER_INVESTIGATION = 1
+"""CLAUDE.md section 5: one ``hypothesis_writer`` call per investigation (contact)."""
+
+
 class HypothesisWriter:
-    """The guarded ``hypothesis_writer`` call: one per investigation, template fallback."""
+    """The guarded ``hypothesis_writer`` call: one per investigation, template fallback.
+
+    One investigation is one contact: a second ``write`` for the same ``contact_id``
+    makes no call and returns the template with ``fallback_reason="llm_budget_spent"``.
+    """
 
     def __init__(
-        self, client: ModelClient, *, violations_path: Path = DEFAULT_VIOLATIONS_PATH
+        self,
+        client: ModelClient,
+        *,
+        violations_path: Path = DEFAULT_VIOLATIONS_PATH,
+        call_limit: int = HYPOTHESIS_WRITER_CALLS_PER_INVESTIGATION,
     ) -> None:
         self.client = client
         self.violations_path = violations_path
+        self.call_limit = call_limit
+        self._calls: dict[str, int] = {}
+
+    def calls_made(self, contact_id: str) -> int:
+        return self._calls.get(contact_id, 0)
 
     def write(
         self, report: PosteriorReport, table: EvidenceTable, *, when: str
     ) -> RoleOutcome[HypothesisSetOutput]:
+        inputs = build_hypothesis_writer_inputs(report, table)
+        cid = report.contact_id
+        if self.calls_made(cid) >= self.call_limit:
+            key = fixture_key(ROLE_HYPOTHESIS_WRITER, inputs)
+            return RoleOutcome("fallback", template_hypotheses(report), LLM_BUDGET_SPENT, None, key)
+        self._calls[cid] = self.calls_made(cid) + 1
         return run_guarded_role(
             self.client,
             ROLE_HYPOTHESIS_WRITER,
-            build_hypothesis_writer_inputs(report, table),
+            inputs,
             check_hypothesis_set,
             lambda: template_hypotheses(report),
             when=when,

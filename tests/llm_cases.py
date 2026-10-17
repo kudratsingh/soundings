@@ -1,7 +1,10 @@
 """Synthetic inputs for the LLM guard tests and the hand-written fixtures.
 
-The allowlist below copies SPEC-INVESTIGATION section 5 by hand so these tests do not
-depend on the probe module (WO-031). Every hand-written fixture under
+The allowlist below copies SPEC-INVESTIGATION section 5 by hand (part A predates WO-031);
+``tests/test_llm_roles.py`` proves it equals the guard view of WO-031 ``ALLOWLIST``.
+``PlannerCase.state()`` gives the WO-031 ``PlannerState`` whose ``LlmPlanner`` inputs are
+exactly ``PlannerCase.inputs()``, so the same fixtures replay through ``LlmPlanner``.
+Every hand-written fixture under
 ``tests/fixtures/model_calls/{probe_planner,hypothesis_writer}/`` is ``<key>.json`` with
 ``key = fixture_key(role, inputs)``; ``PLANNER_CASES`` / ``WRITER_CASES`` name the case
 each key belongs to. Only the fixture ``output`` is written by hand.
@@ -15,7 +18,19 @@ from pathlib import Path
 from typing import Any
 
 from soundings.investigation.evidence import EvidenceTable
-from soundings.investigation.posterior import Posterior, PosteriorReport
+from soundings.investigation.planner import (
+    BudgetCounts,
+    BudgetLedger,
+    PlannerState,
+    load_budget_limits,
+    observed_confidence,
+)
+from soundings.investigation.posterior import (
+    LikelihoodTables,
+    Posterior,
+    PosteriorReport,
+    load_likelihood_tables,
+)
 from soundings.llm.guard import GuardContext, ProbeTerms, RemainingBudget, ViolationCode
 from soundings.llm.roles import build_hypothesis_writer_inputs, build_probe_planner_inputs
 from soundings.schemas import EvidenceKind, EvidenceRow, FeatureName, Hypothesis, ProbeId, Rung
@@ -23,6 +38,7 @@ from soundings.schemas.enums import Unit
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "model_calls"
 CONTACT = "c-0001"
+TABLES: LikelihoodTables = load_likelihood_tables()
 
 ALLOWLIST: dict[ProbeId, ProbeTerms] = {
     ProbeId.REGISTRY_LOOKUP: ProbeTerms(Rung.WATCH, 0.0, 0.0),
@@ -136,6 +152,36 @@ class PlannerCase:
         return build_probe_planner_inputs(
             make_table(), threat_report(), self.ctx, self.asset_context
         )
+
+    def state(self) -> PlannerState:
+        """The WO-031 state this case's ``GuardContext`` describes."""
+        return planner_state(self.ctx)
+
+
+def ledger_for(remaining: RemainingBudget, contact_id: str = CONTACT) -> BudgetLedger:
+    """A ledger whose ``remaining(contact_id)`` equals ``remaining``."""
+    ledger = BudgetLedger(load_budget_limits())
+    lim = ledger.limits
+    ledger._counts[contact_id] = BudgetCounts(
+        probes=lim.probes_per_contact - remaining.probes,
+        paid=lim.paid_probes_per_contact - remaining.paid_probes,
+        interruptions=lim.human_interruptions_per_contact - remaining.interruptions,
+    )
+    return ledger
+
+
+def planner_state(ctx: GuardContext, report: PosteriorReport | None = None) -> PlannerState:
+    """The ``PlannerState`` matching a guard context, over ``make_table()``."""
+    report = report if report is not None else threat_report()
+    return PlannerState(
+        contact_id=ctx.contact_id,
+        posterior=report.posterior,
+        observed_confidence=observed_confidence(make_table(), ctx.contact_id, TABLES),
+        current_rung=ctx.current_rung,
+        ledger=ledger_for(ctx.remaining, ctx.contact_id),
+        tick=ctx.tick,
+        ran_probes=ctx.already_run,
+    )
 
 
 PLANNER_CASES: dict[str, PlannerCase] = {
