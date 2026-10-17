@@ -57,6 +57,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
 | 087 | bounded live mode (stage) | WO written | wo/087-bounded-live-mode | | | |
+| 090 | deck + Devpost fields | in review | wo/090-deck-devpost | | | 27 passed (tests/test_deck.py) |
 | 092 | mentor brief | in review | wo/092-mentor-brief | | | see PR (test_mentor_brief 8) |
 
 ## Team

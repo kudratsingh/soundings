@@ -63,4 +63,6 @@ None changed; the deck describes watch / ask / slow / hold / hand to a person.
 If late, drop in order: the DEVPOST evidence-block refresh (leave placeholders); the threshold-curve embed (placeholder); keyboard Home/End. Never cut: placeholders-not-figures, the denylist check, 11 pages.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: (see branch PR) · Merged commit: (squash on merge) · Test summary: `tests/test_deck.py` 27 passed; full suite 1439 passed; `make check` exit 0 · STATE.md updated: yes (one row)
+- `make deck` exit 0 without `report.json` (warning, 8 `[eval pending]` sites, 11-page PDF) and with the synthetic fixture copied in (0 pending, 11 pages); the fixture copy was removed and `docs/deck/index.html` / `docs/DEVPOST.md` were re-rendered with placeholders before commit.
+- Deviations: file named `WO-090-deck-devpost.md` (the task text said `WO-090-090-...`, a doubled number); OR-Tools and shapely are listed with an owner check (they arrive with WO-081/WO-082, unmerged at this WO); DEVPOST Twists mirrors the DECK-INPUTS 'Twists (Devpost writeup)' section that landed on main during this WO; `config/denylist.txt`'s check script does not scan `.html`, so the rendered deck is checked by `build_deck.py` and `test_deck.py` instead.

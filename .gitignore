@@ -15,3 +15,4 @@ tests/fixtures/model_calls/**/*.tmp
 *.db
 scenarios/live/*.yaml
 !scenarios/live/.gitkeep
+docs/deck/deck.pdf
