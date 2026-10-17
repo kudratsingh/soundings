@@ -131,9 +131,11 @@ jobs:
     needs: [static, tests-core, tests-heavy-a, tests-heavy-b, web]
     steps:
       - name: Every job green
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
         run: |
-          echo '${{ toJSON(needs) }}'
-          case '${{ join(needs.*.result, ",") }}' in
+          echo "job results: $RESULTS"
+          case "$RESULTS" in
             *failure*|*cancelled*|*skipped*) echo "a job did not pass"; exit 1;;
           esac
           echo "all jobs passed"
