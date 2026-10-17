@@ -83,7 +83,7 @@ class PlanWatchConfig(StrictModel):
 
 
 class ReacquireConfig(StrictModel):
-    max_gap_s: PositiveFloat = 600.0
+    max_gap_s: PositiveFloat = 100.0
     gate_base_m: PositiveFloat = 75.0
     gate_growth_mps: NonNegFloat = 0.15
     speed_tol_mps: PositiveFloat = 0.5
