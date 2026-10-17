@@ -1,0 +1,38 @@
+# The simulated responder platform (WO-088; CLAUDE.md section 8 A2). Loaded by
+# soundings.sim.responder.load_responder_config. Every value below is a demo value,
+# chosen for a small battery vehicle in this simplified harbor, not a vendor figure.
+#
+# The responder is a mobile probe at rung ask: it is dispatched to look, keeps station
+# at standoff on the side of the contact away from the nearest asset, and returns to
+# dock. standoff_m may not go below 25 m here (the loader rejects it); a smaller
+# standoff, leaving the geofence, or a second vehicle is a person's call
+# (config/ladder.yaml boundary rows).
+
+responder:
+  id: resp_1                         # demo value
+  dock: {lat: 33.736, lon: -118.257} # demo value: a pier on the east side of the Main Channel
+  speed_mps: 1.5                     # demo value: cruise speed
+  standoff_m: 25.0                   # demo value: it orbits at standoff, never inside
+  battery_min: 90.0                  # demo value: full charge, in minutes at cruise
+  # Battery law (local cubic law until WO-089 ships soundings.physics.battery_drain_min):
+  # drain per minute = hotel_load_min_per_min + drain_coeff * speed_mps^3.
+  # At 1.5 m/s that is 0.2 + 0.24 * 3.375 = 1.01 battery-minutes per minute.
+  drain_coeff: 0.24                  # demo value
+  hotel_load_min_per_min: 0.2        # demo value: sensors and comms while underway or on station
+  battery_reserve_frac: 0.1          # demo value: margin kept above the return cost
+  geofence_zone_ids:                 # demo value: every declared security zone in config/harbor.geojson
+    - fuel_berths
+    - inner_basin_research
+    - inner_harbor_west
+    - main_channel
+    - pier_400_approach
+    - vincent_thomas_bridge
+  restation_hysteresis_m: 5.0        # demo value: the contact must move this far before it re-stations
+  orbit_period_s: 60.0               # demo value: one sweep of the station arc
+  orbit_half_arc_deg: 45.0           # demo value: the arc swept either side of the away bearing
+  corridor_half_width_m: 25.0        # demo value: never inside the corridor between contact and asset
+  corridor_tie_margin_m: 100.0       # demo value: also keep out of corridors to assets this close to the nearest distance
+  look_range_max_m: 150.0            # demo value: beyond this on station it returns to dock (no following)
+  transit_timeout_factor: 2.0        # demo value: station not reached in factor x ETA + 120 s -> return to dock
+  route_cell_m: 25.0                 # demo value: planning grid for routes inside the geofence
+  search_track_spacing_m: 50.0       # demo value: lawnmower leg spacing over a drift box
