@@ -1,0 +1,23 @@
+# Trap TR-03 (known answer: hand off). An unfiled vehicle sits almost still beside
+# fuel_berth_2 before dawn, high-band tonal, no reply. Low speed reads like debris on
+# kinematics alone. Calibrates the missed-threat side for a loiterer.
+id: TR-03
+name: Loiterer beside the fuel berth before dawn
+seed: 31
+duration_ticks: 300
+tick_s: 2
+ground_truth: UNAUTHORIZED_UUV
+hour_of_day: 4
+contacts:
+  - id: gt-1
+    start: {lat: 33.7428, lon: -118.2652, depth_m: 8}
+    behavior: {type: stationary, jitter_mps: 0.1}
+    acoustic: {propeller_tonal: true, tonal_band: high, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HANDED_OFF
+  max_human_interruptions: 1
+notes: >-
+  Right answer: hand to a person. Holding station under power beside a fuel berth with
+  no filing and no reply is the loiter case; drift-like speed alone must not clear it.

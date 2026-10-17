@@ -1,0 +1,25 @@
+# Trap TR-02 (known answer: hand off). An unfiled vehicle creeps toward fuel_berth_2 in
+# daylight at a walking pace, quiet mid-band tonal, no reply to the hail. Nothing about
+# its speed or hour is alarming; only the evidence as a whole is. Calibrates the
+# missed-threat side of stopping.threat_mass_handoff.
+id: TR-02
+name: Slow-closing unfiled vehicle in daylight
+seed: 29
+duration_ticks: 300
+tick_s: 2
+ground_truth: UNAUTHORIZED_UUV
+hour_of_day: 14
+contacts:
+  - id: gt-1
+    start: {lat: 33.7395, lon: -118.2625, depth_m: 7}
+    behavior: {type: transit, target_asset: fuel_berth_2, speed_mps: 0.35}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HANDED_OFF
+  top_hypothesis: UNAUTHORIZED_UUV
+  max_human_interruptions: 1
+notes: >-
+  Right answer: hand to a person. Unfiled, silent to the hail, propeller tonal and
+  closing on a critical asset; slow speed and daylight must not talk the scorer out of it.
