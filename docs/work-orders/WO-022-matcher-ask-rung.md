@@ -155,7 +155,19 @@ watch (free probes, `registry_lookup`) and ask (`acoustic_hail`, the matcher, pl
 - §2.6: the citation test (every outcome and notice line cites existing rows; the assumption is labelled).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: [#14](https://github.com/kudratsingh/soundings/pull/14) (branch `wo/022-matcher-ask-rung`) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, full suite 1080 passed after rebase; WO-022 tests 91 (matcher 31, search box 6, re-acquire 9, ask rung 10, runner v1 27, rules 18) · STATE.md updated: yes (WO-022 row)
+
+- Every exit test passes with `MODEL_MODE=replay`; the denylist grep prints nothing. Determinism: `PYTHONHASHSEED` 0 vs 1 on `--scenario S02 --seed 3` gives an empty diff (sha256 `27555550…d477a`, `transition_log_hash=b4793710…ba67b`); `-k deterministic` checks S01, S02, S05 in process.
+- Manual: S01's plan filed through `/registry` with `scripts/registry_form_shot.py --plan-from S01` (cached headless shell via `--executable-path`), then `python -m soundings.runner --scenario S01 --seed 1 --plans db`: both ground-truth cases end `CLEARED_AT_ASK`, and the hash equals the scenario-plans run (`f799c460…0653`).
+- Interface as implemented (differences from the text above):
+  - `match_reacquisition(..., *, new_id)`; `speed_mps` may be None (speed test skipped). The runner tries it at the new id's first reading, where speed is not yet measured, so on catalog runs the gate is position-only.
+  - `drift_search_box(..., *, assumption_row_id)` (the `current_field` row it cites).
+  - `registry_lookup_rows(lookup, *, contact_id, track_segment, hail_rows=())`; `RegistryLookup` also carries `modem_id` and `tick`. `plan_id` rows use source `registry:<plan_id lower-case>` when a modem named the plan and `registry.position:<...>` for a position-only lookup (sources are lower case by WO-010's pattern); `lineage_plan_id` reads only the former.
+  - `MatchConfig.lost_vehicle_silence_min` is filled from `config/ladder.yaml` by `load_match_config` (refuses the key in matcher.yaml). `EvidenceView` also holds `current_field_row_id`, `reacquired_from` and their row ids; `PositionFix.row_id` may be None.
+  - `CaseResult` adds `opened_tick`, `closed_tick`, `outcomes` (every matcher outcome), `hail_keys`, `opened_by` (`new_track` | `plan_watch`), `failure`. `RunResult` adds `hails` (`HailRecord`) and `reacquisitions`. `LostVehicleNotice` adds `tick`. `probes_used` = {`acoustic_hail`: distinct hail keys sent, `registry_lookup`: distinct lookup keys}.
+  - Extra exports: `check_transition`, `IllegalTransition`, `V1_END_STATES`, `transition_log_hash_of`, `format_transition`, `hail_count`, `HailRecord`.
+- Choices beyond the text (DECISIONS.md 2026-10-16 23:44 WO-022 row): `reacquire.max_gap_s` is 100 s, not 600; evidence extraction continues for every tracked contact (so last-heard stays current), with acoustic rows written once per reading; WATCHING hands to ASKING also when the track drops (`track_dropped`) or the run ends (`run_ended`), and scheduled hails drain past the last tick; plans without ticks are never in window; each re-issued id of a lost lineage gets its own LOST_VEHICLE case and an updated notice.
+- Cut line: nothing dropped.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Approved: the registry plan watch (re-hail cleared filed contacts every 300 s while the plan window is open; on silence past `lost_vehicle_silence_min` open a NEW case DETECTED → WATCHING → ASKING → LOST_VEHICLE; never reopen a terminal state) and the non-terminal matcher code `PENDING_SILENCE`.

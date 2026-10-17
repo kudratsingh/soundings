@@ -1,0 +1,26 @@
+# Matcher and ask-rung settings (WO-022; docs/SPEC-INVESTIGATION.md sections 5, 7, 9.9).
+# Loaded by soundings.matcher.load_match_config. Every value here is a stress-test
+# setting for the demonstration, not an operational figure. Approved as a new config
+# file in docs/log/DECISIONS.md 2026-10-16 23:05. The lost-vehicle silence threshold is
+# NOT here: it is read from config/ladder.yaml stopping.lost_vehicle_silence_min.
+
+area_tolerance_m: 150        # a filed vehicle within this distance of its plan's zone is in area
+evidence_every_ticks: 15     # watch rung: extractor rows and registry_lookup cadence (ticks)
+watch_min_points: 10         # readings needed before the watch rung hands to ask
+
+ask:
+  max_hails_per_case: 2      # acoustic_hail budget per case (paid probe, $0.01 each)
+
+plan_watch:
+  rehail_interval_s: 300     # re-hail a cleared filed contact this often while its window is open
+
+reacquire:                   # SPEC-INVESTIGATION 9.9: match a returning track to a lost one
+  max_gap_s: 100             # no match after this long without a reading (DECISIONS 2026-10-16 23:44)
+  gate_base_m: 75            # gate radius at zero gap
+  gate_growth_mps: 0.15      # gate growth per second of gap
+  speed_tol_mps: 0.5         # max |speed_new - speed_old| when the new speed is measured
+
+search_box:                  # LOST_VEHICLE drift search box
+  base_radius_m: 50          # radius floor before position sigma and growth
+  growth_mps: 0.10           # radius growth per second since the anchor fix
+  step_s: 30                 # advection step through the configured current field

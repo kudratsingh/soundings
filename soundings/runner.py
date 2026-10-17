@@ -1,0 +1,1124 @@
+"""Scenario runner (shared file). WO-022 owns runner v1; later WOs edit only their block.
+
+Runner v1 is the ask rung end to end: sim -> evidence table -> watch probes ->
+``registry_lookup`` + ``acoustic_hail`` -> matcher. Every case ends at CLEARED_AT_ASK,
+at LOST_VEHICLE with a ``LostVehicleNotice`` for the plan's operator, or at
+INVESTIGATING with ``investigation_pending=True`` for runner v2 (WO-033).
+
+Rules the runner keeps (CLAUDE.md section 2):
+
+* 2.2: every state change goes through ``check_transition`` against ``ASK_TRANSITIONS``
+  (the five SPEC-LADDER section 3 rows from DETECTED through ASKING); anything else
+  raises ``IllegalTransition`` and the case is written as FAILED. Nothing here imports
+  ``soundings.llm``.
+* 2.4: time is the tick (``TickClock``); every collection is iterated in sorted order;
+  the transition log is canonical JSONL and ``transition_log_hash`` is its sha256.
+* 2.6: every transition, outcome and notice line cites evidence row ids in
+  ``RunResult.evidence``.
+* The runner reads only observed data (``SimRun.tracks``, ``tick_s``, ``n_ticks``) and
+  never a track point after the current tick. Ground truth (``contact_truth``,
+  ``truth_paths``) is read only by the simulated hail (WO-021) and by tests.
+
+Interruptions follow the one definition of DECISIONS.md 2026-10-16 23:05: an event that
+needs the watch officer or backup approver to look or act. Runner v1 raises none; a
+LOST_VEHICLE notice goes to the plan's ``contact_channel`` and is not an interruption.
+"""
+
+from __future__ import annotations
+
+import argparse
+import bisect
+import hashlib
+import math
+import sys
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from enum import StrEnum
+from functools import partial
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import Field, StrictBool, StrictStr
+
+from soundings.canonical import canonical_json, round6, stable_hash
+from soundings.challenge.hail import (
+    HailConfig,
+    HailResult,
+    HailSimulator,
+    KnownOperatorTable,
+    hail_evidence_rows,
+)
+from soundings.clock import TickClock
+from soundings.investigation.evidence import EvidenceTable, carry_over_reacquired
+from soundings.investigation.features import (
+    current_at_from_field,
+    current_field_row,
+    extract_acoustic,
+    extract_context,
+    extract_kinematics,
+    hour_at,
+    last_fitted_state,
+    track_arrays,
+    track_segments,
+)
+from soundings.matcher import (
+    EvidenceView,
+    LostTrack,
+    MatchCode,
+    MatchConfig,
+    MatchOutcome,
+    PositionFix,
+    ReacquireMatch,
+    RegistryLookup,
+    SearchBox,
+    drift_search_box,
+    evidence_view,
+    load_match_config,
+    match,
+    match_reacquisition,
+    registry_lookup,
+    registry_lookup_rows,
+)
+from soundings.probe_keys import idempotency_key, tick_bucket
+from soundings.registry.models import PlanView
+from soundings.registry.store import RegistryStore, plan_views_from_scenario
+from soundings.schemas._base import NonNegFloat, NonNegInt, StrictModel
+from soundings.schemas.denylist import FreeText
+from soundings.schemas.enums import HailReply, LadderState, ProbeId, RegistryMatch
+from soundings.schemas.evidence import EvidenceRow, RowId
+from soundings.schemas.geo import distance_m, from_local_m
+from soundings.schemas.harbor import Harbor, load_harbor
+from soundings.schemas.scenario import Scenario
+from soundings.schemas.track import Track
+from soundings.sim.current import CurrentField, load_current_field
+from soundings.sim.detection import load_detection_params
+from soundings.sim.run import run_scenario
+from soundings.sim.scenario import resolve_scenario
+from soundings.sim.types import SimRun
+
+# --- WO-022 begin: runner v1 ---
+
+S = LadderState
+PLAN_HORIZON_TICK = 10**9
+"""``overlapping_ticks(0, PLAN_HORIZON_TICK)`` reads every tick-windowed plan."""
+
+
+class RunnerEvent(StrEnum):
+    """SPEC-LADDER section 2 events that runner v1 uses."""
+
+    CONTACT_DETECTED = "contact_detected"
+    PROBE_RESULT = "probe_result"
+    STOP_RULE_FIRED = "stop_rule_fired"
+
+
+ASK_TRANSITIONS: frozenset[tuple[LadderState, RunnerEvent, LadderState]] = frozenset(
+    {
+        (S.DETECTED, RunnerEvent.CONTACT_DETECTED, S.WATCHING),
+        (S.WATCHING, RunnerEvent.PROBE_RESULT, S.ASKING),
+        (S.ASKING, RunnerEvent.STOP_RULE_FIRED, S.CLEARED_AT_ASK),
+        (S.ASKING, RunnerEvent.STOP_RULE_FIRED, S.LOST_VEHICLE),
+        (S.ASKING, RunnerEvent.PROBE_RESULT, S.INVESTIGATING),
+    }
+)
+"""The five SPEC-LADDER section 3 rows from DETECTED through ASKING; nothing else."""
+
+V1_END_STATES: frozenset[LadderState] = frozenset(
+    {S.CLEARED_AT_ASK, S.LOST_VEHICLE, S.INVESTIGATING}
+)
+
+
+class IllegalTransition(RuntimeError):
+    """A state change outside ``ASK_TRANSITIONS``."""
+
+
+def check_transition(from_state: LadderState, event: RunnerEvent, to_state: LadderState) -> None:
+    """Raise ``IllegalTransition`` unless ``(from, event, to)`` is in ``ASK_TRANSITIONS``."""
+    if (from_state, event, to_state) not in ASK_TRANSITIONS:
+        raise IllegalTransition(
+            f"{from_state.value} x {event.value} -> {to_state.value} is not an ask-rung row"
+        )
+
+
+class Transition(StrictModel):
+    seq: NonNegInt
+    case_id: StrictStr
+    contact_id: StrictStr
+    tick: NonNegInt
+    from_state: LadderState
+    event: RunnerEvent
+    to_state: LadderState
+    reason_code: StrictStr
+    evidence_row_ids: Annotated[tuple[RowId, ...], Field(min_length=1)]
+    idempotency_key: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class CaseResult(StrictModel):
+    """One case: a contact's pass through the ask rung. ``outcome`` is the last outcome.
+
+    ``outcomes`` holds every matcher outcome in order (a PENDING_SILENCE before the
+    final one); ``hail_keys`` the idempotency keys of the hails the case used.
+    """
+
+    case_id: StrictStr
+    contact_id: StrictStr
+    state: LadderState
+    outcome: MatchOutcome | None
+    reacquired_from: StrictStr | None
+    investigation_pending: StrictBool
+    opened_tick: NonNegInt
+    closed_tick: NonNegInt | None = None
+    outcomes: tuple[MatchOutcome, ...] = ()
+    hail_keys: tuple[str, ...] = ()
+    opened_by: Literal["new_track", "plan_watch"] = "new_track"
+    failure: FreeText | None = None
+
+
+class HailRecord(StrictModel):
+    """One hail the runner used. ``cached`` marks a reuse of an earlier hail's result."""
+
+    purpose: Literal["ask", "plan_watch"]
+    case_id: StrictStr | None
+    contact_id: StrictStr
+    sent_tick: NonNegInt
+    reply_tick: NonNegInt
+    hail_reply: HailReply
+    idempotency_key: StrictStr
+    cached: StrictBool
+    row_ids: tuple[RowId, ...]
+
+
+NoticeSection = Literal["Contact", "What we know", "What we assume", "Search box"]
+
+
+class NoticeLine(StrictModel):
+    """One line of a LOST_VEHICLE notice under a SPEC-LADDER section 6 name."""
+
+    section: NoticeSection
+    text: FreeText
+    evidence_row_ids: Annotated[tuple[RowId, ...], Field(min_length=1)]
+
+
+class LostVehicleNotice(StrictModel):
+    """Sent to the plan's ``contact_channel``; the watch officer is not interrupted."""
+
+    case_id: StrictStr
+    contact_id: StrictStr
+    tick: NonNegInt
+    plan_id: StrictStr
+    operator: FreeText
+    vehicle: FreeText
+    contact_channel: FreeText
+    last_known: PositionFix
+    silence_s: NonNegFloat
+    search_box: SearchBox
+    evidence_row_ids: Annotated[tuple[RowId, ...], Field(min_length=1)]
+    lines: tuple[NoticeLine, ...]
+
+
+@dataclass(frozen=True)
+class RunResult:
+    scenario_id: str
+    seed: int
+    sim: SimRun
+    cases: list[CaseResult]
+    transitions: list[Transition]
+    evidence: EvidenceTable
+    notices: list[LostVehicleNotice]
+    interruptions: int
+    probes_used: dict[str, int]
+    transition_log_hash: str
+    hails: tuple[HailRecord, ...] = ()
+    reacquisitions: tuple[ReacquireMatch, ...] = ()
+
+    def case(self, case_id: str) -> CaseResult:
+        for c in self.cases:
+            if c.case_id == case_id:
+                return c
+        raise KeyError(case_id)
+
+
+def transition_log_lines(transitions: Iterable[Transition]) -> list[str]:
+    """One canonical JSON object per transition, in ``seq`` order."""
+    return [canonical_json(t) for t in sorted(transitions, key=lambda t: t.seq)]
+
+
+def transition_log_text(transitions: Iterable[Transition]) -> str:
+    lines = transition_log_lines(transitions)
+    return "".join(f"{line}\n" for line in lines)
+
+
+def transition_log_hash_of(transitions: Iterable[Transition]) -> str:
+    """sha256 of the canonical JSONL text of ``transitions``."""
+    return hashlib.sha256(transition_log_text(transitions).encode("utf-8")).hexdigest()
+
+
+def write_transition_log(result: RunResult, path: str | Path) -> Path:
+    """Write the canonical JSONL transition log; its sha256 is ``transition_log_hash``."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(transition_log_text(result.transitions), encoding="utf-8")
+    return out
+
+
+# --- internal state -----------------------------------------------------------------------
+
+
+@dataclass
+class _Contact:
+    cid: str
+    track: Track
+    ticks: list[int]
+    first_tick: int
+    last_tick: int
+    dropped_at: int
+    n_seen: int = 0
+    n_extracted: int = 0
+    dropped: bool = False
+    linked_to: str | None = None  # the successor id after a re-acquisition
+
+    def upto(self) -> Track:
+        """The track as seen so far (readings at or before the current tick)."""
+        points = self.track.points[: self.n_seen]
+        if not points:
+            raise ValueError(f"{self.cid} has no reading yet")
+        last = points[-1].tick
+        gaps = tuple(g for g in self.track.gaps if g.end_tick < last)
+        return self.track.model_copy(update={"points": points, "gaps": gaps})
+
+
+@dataclass
+class _Case:
+    case_id: str
+    contact_id: str
+    opened_tick: int
+    opened_by: Literal["new_track", "plan_watch"] = "new_track"
+    state: LadderState = S.DETECTED
+    outcome: MatchOutcome | None = None
+    outcomes: list[MatchOutcome] = field(default_factory=list)
+    hail_keys: list[str] = field(default_factory=list)
+    reacquired_from: str | None = None
+    investigation_pending: bool = False
+    closed_tick: int | None = None
+    failure: str | None = None
+
+    def result(self) -> CaseResult:
+        return CaseResult(
+            case_id=self.case_id,
+            contact_id=self.contact_id,
+            state=self.state,
+            outcome=self.outcome,
+            reacquired_from=self.reacquired_from,
+            investigation_pending=self.investigation_pending,
+            opened_tick=self.opened_tick,
+            closed_tick=self.closed_tick,
+            outcomes=tuple(self.outcomes),
+            hail_keys=tuple(self.hail_keys),
+            opened_by=self.opened_by,
+            failure=self.failure,
+        )
+
+
+@dataclass
+class _Watch:
+    """A cleared filed contact under the registry plan watch."""
+
+    contact_id: str
+    plan_id: str
+    case_id: str
+    next_tick: int
+
+
+@dataclass(order=True)
+class _Event:
+    tick: int
+    order: int
+    key: str
+    kind: str = field(compare=False)
+    hail: HailResult | None = field(default=None, compare=False)
+
+
+_ORDER = {"ask_send": 0, "ask_reply": 1, "watch_reply": 2}
+
+
+class _Plans:
+    """Plans as the matcher sees them: a list, or a ``RegistryStore`` read on the hot path."""
+
+    def __init__(self, source: RegistryStore | Sequence[PlanView]) -> None:
+        self._store = source if isinstance(source, RegistryStore) else None
+        self._list = None if isinstance(source, RegistryStore) else list(source)
+        self._cache: tuple[int, list[PlanView]] | None = None
+
+    def at(self, tick: int) -> list[PlanView]:
+        if self._list is not None:
+            return self._list
+        if self._cache is not None and self._cache[0] == tick:
+            return self._cache[1]
+        assert self._store is not None
+        plans = self._store.overlapping_ticks(0, PLAN_HORIZON_TICK)
+        self._cache = (tick, plans)
+        return plans
+
+
+# --- the runner ---------------------------------------------------------------------------
+
+
+class ScenarioRunner:
+    """Runs one scenario through the ask rung. ``plans`` defaults to the scenario's plans.
+
+    ``plans`` may be a ``RegistryStore`` (read through ``overlapping_ticks`` at every
+    lookup) or a list of ``PlanView``. Later WOs add keyword arguments only.
+    """
+
+    def __init__(
+        self,
+        scenario: Scenario | str,
+        *,
+        seed: int | None = None,
+        plans: RegistryStore | Sequence[PlanView] | None = None,
+        harbor: Harbor | None = None,
+        current_field: CurrentField | None = None,
+        match_cfg: MatchConfig | None = None,
+        hail_cfg: HailConfig | None = None,
+        known: KnownOperatorTable | None = None,
+    ) -> None:
+        self.harbor = harbor if harbor is not None else load_harbor()
+        self.scenario = (
+            resolve_scenario(scenario, self.harbor) if isinstance(scenario, str) else scenario
+        )
+        self.seed = self.scenario.seed if seed is None else int(seed)
+        self.plans_source: RegistryStore | Sequence[PlanView] = (
+            plans if plans is not None else plan_views_from_scenario(self.scenario)
+        )
+        self.current_field = current_field if current_field is not None else load_current_field()
+        self.match_cfg = match_cfg if match_cfg is not None else load_match_config()
+        self.hail_cfg = hail_cfg
+        self.known = known
+        self.timeout_ticks = load_detection_params().track_timeout_ticks
+
+    def run(self) -> RunResult:
+        """Run the scenario and return the ask-rung result (deterministic)."""
+        return _V1Run(self).execute()
+
+
+class _V1Run:
+    """One execution of runner v1. All mutable state lives here."""
+
+    def __init__(self, runner: ScenarioRunner) -> None:
+        self.r = runner
+        sc = runner.scenario
+        self.cfg = runner.match_cfg
+        self.harbor = runner.harbor
+        self.sim = run_scenario(sc, seed=runner.seed, harbor=runner.harbor)
+        self.tick_s = float(self.sim.tick_s)
+        self.clock = TickClock(self.tick_s)
+        self.hail = HailSimulator(
+            sc, self.sim, seed=runner.seed, known=runner.known, cfg=runner.hail_cfg
+        )
+        self.plans = _Plans(runner.plans_source)
+        self.table = EvidenceTable()
+        cf = runner.current_field
+        self.current_at = current_at_from_field(
+            cf.vector_at, cf.phase_for_hour, hour_of_day=sc.hour_of_day
+        )
+        self.contacts: dict[str, _Contact] = {}
+        for cid in sorted(self.sim.tracks):
+            track = self.sim.tracks[cid]
+            ticks = [p.tick for p in track.points]
+            self.contacts[cid] = _Contact(
+                cid=cid,
+                track=track,
+                ticks=ticks,
+                first_tick=ticks[0],
+                last_tick=ticks[-1],
+                dropped_at=ticks[-1] + runner.timeout_ticks + 1,
+            )
+        self.cases: dict[str, _Case] = {}
+        self.case_count: dict[str, int] = {}
+        self.active_case: dict[str, str] = {}
+        self.transitions: list[Transition] = []
+        self.notices: list[LostVehicleNotice] = []
+        self.events: list[_Event] = []
+        self.watches: dict[str, _Watch] = {}
+        self.hail_records: list[HailRecord] = []
+        self.hail_keys_sent: set[str] = set()
+        self.lookup_keys: set[str] = set()
+        self.reacquisitions: list[ReacquireMatch] = []
+        self.rehail_ticks = max(
+            1, int(math.ceil(round(self.cfg.plan_watch.rehail_interval_s / self.tick_s, 9)))
+        )
+
+    # --- evidence -------------------------------------------------------------------------
+
+    def append(self, rows: Iterable[EvidenceRow]) -> list[str]:
+        ids: list[str] = []
+        for row in rows:
+            rid = row.row_id
+            if rid not in self.table:
+                self.table.append(row)
+            ids.append(rid)
+        return ids
+
+    def extract(self, c: _Contact) -> None:
+        """Extractor rows over the track so far; acoustic rows for the new readings only."""
+        if c.n_seen == 0 or c.n_seen == c.n_extracted:
+            return
+        track = c.upto()
+        current_row = current_field_row(track, self.current_at)
+        segments = track_segments(track)
+        fresh = track.model_copy(update={"points": track.points[c.n_extracted :], "gaps": ()})
+        rows = [current_row, *dict.fromkeys(segments.values())]
+        rows += extract_kinematics(
+            track, self.harbor, self.current_at, segments=segments, current_row=current_row
+        )
+        rows += extract_acoustic(fresh)
+        rows += extract_context(track, self.harbor, hour_of_day=self.r.scenario.hour_of_day)
+        self.append(rows)
+        c.n_extracted = c.n_seen
+
+    def view(self, c: _Contact, tick: int) -> EvidenceView:
+        self.extract(c)
+        return evidence_view(self.table, c.cid, c.upto(), tick, self.tick_s)
+
+    def tide_phase(self, tick: int) -> str:
+        hour = hour_at(self.r.scenario.hour_of_day, tick * self.tick_s)
+        return self.r.current_field.phase_for_hour(hour)
+
+    # --- probes ---------------------------------------------------------------------------
+
+    def lookup(
+        self, c: _Contact, view: EvidenceView, tick: int, hail_rows: Sequence[EvidenceRow] = ()
+    ) -> tuple[RegistryLookup, list[str], str]:
+        modem = view.modem_id if hail_rows else None
+        result = registry_lookup(
+            self.plans.at(tick),
+            self.harbor,
+            view.position.lat,
+            view.position.lon,
+            tick,
+            self.cfg,
+            modem_id=modem,
+        )
+        assert view.position.row_id is not None
+        rows = registry_lookup_rows(
+            result,
+            contact_id=c.cid,
+            track_segment=self.table.get(view.position.row_id),
+            hail_rows=hail_rows,
+        )
+        ids = self.append(rows)
+        args = {} if modem is None else {"modem_id": modem}
+        key = idempotency_key(
+            c.cid, ProbeId.REGISTRY_LOOKUP.value, args, tick_bucket(tick, self.tick_s)
+        )
+        self.lookup_keys.add(key)
+        return result, ids, key
+
+    def send_hail(
+        self, c: _Contact, tick: int, *, previously_replied: bool, case_id: str | None, purpose: str
+    ) -> HailResult:
+        key = self.hail.key(c.cid, tick)
+        cached = key in self.hail_keys_sent
+        result = self.hail.send(c.cid, tick, previously_replied=previously_replied)
+        self.hail_keys_sent.add(key)
+        self._record_hail(result, case_id=case_id, purpose=purpose, cached=cached)
+        return result
+
+    def _record_hail(
+        self, result: HailResult, *, case_id: str | None, purpose: str, cached: bool
+    ) -> None:
+        rows = hail_evidence_rows(result, tick_s=self.tick_s)
+        self.hail_records.append(
+            HailRecord(
+                purpose="ask" if purpose == "ask" else "plan_watch",
+                case_id=case_id,
+                contact_id=result.contact_id,
+                sent_tick=result.sent_tick,
+                reply_tick=result.reply_tick,
+                hail_reply=result.hail_reply,
+                idempotency_key=result.idempotency_key,
+                cached=cached,
+                row_ids=tuple(r.row_id for r in rows),
+            )
+        )
+
+    # --- transitions ----------------------------------------------------------------------
+
+    def advance(
+        self,
+        case: _Case,
+        tick: int,
+        event: RunnerEvent,
+        to_state: LadderState,
+        *,
+        reason_code: str,
+        row_ids: Iterable[str],
+        key: str,
+    ) -> None:
+        try:
+            check_transition(case.state, event, to_state)
+        except IllegalTransition as exc:
+            case.failure = str(exc)
+            case.state = S.FAILED
+            case.closed_tick = tick
+            self.active_case.pop(case.contact_id, None)
+            raise
+        ids = tuple(sorted(set(row_ids)))
+        missing = [i for i in ids if i not in self.table]
+        if missing or not ids:
+            raise RuntimeError(f"{case.case_id}: transition cites rows not in the table")
+        self.transitions.append(
+            Transition(
+                seq=len(self.transitions),
+                case_id=case.case_id,
+                contact_id=case.contact_id,
+                tick=tick,
+                from_state=case.state,
+                event=event,
+                to_state=to_state,
+                reason_code=reason_code,
+                evidence_row_ids=ids,
+                idempotency_key=key,
+            )
+        )
+        case.state = to_state
+        if to_state in V1_END_STATES:
+            case.closed_tick = tick
+            self.active_case.pop(case.contact_id, None)
+
+    def transition_key(self, case: _Case, label: str, tick: int) -> str:
+        return stable_hash(["transition", case.case_id, label, tick])
+
+    # --- cases ----------------------------------------------------------------------------
+
+    def open_case(self, c: _Contact, tick: int, *, opened_by: str) -> _Case:
+        n = self.case_count.get(c.cid, 0) + 1
+        self.case_count[c.cid] = n
+        case = _Case(
+            case_id=f"{c.cid}#{n}",
+            contact_id=c.cid,
+            opened_tick=tick,
+            opened_by="plan_watch" if opened_by == "plan_watch" else "new_track",
+        )
+        self.cases[case.case_id] = case
+        self.active_case[c.cid] = case.case_id
+        return case
+
+    def on_new_track(self, c: _Contact, tick: int) -> None:
+        case = self.open_case(c, tick, opened_by="new_track")
+        view = self.view(c, tick)
+        cited = [view.position.row_id]
+        found = self.try_reacquire(c, tick, view.position)
+        if found is not None:
+            ids = carry_over_reacquired(
+                self.table,
+                found.old_id,
+                c.cid,
+                t=tick,
+                match_confidence=found.match_confidence,
+                reason=found.reason,
+            )
+            case.reacquired_from = found.old_id
+            self.contacts[found.old_id].linked_to = c.cid
+            self.reacquisitions.append(found)
+            cited.append(ids[0])
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.CONTACT_DETECTED,
+            S.WATCHING,
+            reason_code="contact_detected",
+            row_ids=[i for i in cited if i is not None],
+            key=self.transition_key(case, "contact_detected", tick),
+        )
+
+    def try_reacquire(self, c: _Contact, tick: int, first: PositionFix) -> ReacquireMatch | None:
+        lost: list[LostTrack] = []
+        for oid in sorted(self.contacts):
+            o = self.contacts[oid]
+            if oid == c.cid or o.linked_to is not None or o.n_seen == 0:
+                continue
+            if not o.last_tick + self.r.timeout_ticks < first.tick:
+                continue
+            if not self.table.for_contact(oid):
+                continue
+            lost.append(self.lost_track(o))
+        if not lost:
+            return None
+        return match_reacquisition(
+            first,
+            None,  # one reading: the new track's speed is not measured yet
+            lost,
+            tick,
+            self.tick_s,
+            self.r.current_field,
+            self.tide_phase(first.tick),
+            self.cfg,
+            new_id=c.cid,
+        )
+
+    def lost_track(self, o: _Contact) -> LostTrack:
+        track = o.upto()
+        last = track.points[-1]
+        state = last_fitted_state(track_arrays(track))
+        if state is None:
+            lat, lon, vel = last.lat, last.lon, (0.0, 0.0)
+        else:
+            x, y, vx, vy = state
+            lat, lon = from_local_m(x, y)
+            vel = (round6(vx), round6(vy))
+        seg = evidence_view(self.table, o.cid, track, last.tick, self.tick_s).position.row_id
+        return LostTrack(
+            contact_id=o.cid,
+            last_fix=PositionFix(
+                lat=round6(lat),
+                lon=round6(lon),
+                tick=last.tick,
+                sigma_m=round6(last.sigma_m),
+                row_id=seg,
+            ),
+            velocity_mps=vel,
+            last_tick=last.tick,
+        )
+
+    def watch_step(self, case: _Case, c: _Contact, tick: int, *, force: str | None) -> None:
+        """WATCHING: registry lookup each cadence; hand to ask once there is enough track."""
+        cadence = (tick - c.first_tick) % self.cfg.evidence_every_ticks == 0
+        ready = c.n_seen >= self.cfg.watch_min_points or force is not None
+        if not (cadence or ready):
+            return
+        view = self.view(c, tick)
+        _, ids, key = self.lookup(c, view, tick)
+        if not ready:
+            return
+        reason = force if force is not None else "free_probes_complete"
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.PROBE_RESULT,
+            S.ASKING,
+            reason_code=reason,
+            row_ids=[*ids, view.position.row_id or ids[0]],
+            key=key,
+        )
+        self.ask_send(case, c, tick)
+
+    def ask_send(self, case: _Case, c: _Contact, tick: int) -> None:
+        view = self.view(c, tick)
+        result = self.send_hail(
+            c, tick, previously_replied=view.lineage_replied, case_id=case.case_id, purpose="ask"
+        )
+        case.hail_keys.append(result.idempotency_key)
+        self.schedule(result.reply_tick, "ask_reply", case.case_id, result)
+
+    def schedule(self, tick: int, kind: str, key: str, hail: HailResult | None = None) -> None:
+        bisect.insort(self.events, _Event(tick, _ORDER[kind], key, kind, hail))
+
+    def ask_reply(self, case: _Case, c: _Contact, tick: int, hail: HailResult) -> None:
+        if case.state is not S.ASKING:
+            return
+        rows = hail_evidence_rows(hail, tick_s=self.tick_s)
+        self.append(rows)
+        view = self.view(c, tick)
+        lookup, lookup_ids, _ = self.lookup(c, view, tick, rows)
+        outcome = match(view, self.plans.at(tick), tick, harbor=self.harbor, cfg=self.cfg)
+        case.outcomes.append(outcome)
+        code = outcome.code
+        if code is MatchCode.PENDING_SILENCE:
+            if len(case.hail_keys) < self.cfg.ask.max_hails_per_case:
+                assert view.last_heard_tick is not None
+                limit_s = self.cfg.lost_vehicle_silence_s
+                limit_ticks = int(math.floor(round(limit_s / self.tick_s, 9)))
+                due = view.last_heard_tick + limit_ticks + 1
+                send_at = max(tick + 1, due - self.hail.latency_ticks)
+                case.outcome = outcome
+                self.schedule(send_at, "ask_send", case.case_id)
+                return
+            outcome = MatchOutcome(
+                code=MatchCode.ESCALATE,
+                reason=(
+                    f"hail budget of {self.cfg.ask.max_hails_per_case} spent with silence "
+                    f"still pending ({outcome.reason})"
+                ),
+                evidence_row_ids=outcome.evidence_row_ids,
+                plan_id=outcome.plan_id,
+                silence_s=outcome.silence_s,
+            )
+            case.outcomes.append(outcome)
+            code = outcome.code
+        case.outcome = outcome
+        cited = [*outcome.evidence_row_ids, *lookup_ids]
+        if code is MatchCode.CLEARED_AT_ASK:
+            if lookup.match is not RegistryMatch.EXACT or view.hail_reply is not HailReply.VALID:
+                raise IllegalTransition(f"{case.case_id}: CLEARED_AT_ASK needs exact and valid")
+            self.advance(
+                case,
+                tick,
+                RunnerEvent.STOP_RULE_FIRED,
+                S.CLEARED_AT_ASK,
+                reason_code=code.value,
+                row_ids=cited,
+                key=hail.idempotency_key,
+            )
+            assert outcome.plan_id is not None
+            self.watches[c.cid] = _Watch(
+                contact_id=c.cid,
+                plan_id=outcome.plan_id,
+                case_id=case.case_id,
+                next_tick=hail.sent_tick + self.rehail_ticks,
+            )
+        elif code is MatchCode.LOST_VEHICLE:
+            notice = self.notice(case, c, view, outcome, tick)
+            self.advance(
+                case,
+                tick,
+                RunnerEvent.STOP_RULE_FIRED,
+                S.LOST_VEHICLE,
+                reason_code=code.value,
+                row_ids=[*cited, *notice.evidence_row_ids],
+                key=hail.idempotency_key,
+            )
+            self.notices.append(notice)
+            self.watches.pop(c.cid, None)
+        else:
+            self.advance(
+                case,
+                tick,
+                RunnerEvent.PROBE_RESULT,
+                S.INVESTIGATING,
+                reason_code=code.value,
+                row_ids=cited,
+                key=hail.idempotency_key,
+            )
+            case.investigation_pending = True
+
+    # --- plan watch -----------------------------------------------------------------------
+
+    def plan_watch_sends(self, tick: int) -> None:
+        for cid in sorted(self.watches):
+            w = self.watches[cid]
+            c = self.contacts[cid]
+            plan = next((p for p in self.plans.at(tick) if p.plan_id == w.plan_id), None)
+            ended = plan is None or plan.end_tick is None or tick > plan.end_tick
+            if c.dropped or ended or cid in self.active_case:
+                del self.watches[cid]
+                continue
+            if tick < w.next_tick:
+                continue
+            view = self.view(c, tick)
+            result = self.send_hail(
+                c,
+                tick,
+                previously_replied=view.lineage_replied,
+                case_id=None,
+                purpose="plan_watch",
+            )
+            w.next_tick = tick + self.rehail_ticks
+            self.schedule(result.reply_tick, "watch_reply", cid, result)
+
+    def watch_reply(self, c: _Contact, tick: int, hail: HailResult) -> None:
+        self.append(hail_evidence_rows(hail, tick_s=self.tick_s))
+        if c.cid in self.active_case or c.cid not in self.watches:
+            return
+        view = self.view(c, tick)
+        outcome = match(view, self.plans.at(tick), tick, harbor=self.harbor, cfg=self.cfg)
+        if outcome.code is not MatchCode.LOST_VEHICLE:
+            return
+        # Silence past the threshold: a NEW case; the cleared case stays terminal.
+        del self.watches[c.cid]
+        case = self.open_case(c, tick, opened_by="plan_watch")
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.CONTACT_DETECTED,
+            S.WATCHING,
+            reason_code="plan_watch_silence",
+            row_ids=[*outcome.evidence_row_ids],
+            key=self.transition_key(case, "contact_detected", tick),
+        )
+        _, ids, key = self.lookup(c, view, tick)
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.PROBE_RESULT,
+            S.ASKING,
+            reason_code="plan_watch_silence",
+            row_ids=[*ids, *outcome.evidence_row_ids],
+            key=key,
+        )
+        reused = self.send_hail(
+            c,
+            hail.sent_tick,
+            previously_replied=view.lineage_replied,
+            case_id=case.case_id,
+            purpose="ask",
+        )
+        case.hail_keys.append(reused.idempotency_key)
+        self.ask_reply(case, c, tick, reused)
+
+    # --- the notice -----------------------------------------------------------------------
+
+    def notice(
+        self, case: _Case, c: _Contact, view: EvidenceView, outcome: MatchOutcome, tick: int
+    ) -> LostVehicleNotice:
+        plan_id = outcome.plan_id or view.lineage_plan_id
+        assert plan_id is not None
+        plan = next((p for p in self.plans.at(tick) if p.plan_id == plan_id), None)
+        operator = plan.operator if plan is not None else "operator not on file"
+        vehicle = plan.vehicle if plan is not None else "vehicle not on file"
+        channel = plan.contact_channel if plan is not None else "no contact channel on file"
+        pos = view.position
+        cur_id = view.current_field_row_id
+        if cur_id is None or pos.row_id is None:
+            raise RuntimeError(f"{case.case_id}: a notice needs a position and current row")
+        phase = self.tide_phase(pos.tick)
+        box = drift_search_box(
+            pos,
+            tick,
+            self.tick_s,
+            self.r.current_field,
+            phase,
+            self.cfg,
+            assumption_row_id=cur_id,
+        )
+        silence = outcome.silence_s if outcome.silence_s is not None else 0.0
+        limit = self.cfg.lost_vehicle_silence_s
+        drifted = distance_m(pos.lat, pos.lon, box.center_lat, box.center_lon)
+        elapsed = (tick - pos.tick) * self.tick_s
+        lines: list[NoticeLine] = []
+
+        def add(section: NoticeSection, text: str, ids: Sequence[str | None]) -> None:
+            clean = tuple(sorted({i for i in ids if i is not None}))
+            lines.append(NoticeLine(section=section, text=text, evidence_row_ids=clean))
+
+        add(
+            "Contact",
+            f"{c.cid} ({case.case_id}): {vehicle}, operator {operator}, filed on plan {plan_id}",
+            [view.lineage_plan_row_id],
+        )
+        if view.reacquired_from is not None:
+            add(
+                "Contact",
+                f"track re-acquired from {view.reacquired_from}; evidence carried over",
+                [view.reacquired_row_id],
+            )
+        add(
+            "What we know",
+            f"last known position {pos.lat:.6f}, {pos.lon:.6f} at tick {pos.tick} "
+            f"(t={pos.tick * self.tick_s:.0f} s), position sigma {pos.sigma_m:.1f} m",
+            [pos.row_id],
+        )
+        reply = view.hail_reply.value if view.hail_reply is not None else "none"
+        add(
+            "What we know",
+            f"acoustic hail answered {reply}; no reply from the vehicle's modem",
+            [view.hail_row_id],
+        )
+        add(
+            "What we know",
+            f"silence {silence:.0f} s > {limit:.0f} s since it was last heard at tick "
+            f"{view.last_heard_tick}",
+            [view.last_heard_row_id],
+        )
+        add(
+            "What we assume",
+            f"search-box drift uses the configured current field ({phase} tide); current "
+            "field is the configured default; no live gauge",
+            [cur_id],
+        )
+        add(
+            "Search box",
+            f"centre {box.center_lat:.6f}, {box.center_lon:.6f}, radius {box.radius_m:.0f} m "
+            f"at tick {tick}; drifted {drifted:.0f} m from the last known position over "
+            f"{elapsed:.0f} s",
+            [pos.row_id, cur_id],
+        )
+        all_ids = tuple(sorted({i for line in lines for i in line.evidence_row_ids}))
+        return LostVehicleNotice(
+            case_id=case.case_id,
+            contact_id=c.cid,
+            tick=tick,
+            plan_id=plan_id,
+            operator=operator,
+            vehicle=vehicle,
+            contact_channel=channel,
+            last_known=pos,
+            silence_s=silence,
+            search_box=box,
+            evidence_row_ids=all_ids,
+            lines=tuple(lines),
+        )
+
+    # --- the loop -------------------------------------------------------------------------
+
+    def guarded(self, case: _Case, fn: Callable[[], None]) -> None:
+        """Run one case step; an illegal transition writes the case as FAILED."""
+        try:
+            fn()
+        except IllegalTransition as exc:
+            if case.state is not S.FAILED:
+                case.failure = str(exc)
+                case.state = S.FAILED
+                case.closed_tick = self.clock.tick
+                self.active_case.pop(case.contact_id, None)
+
+    def step(self, tick: int) -> None:
+        in_run = tick < self.sim.n_ticks
+        for cid in sorted(self.contacts):
+            c = self.contacts[cid]
+            c.n_seen = bisect.bisect_right(c.ticks, tick)
+            if not c.dropped and tick >= c.dropped_at:
+                c.dropped = True
+        # New observed ids.
+        for cid in sorted(self.contacts):
+            c = self.contacts[cid]
+            if c.first_tick == tick:
+                self.on_new_track(c, tick)
+        # Evidence cadence for every tracked contact.
+        for cid in sorted(self.contacts):
+            c = self.contacts[cid]
+            if c.n_seen and not c.dropped:
+                if (tick - c.first_tick) % self.cfg.evidence_every_ticks == 0:
+                    self.extract(c)
+            if c.dropped and tick == c.dropped_at:
+                self.extract(c)
+        # WATCHING cases.
+        for case_id in sorted(self.cases):
+            case = self.cases[case_id]
+            if case.state is not S.WATCHING:
+                continue
+            c = self.contacts[case.contact_id]
+            force = None
+            if c.dropped:
+                force = "track_dropped"
+            elif not in_run:
+                force = "run_ended"
+            self.guarded(case, partial(self.watch_step, case, c, tick, force=force))
+        # Scheduled hail sends and replies.
+        while self.events and self.events[0].tick <= tick:
+            ev = self.events.pop(0)
+            if ev.kind == "watch_reply":
+                assert ev.hail is not None
+                self.watch_reply(self.contacts[ev.key], tick, ev.hail)
+                continue
+            case = self.cases[ev.key]
+            c = self.contacts[case.contact_id]
+            if ev.kind == "ask_send":
+                if case.state is S.ASKING:
+                    self.guarded(case, partial(self.ask_send, case, c, tick))
+            else:
+                assert ev.hail is not None
+                self.guarded(case, partial(self.ask_reply, case, c, tick, ev.hail))
+        if in_run:
+            self.plan_watch_sends(tick)
+
+    def execute(self) -> RunResult:
+        n = self.sim.n_ticks
+        for tick in range(n):
+            self.clock.tick = tick
+            self.step(tick)
+        tick = n
+        while self.events or any(k.state is S.WATCHING for k in self.cases.values()):
+            self.clock.tick = tick
+            self.step(tick)
+            tick += 1
+        return self.result()
+
+    def result(self) -> RunResult:
+        cases = [self.cases[k].result() for k in sorted(self.cases, key=_case_sort_key)]
+        probes = {
+            ProbeId.ACOUSTIC_HAIL.value: len(self.hail_keys_sent),
+            ProbeId.REGISTRY_LOOKUP.value: len(self.lookup_keys),
+        }
+        return RunResult(
+            scenario_id=self.r.scenario.id,
+            seed=self.r.seed,
+            sim=self.sim,
+            cases=cases,
+            transitions=list(self.transitions),
+            evidence=self.table,
+            notices=list(self.notices),
+            interruptions=0,
+            probes_used=probes,
+            transition_log_hash=transition_log_hash_of(self.transitions),
+            hails=tuple(self.hail_records),
+            reacquisitions=tuple(self.reacquisitions),
+        )
+
+
+def _case_sort_key(case_id: str) -> tuple[str, int]:
+    cid, _, n = case_id.partition("#")
+    return cid, int(n)
+
+
+def hail_count(result: RunResult, case_id: str) -> int:
+    """Hails a case used (distinct idempotency keys)."""
+    return len(set(result.case(case_id).hail_keys))
+
+
+def format_transition(t: Transition) -> str:
+    return (
+        f"{t.seq}\t{t.tick}\t{t.case_id}\t{t.from_state.value}->{t.to_state.value}\t"
+        f"{t.event.value}\t{t.reason_code}"
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m soundings.runner", description="Run a scenario through the ask rung."
+    )
+    parser.add_argument("--scenario", required=True, help="catalog id (S01), smoke, or a path")
+    parser.add_argument("--seed", type=int, default=None, help="default: the scenario's seed")
+    parser.add_argument("--plans", choices=("scenario", "db"), default="scenario")
+    parser.add_argument("--out", default=None, help="directory for transitions.jsonl")
+    args = parser.parse_args(argv)
+    plans: RegistryStore | None = RegistryStore() if args.plans == "db" else None
+    try:
+        result = ScenarioRunner(args.scenario, seed=args.seed, plans=plans).run()
+    finally:
+        if plans is not None:
+            plans.close()
+    for t in result.transitions:
+        print(format_transition(t))
+    if args.out:
+        out = Path(args.out)
+        write_transition_log(result, out / "transitions.jsonl")
+        notices = "".join(f"{canonical_json(n)}\n" for n in result.notices)
+        (out / "notices.jsonl").write_text(notices, encoding="utf-8")
+    print(f"transition_log_hash={result.transition_log_hash}")
+    return 0
+
+
+# --- WO-022 end ---
+
+# --- v2 (WO-033) ---
+# --- end v2 (WO-033) ---
+
+# --- v3 (WO-043) ---
+# --- end v3 (WO-043) ---
+
+# --- sim_likelihoods (WO-051) ---
+# --- end sim_likelihoods (WO-051) ---
+
+__all__ = [
+    "ASK_TRANSITIONS",
+    "CaseResult",
+    "HailRecord",
+    "IllegalTransition",
+    "LostVehicleNotice",
+    "NoticeLine",
+    "RunResult",
+    "RunnerEvent",
+    "ScenarioRunner",
+    "Transition",
+    "check_transition",
+    "format_transition",
+    "hail_count",
+    "main",
+    "transition_log_hash_of",
+    "transition_log_lines",
+    "write_transition_log",
+]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
