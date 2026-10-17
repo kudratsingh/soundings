@@ -34,6 +34,9 @@ import { fetchPhysics } from './api'
 // --- WO-088 begin ---
 import ResponderLayer from './components/ResponderLayer'
 // --- WO-088 end ---
+// --- WO-086 begin ---
+import RungLedger from './components/RungLedger'
+// --- WO-086 end ---
 
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
@@ -246,6 +249,9 @@ function App() {
             onOpenSitrep={() => setSitrepOpen(true)}
           />
           <section className="ladder-rail" aria-label="ladder">
+            {/* --- WO-086 begin: rung ledger and the blunt-policy counter (display only) --- */}
+            <RungLedger ledger={run.ledger} />
+            {/* --- WO-086 end --- */}
             <RungIndicator active={activeRung} livesOn={boundary?.lives_on ?? ['ask', 'hand_to_person']} />
             <p className="boundary-reason label" data-testid="boundary-reason">
               {boundaryReason(boundary, activeRung)}
