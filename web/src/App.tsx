@@ -16,6 +16,9 @@ import SitrepDrawer from './components/SitrepDrawer'
 import StateTimeline from './components/StateTimeline'
 import type { Rung } from './events'
 import { autoSelect, useRun } from './useRun'
+// --- WO-062P begin ---
+import PresenterMode from './components/PresenterMode'
+// --- WO-062P end ---
 
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
@@ -148,6 +151,9 @@ function App() {
       {/* --- end WO-061 block --- */}
       {/* --- WO-062 block (demo runner) --- */}
       {/* --- end WO-062 block --- */}
+      {/* --- WO-062P begin --- */}
+      <PresenterMode run={run} onRun={setRunId} />
+      {/* --- WO-062P end --- */}
     </div>
   )
 }
