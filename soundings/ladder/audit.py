@@ -739,7 +739,12 @@ class AuditSink:
             known = None if self.guard_inputs is None else self.guard_inputs(decision.inputs_hash)
             if known is not None:
                 dumped["read"] = dict(known)
-            key = f"{cid}:{decision.guard.value}:{decision.inputs_hash}"
+            # --- WO-060B begin: a refusal with no checkpoint and no action has no contact
+            # id here (LadderMachine.step notifies (None, (), decisions)); its key still has
+            # to match _KEY_RE, or the run stops on the first guard refusal (contact_surge).
+            owner = cid or "unattributed"
+            # --- WO-060B end ---
+            key = f"{owner}:{decision.guard.value}:{decision.inputs_hash}"
             guard_row = guard_decision_payload(decision, dumped)
             out.append(AuditEntry(AuditKind.GUARD_DECISION, guard_row, cid, key))
         if checkpoint is not None and checkpoint.event.kind.value == "approval":

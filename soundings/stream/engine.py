@@ -20,7 +20,7 @@ import bisect
 import builtins
 import itertools
 from collections import defaultdict
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -61,7 +61,7 @@ from soundings.stream.events import (
 )
 
 # --- WO-086 begin ---
-from soundings.stream.ledger import BluntCounter, with_ledger
+from soundings.stream.ledger import BluntCounter, LedgerAnnotator, with_ledger
 from soundings.stream.projection import projection_series
 
 # --- WO-086 end ---
@@ -385,6 +385,46 @@ class BatchReplaySource:
 _SOURCES: dict[str, SourceFactory] = {"batch": BatchReplaySource}
 
 
+# --- WO-060B begin: lazy sources (runner v3) ---
+class LazySource(Protocol):
+    """A source that produces its stream as the pacing clock asks for it (runner v3).
+
+    ``buffer`` is the stream so far (the handle shares the list), ``pull(until_t_s)`` steps
+    every tick up to that sim time, ``exhausted`` is true once ``run_finished`` is in."""
+
+    name: str
+    lazy: bool
+    buffer: list[StreamEvent]
+
+    @property
+    def exhausted(self) -> bool: ...
+
+    def pull(self, until_t_s: float) -> int: ...
+
+    def events(self) -> list[StreamEvent]: ...
+
+    @property
+    def track_hash(self) -> str: ...
+
+    def annotate(self, annotator: LedgerAnnotator) -> None: ...
+
+    def approve(self, request_id: str, approver: str) -> ApprovalResultEvent: ...
+
+
+def _is_lazy(src: object) -> bool:
+    return bool(getattr(src, "lazy", False)) and hasattr(src, "pull")
+
+
+def _register_v3() -> None:
+    from soundings.stream.v3 import v3_manual_source, v3_source
+
+    _SOURCES.setdefault("v3", v3_source)
+    _SOURCES.setdefault("v3-manual", v3_manual_source)
+
+
+# --- WO-060B end ---
+
+
 def register_source(name: str, factory: SourceFactory) -> None:
     """Register a run source (WO-061 registers ``stepped``)."""
     _SOURCES[name] = factory
@@ -410,25 +450,96 @@ class RunHandle:
     clock: Clock
     order: int
     _due: list[float] = field(default_factory=list, repr=False)
+    # --- WO-060B begin: piecewise pacing (1x while awaiting approval) and lazy sources ---
+    awaiting_speed: float = 0.0
+    """Sim seconds per wall second while any contact is AWAITING_APPROVAL (0: no change)."""
+    _awaiting: set[str] = field(default_factory=set, repr=False)
+    _last_t: float = field(default=0.0, repr=False)
+    _anchor: tuple[float, float, float] = field(default=(0.0, 0.0, 1.0), repr=False)
 
     def __post_init__(self) -> None:
-        self._due = [e.t_s for e in self.events]
+        self._due = []
+        self._extend_due()
+
+    def _pace(self) -> float:
+        if self._awaiting and self.awaiting_speed > 0:
+            return min(self.awaiting_speed, self.speed)
+        return self.speed
+
+    def _extend_due(self) -> None:
+        """Wall-second release time of every new event: sim time divided by the pace in
+        force when the previous event was released (1x while a contact awaits approval,
+        so the approver gets the real timeout; the ladder itself runs on sim ticks)."""
+        if self.speed <= 0:
+            return
+        for e in self.events[len(self._due) :]:
+            if not self._due:
+                self._anchor = (0.0, 0.0, self.speed)
+            wall0, sim0, pace = self._anchor
+            due = wall0 + max(0.0, e.t_s - sim0) / pace
+            self._due.append(due)
+            self._last_t = e.t_s
+            if e.type == "transition":
+                p = e.payload
+                if p.to_state is LadderState.AWAITING_APPROVAL:
+                    self._awaiting.add(p.contact_id)
+                else:
+                    self._awaiting.discard(p.contact_id)
+                if self._pace() != pace:  # the pace changes from this event on
+                    self._anchor = (due, e.t_s, self._pace())
+
+    @property
+    def lazy(self) -> bool:
+        return _is_lazy(self.source)
+
+    def _fill(self, now: float) -> None:
+        """Let a lazy source step up to the sim time the pacing clock has reached."""
+        src = self.source
+        if not _is_lazy(src):
+            return
+        lazy: LazySource = src  # type: ignore[assignment]
+        while not lazy.exhausted:
+            if self.speed <= 0:
+                lazy.pull(float("inf"))
+            else:
+                wall0, sim0, pace = self._anchor if self._due else (0.0, 0.0, self.speed)
+                target = sim0 + max(0.0, now - wall0) * pace
+                if lazy.pull(target) == 0:
+                    if lazy.exhausted:
+                        break
+                    # Nothing new up to the target: release the next tick when it is due.
+                    break
+            self._extend_due()
+            if self._due and self._due[-1] > now:
+                break
+
+    @property
+    def exhausted(self) -> bool:
+        src = self.source
+        return not _is_lazy(src) or bool(getattr(src, "exhausted", True))
 
     def available(self) -> int:
         """How many events (a prefix) the pacing clock has released so far."""
         if self.speed <= 0:
+            self._fill(float("inf"))
             return len(self.events)
-        return bisect.bisect_right(self._due, self.clock.now_s() * self.speed)
+        now = self.clock.now_s()
+        self._fill(now)
+        return bisect.bisect_right(self._due, now)
 
     @property
     def finished(self) -> bool:
-        return self.available() >= len(self.events)
+        return self.available() >= len(self.events) and self.exhausted
 
     def wait_s(self, index: int) -> float:
         """Wall seconds until event ``index`` is released (0 when it already is)."""
-        if self.speed <= 0 or index >= len(self.events):
+        if self.speed <= 0:
             return 0.0
-        return max(0.0, self._due[index] / self.speed - self.clock.now_s())
+        if index >= len(self._due):
+            return MAX_POLL_S if not self.exhausted else 0.0
+        return max(0.0, self._due[index] - self.clock.now_s())
+
+    # --- WO-060B end ---
 
     def summary(self) -> dict[str, object]:
         return {
@@ -492,8 +603,16 @@ class RunEngine:
                 use_llm=use_llm,
             )
         )
-        events = src.events()
-        events = ledger_stream(events, blunt)  # WO-086
+        # --- WO-060B begin: a lazy source shares its growing buffer with the handle, and
+        # the WO-086 ledger annotates it event by event as it is stepped ---
+        if _is_lazy(src):
+            lazy: LazySource = src  # type: ignore[assignment]
+            lazy.annotate(LedgerAnnotator(blunt, expected_track_hash=lazy.track_hash))
+            events = lazy.buffer
+        else:
+            events = src.events()
+            events = ledger_stream(events, blunt)  # WO-086
+        # --- WO-060B end ---
         self._evict()
         handle = RunHandle(
             run_id=run_id,
@@ -504,6 +623,7 @@ class RunEngine:
             events=events,
             clock=self.clock_factory(),
             order=n,
+            awaiting_speed=ui_config().awaiting_approval_speed,  # WO-060B
         )
         self._runs[run_id] = handle
         return handle
@@ -531,21 +651,48 @@ class RunEngine:
 
     def run_to_end(self, run_id: str, approve_first: bool = False) -> builtins.list[StreamEvent]:
         """Every event of the run, unpaced. ``approve_first`` matters only to ``stepped``."""
-        return list(self.get(run_id).events)
+        # --- WO-060B begin ---
+        handle = self.get(run_id)
+        if _is_lazy(handle.source):
+            handle.source.events()
+            handle._extend_due()
+        # --- WO-060B end ---
+        return list(handle.events)
+
+    # --- WO-060B begin: the approval hook for WO-061 ---
+    def deliver_approval(self, run_id: str, token: Mapping[str, object]) -> str:
+        """Hand a person's WO-041 approval token to the run's ladder (WO-061's button).
+
+        Only a ``v3-manual`` run waits on a person; the ladder's guard checks the token
+        against the requested scope on the next tick, so a token for another scope changes
+        nothing. Returns the contact id. ``NoPendingApproval`` when the run has no open
+        request for the token's contact or its source takes no tokens; ``ValueError``
+        (``soundings.stream.v3.TokenRefused``) when the token does not verify for it."""
+        src = self.get(run_id).source
+        deliver = getattr(src, "deliver_approval", None)
+        if deliver is None:
+            raise NoPendingApproval(f"run {run_id!r} ({src.name}) takes no approval tokens")
+        try:
+            return str(deliver(token))
+        except LookupError as exc:
+            raise NoPendingApproval(str(exc)) from exc
+
+    # --- WO-060B end ---
 
     async def subscribe(self, run_id: str, after: int = -1) -> AsyncIterator[StreamEvent]:
         """Events with ``seq > after``: the released backlog first, then live as paced."""
         handle = self.get(run_id)
         nxt = max(after + 1, 0)
-        total = len(handle.events)
-        while nxt < total:
+        # --- WO-060B begin: a lazy source's stream grows while it is watched ---
+        while True:
             ready = handle.available()
             while nxt < ready:
                 yield handle.events[nxt]
                 nxt += 1
-            if nxt >= total:
+            if nxt >= len(handle.events) and handle.exhausted:
                 break
             await asyncio.sleep(min(handle.wait_s(nxt), MAX_POLL_S))
+        # --- WO-060B end ---
 
 
 _ENGINE: RunEngine | None = None
@@ -571,8 +718,40 @@ def stream_events(
     # --- WO-086 end ---
 
 
+# --- WO-060B begin: the unpaced runner v3 stream ---
+def v3_stream_events(
+    scenario: Scenario | str,
+    seed: int | None = None,
+    *,
+    run_id: str = "cli",
+    toggles: Sequence[ToggleName] = (),
+    use_llm: bool = False,
+) -> list[StreamEvent]:
+    """The unpaced event stream of one runner v3 run (CLI ``--source v3``, determinism)."""
+    from soundings.stream.v3 import V3Source
+
+    sc = resolve_scenario(scenario) if isinstance(scenario, str) else scenario
+    req = SourceRequest(
+        scenario=sc,
+        seed=sc.seed if seed is None else seed,
+        run_id=run_id,
+        speed=0,
+        toggles=tuple(toggles),
+        use_llm=use_llm,
+    )
+    src = V3Source(req)
+    src.annotate(
+        LedgerAnnotator(BluntCounter(sc, req.seed).start(), expected_track_hash=src.track_hash)
+    )
+    return src.events()
+
+
+# --- WO-060B end ---
+
+
 __all__ = [
     "BatchReplaySource",
+    "LazySource",  # WO-060B
     "NoPendingApproval",
     "RunEngine",
     "RunHandle",
@@ -587,4 +766,9 @@ __all__ = [
     "sensor_range_events_at",  # WO-089
     "source_names",
     "stream_events",
+    "v3_stream_events",  # WO-060B
 ]
+
+# --- WO-060B begin: register the runner v3 sources ---
+_register_v3()
+# --- WO-060B end ---

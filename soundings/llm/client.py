@@ -213,6 +213,35 @@ class Transport(Protocol):
     ) -> ModelOutput | TransportReply: ...
 
 
+_FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?\s*```\s*$", re.S)
+
+
+def parse_model_json(text: str, role: str) -> dict[str, Any]:
+    """Parse a model reply as one JSON object, tolerating a Markdown code fence or prose.
+
+    Order: the raw text; the text inside a single ``\`\`\`json`` fence; the span from the
+    first ``{`` to the last ``}``. Anything else raises ``ValueError``. This is parse
+    robustness only: the object still goes through the role guard like any other reply,
+    and nothing here changes what the reply says.
+    """
+    candidates = [text]
+    fenced = _FENCE_RE.match(text)
+    if fenced:
+        candidates.append(fenced.group(1))
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError(f"role={role}: model reply is not a JSON object")
+    raise ValueError(f"role={role}: model reply is not JSON")
+
+
 def anthropic_transport(
     *, model: str, role: str, system: str | None, inputs: Any
 ) -> TransportReply:
@@ -237,9 +266,7 @@ def anthropic_transport(
     if getattr(response, "stop_reason", None) == "refusal":
         raise ValueError(f"role={role}: the model declined the request")
     texts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-    parsed = json.loads("".join(texts))
-    if not isinstance(parsed, dict):
-        raise ValueError(f"role={role}: model reply is not a JSON object")
+    parsed = parse_model_json("".join(texts), role)
     usage = getattr(response, "usage", None)
     tokens_in = getattr(usage, "input_tokens", None)
     tokens_out = getattr(usage, "output_tokens", None)
@@ -279,9 +306,7 @@ def anthropic_record_transport(
     if getattr(response, "stop_reason", None) == "refusal":
         raise ValueError(f"role={role}: the model declined the request")
     texts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-    parsed = json.loads("".join(texts))
-    if not isinstance(parsed, dict):
-        raise ValueError(f"role={role}: model reply is not a JSON object")
+    parsed = parse_model_json("".join(texts), role)
     usage = getattr(response, "usage", None)
     tokens_in = getattr(usage, "input_tokens", None)
     tokens_out = getattr(usage, "output_tokens", None)

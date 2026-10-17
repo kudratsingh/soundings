@@ -97,12 +97,16 @@ export const fetchBoundary = () => getJson<BoundaryInfo>('/api/boundary')
 export const fetchAbout = () => getJson<AboutInfo>('/api/about')
 export const fetchHarbor = () => getJson<HarborGeoJson>('/api/harbor')
 
-export async function startRun(scenario: string, seed: number | null, speed: number | null) {
+// --- WO-060B begin: runs start on the runner v3 source ("v3") with optional toggles ---
+export const RUN_SOURCE = 'v3'
+
+export async function startRun(scenario: string, seed: number | null, speed: number | null, toggles: string[] = []) {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario, seed, speed }),
+    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE }),
   })
+  // --- WO-060B end ---
   if (!res.ok) throw new Error(`start run: HTTP ${res.status} ${await res.text()}`)
   return (await res.json()) as RunSummary
 }

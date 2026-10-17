@@ -31,7 +31,9 @@ nothing, and the writer's text never feeds a field of the ``Recommendation`` oth
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager  # WO-060B
+from contextvars import ContextVar  # WO-060B
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -481,6 +483,25 @@ class InvestigationHandle:
         return self.machine.result()
 
 
+# --- WO-060B begin: stage client hook ---
+_KIT_CLIENT: ContextVar[ModelClient | None] = ContextVar("soundings_kit_client", default=None)
+
+
+@contextmanager
+def use_kit_client(client: ModelClient | None) -> Iterator[None]:
+    """Within the block, ``make_kit(llm_roles=True)`` builds its ``LlmPlanner`` and
+    ``HypothesisWriter`` over ``client`` (the WO-060B run engine passes the stage live
+    client here) instead of a fresh replay-only client. ``None`` changes nothing."""
+    token = _KIT_CLIENT.set(client)
+    try:
+        yield
+    finally:
+        _KIT_CLIENT.reset(token)
+
+
+# --- WO-060B end ---
+
+
 def make_kit(
     world: ProbeWorld,
     *,
@@ -502,6 +523,14 @@ def make_kit(
     writer: HypothesisWriter | None = None
     if llm_roles:
         client = ModelClient(mode=ModelMode.REPLAY, store=fixture_store)
+        # --- WO-060B begin: stage client hook ---
+        stage = _KIT_CLIENT.get()
+        if stage is not None:
+            client = stage
+            planner = LlmPlanner(
+                stage, deterministic=DeterministicPlanner(), violations_path=violations_path
+            )
+        # --- WO-060B end ---
         writer = HypothesisWriter(client, violations_path=violations_path)
     return InvestigationKit(
         tables=tables,
@@ -526,6 +555,7 @@ __all__ = [
     "RunProbeRunner",
     "WriterAdapter",
     "make_kit",
+    "use_kit_client",  # WO-060B
     "planner_ledger",
     "ran_probes",
 ]
