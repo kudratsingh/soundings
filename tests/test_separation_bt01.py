@@ -15,6 +15,7 @@ import ast
 import dataclasses
 import inspect
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -170,11 +171,28 @@ def s01_case() -> tuple[RunResult, tuple[PlanView, ...]]:
     return with_vessel(result, job, "ais-91"), tuple(plans)
 
 
+RUN_PICKLE_ENV = "SOUNDINGS_SEP_BT01_RUN"
+"""Subprocesses re-advise the parent's pickled BT-01 run: the runner's own determinism is
+WO-080's test; this one proves the advisories are hash-seed independent without three
+full BT-01 runs."""
+
+
+@cache
+def bt01_run() -> RunResult:
+    path = os.environ.get(RUN_PICKLE_ENV)
+    if path:
+        with open(path, "rb") as fh:
+            loaded: RunResult = pickle.load(fh)
+        return loaded
+    scenario = resolve_scenario("BT-01", HARBOR)
+    return ScenarioRunner(scenario, seed=SEED, **_runner_kwargs()).run()
+
+
 @cache
 def bt01_case() -> tuple[RunResult, tuple[PlanView, ...], tuple[str, ...]]:
     """BT-01 at seed 7, plus in-memory vessels only where the committed file has none."""
     scenario = resolve_scenario("BT-01", HARBOR)
-    result = ScenarioRunner(scenario, seed=SEED, **_runner_kwargs()).run()
+    result = bt01_run()
     plans = list(plan_views_from_scenario(scenario))
     added: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -321,9 +339,11 @@ def main() -> None:
     print(fingerprint(sys.argv[1] if len(sys.argv) > 1 else "s01"))
 
 
-def _subprocess_runs(which: str) -> Iterator[str]:
+def _subprocess_runs(which: str, run_pickle: Path | None) -> Iterator[str]:
     for seed in ("0", "1"):
         env = {**os.environ, "PYTHONHASHSEED": seed, "MODEL_MODE": "replay"}
+        if run_pickle is not None:
+            env[RUN_PICKLE_ENV] = str(run_pickle)
         proc = subprocess.run(
             [sys.executable, "-c", "from tests.test_separation_bt01 import main; main()", which],
             cwd=REPO,
@@ -335,10 +355,10 @@ def _subprocess_runs(which: str) -> Iterator[str]:
         yield proc.stdout.strip()
 
 
-def _assert_deterministic(which: str) -> None:
+def _assert_deterministic(which: str, run_pickle: Path | None = None) -> None:
     first = fingerprint(which)
     assert fingerprint(which) == first
-    for out in _subprocess_runs(which):
+    for out in _subprocess_runs(which, run_pickle):
         assert out == first
 
 
@@ -347,8 +367,11 @@ def test_s01_deterministic() -> None:
 
 
 @needs_bt01
-def test_bt01_deterministic() -> None:
-    _assert_deterministic("bt01")
+def test_bt01_deterministic(tmp_path: Path) -> None:
+    run_pickle = tmp_path / "bt01_run.pkl"
+    with open(run_pickle, "wb") as fh:
+        pickle.dump(bt01_run(), fh)
+    _assert_deterministic("bt01", run_pickle)
 
 
 __all__ = ["fingerprint", "main", "with_vessel"]
