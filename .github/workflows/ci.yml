@@ -34,6 +34,13 @@ jobs:
       - name: Denylist (no out-of-scope vocabulary outside its definitions)
         run: bash scripts/denylist-check.sh
 
+      - name: No external references (names of the owner's other projects must not appear)
+        run: |
+          if grep -rniE "incident[- _]?commander|incident[- _]?platform|audit-ws|arxiv|research[- ]agent" . \
+               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.mypy_cache \
+               --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache --exclude-dir=dist --exclude=ci.yml; then
+            echo "external reference found; see tests/test_no_external_references.py"; exit 1; fi
+
       - name: Tests (replay only)
         run: uv run pytest -q --maxfail=1
 
