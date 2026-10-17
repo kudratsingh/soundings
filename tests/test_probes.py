@@ -136,8 +136,12 @@ def _s02() -> tuple[Scenario, SimRun]:
 
 def test_allowlist_exact() -> None:
     assert list(ALLOWLIST) == list(ProbeId)
-    assert [p.value for p in ALLOWLIST] == list(SECTION_5)
-    for pid, spec in ALLOWLIST.items():
+    # WO-088: section 5 first, in section 5 order, then the two responder probes (rung ask).
+    assert [p.value for p in P.SECTION_5_ALLOWLIST] == list(SECTION_5)
+    assert [p.value for p in ALLOWLIST] == [*SECTION_5, "responder_look", "responder_search_box"]
+    for pid in P.RESPONDER_PROBES:
+        assert ALLOWLIST[pid].rung_required is Rung.ASK and ALLOWLIST[pid].cost_usd == 0.0
+    for pid, spec in P.SECTION_5_ALLOWLIST.items():
         rung, cost, latency, interruption = SECTION_5[pid.value]
         assert spec.probe_id is pid
         assert spec.rung_required.value == rung, pid

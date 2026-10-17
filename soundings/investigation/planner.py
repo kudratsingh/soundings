@@ -46,6 +46,7 @@ from soundings.investigation.posterior import (
 )
 from soundings.investigation.probes import (
     ALLOWLIST,
+    RESPONDER_PROBES,
     ProbeSpec,
     as_probe_id,
     idempotency_key,
@@ -80,6 +81,9 @@ class BudgetLimits(StrictModel):
     probes_per_contact: NonNegInt
     paid_probes_per_contact: NonNegInt
     human_interruptions_per_contact: NonNegInt
+    # --- WO-088 begin ---
+    responder_dispatches_per_contact: NonNegInt = 1
+    # --- WO-088 end ---
 
 
 def load_budget_limits(path: str | Path = LADDER_PATH) -> BudgetLimits:
@@ -89,6 +93,9 @@ def load_budget_limits(path: str | Path = LADDER_PATH) -> BudgetLimits:
         probes_per_contact=budgets["probes_per_contact"],
         paid_probes_per_contact=budgets["paid_probes_per_contact"],
         human_interruptions_per_contact=budgets["human_interruptions_per_contact"],
+        responder_dispatches_per_contact=budgets.get(
+            "responder_dispatches_per_contact", 1
+        ),  # WO-088
     )
 
 
@@ -133,6 +140,7 @@ class BudgetLedger:
     def __init__(self, limits: BudgetLimits | None = None) -> None:
         self.limits: BudgetLimits = limits if limits is not None else load_budget_limits()
         self._counts: dict[str, BudgetCounts] = {}
+        self._dispatches: dict[str, int] = {}  # WO-088: responder dispatches per contact
 
     def counts(self, contact_id: str) -> BudgetCounts:
         return self._counts.get(contact_id, BudgetCounts())
@@ -154,6 +162,8 @@ class BudgetLedger:
             return False
         if spec.paid and c.paid + 1 > lim.paid_probes_per_contact:
             return False
+        if not self.dispatch_allowed(contact_id, spec.probe_id):  # WO-088
+            return False
         return c.interruptions + spec.interruption <= lim.human_interruptions_per_contact
 
     def record(
@@ -167,6 +177,8 @@ class BudgetLedger:
         if planner_chosen and not self.allows(contact_id, pid):
             raise BudgetExceeded(f"{contact_id}: {pid.value} does not fit the remaining budget")
         c = self.counts(contact_id)
+        if pid in RESPONDER_PROBES:  # WO-088
+            self._dispatches[contact_id] = self.dispatches(contact_id) + 1
         self._counts[contact_id] = BudgetCounts(
             probes=c.probes + (1 if planner_chosen else 0),
             paid=c.paid + (1 if spec.paid else 0),
@@ -181,7 +193,27 @@ class BudgetLedger:
     def copy(self) -> BudgetLedger:
         other = BudgetLedger(self.limits)
         other._counts = dict(self._counts)
+        other._dispatches = dict(self._dispatches)
         return other
+
+    # --- WO-088 begin ---
+    def dispatches(self, contact_id: str) -> int:
+        """Responder dispatches (look or search) already counted for this contact."""
+        return self._dispatches.get(contact_id, 0)
+
+    def dispatch_allowed(self, contact_id: str, probe_id: ProbeId | str) -> bool:
+        """``budgets.responder_dispatches_per_contact``: one dispatch per contact."""
+        if as_probe_id(probe_id) not in RESPONDER_PROBES:
+            return True
+        return self.dispatches(contact_id) + 1 <= self.limits.responder_dispatches_per_contact
+
+    def seed_dispatches(self, contact_id: str, n: int) -> BudgetLedger:
+        """Set the dispatch count (from the evidence table) without touching the others."""
+        if n > 0:
+            self._dispatches[contact_id] = int(n)
+        return self
+
+    # --- WO-088 end ---
 
     def to_dict(self) -> dict[str, dict[str, int]]:
         """``contact_id -> counters``, contacts sorted."""
@@ -267,6 +299,12 @@ class PlannerState:
     tick_s: float = DEFAULT_TICK_S
     probe_confidence: Mapping[ProbeId, float] = field(default_factory=dict)
     ran_probes: frozenset[ProbeId] = frozenset()
+    # --- WO-088 begin ---
+    responder_available: bool = False
+    """Responder probes are candidates only when the harbor's responder can be dispatched."""
+    probe_latency_s: Mapping[ProbeId, float] = field(default_factory=dict)
+    """Per-probe latency overrides (a responder's transit time from where it is now)."""
+    # --- WO-088 end ---
 
     def key_for(self, probe_id: ProbeId) -> str:
         """The argument-free idempotency key of ``probe_id`` in this tick bucket."""
@@ -336,6 +374,8 @@ class DeterministicPlanner:
                 continue
             if state.already_ran(pid):
                 continue
+            if pid in RESPONDER_PROBES and not state.responder_available:  # WO-088
+                continue
             gain = expected_information_gain(
                 state.posterior,
                 spec,
@@ -343,6 +383,9 @@ class DeterministicPlanner:
                 tables,
                 probe_confidence=state.probe_confidence.get(pid),
             )
+            latency = state.probe_latency_s.get(pid)  # WO-088: a responder's transit time
+            if latency is not None:
+                spec = spec.model_copy(update={"latency_s": float(latency)})
             scored.append((probe_score(gain, spec, self.weights), order[pid], pid, gain))
         scored.sort(key=lambda s: (-s[0], s[1]))
         return [RankedProbe(probe_id=pid, gain=gain, score=score) for score, _, pid, gain in scored]

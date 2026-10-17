@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from soundings.investigation.probes import ALLOWLIST as PROBE_ALLOWLIST
+from soundings.investigation.probes import RESPONDER_PROBES
 from soundings.llm.client import fixture_key
 from soundings.llm.planner import guard_allowlist, guard_context, planner_inputs
 from soundings.llm.roles import (
@@ -118,6 +119,7 @@ def test_inputs_allowlist_equals_wo031_allowlist() -> None:
             "interruption": spec.interruption,
         }
         for pid, spec in PROBE_ALLOWLIST.items()
+        if pid not in RESPONDER_PROBES  # WO-088: the model sees section 5 only
     ]
     state = PLANNER_CASES["valid"].state()
     assert planner_inputs(state)["allowlist"] == expected

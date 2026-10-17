@@ -44,7 +44,7 @@ from soundings.investigation.planner import (
     PlannerState,
 )
 from soundings.investigation.posterior import LikelihoodTables, PosteriorReport
-from soundings.investigation.probes import ALLOWLIST, ProbeSpec, rung_index
+from soundings.investigation.probes import ALLOWLIST, SECTION_5_ALLOWLIST, ProbeSpec, rung_index
 from soundings.llm.client import FixtureStore, ModelClient, ModelMode
 from soundings.llm.fallback import fallback_probe_plan
 from soundings.llm.guard import (
@@ -102,9 +102,13 @@ def probe_terms(spec: ProbeSpec) -> ProbeTerms:
 
 
 def guard_allowlist(
-    allowlist: Mapping[ProbeId, ProbeSpec] = ALLOWLIST,
+    allowlist: Mapping[ProbeId, ProbeSpec] = SECTION_5_ALLOWLIST,
 ) -> dict[ProbeId, ProbeTerms]:
-    """WO-031 ``ALLOWLIST`` as guard terms, in allowlist order."""
+    """WO-031 section 5 ``ALLOWLIST`` as guard terms, in allowlist order.
+
+    WO-088: the model sees the section 5 probes only. The responder probes are chosen by
+    the deterministic planner (a model reply naming one is ``NOT_IN_ALLOWLIST``), which
+    also keeps the recorded fixture keys valid."""
     return {pid: probe_terms(spec) for pid, spec in allowlist.items()}
 
 
@@ -129,7 +133,7 @@ def guard_context(state: PlannerState) -> GuardContext:
         remaining=remaining_budget(state),
         contact_id=state.contact_id,
         tick=state.tick,
-        already_run=frozenset(pid for pid in ALLOWLIST if state.already_ran(pid)),
+        already_run=frozenset(pid for pid in SECTION_5_ALLOWLIST if state.already_ran(pid)),
     )
 
 

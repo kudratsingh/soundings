@@ -234,7 +234,10 @@ def test_unsigned_nothing_above_ask_executes() -> None:
             )
             if _above_ask(action) or action in ABSOLUTE_NEVER:
                 assert not bd.permits, action
-            if TABLE.rung_of(action) in (Rung.WATCH, Rung.ASK):
+            if TABLE.cell_of(action) is BoundaryCell.PERSON_APPROVES:
+                # WO-088 (CLAUDE.md 8 A2): the responder rows at ask need a person.
+                assert TABLE.rung_of(action) is not Rung.WATCH and not bd.permits, action
+            elif TABLE.rung_of(action) in (Rung.WATCH, Rung.ASK):
                 assert bd.permits, action  # watch and ask stay with the platform
 
 

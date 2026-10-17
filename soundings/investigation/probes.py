@@ -87,6 +87,7 @@ from soundings.investigation.features import (
 )
 from soundings.matcher import (
     MatchConfig,
+    SearchBox,
     load_match_config,
     registry_lookup,
     registry_lookup_rows,
@@ -101,12 +102,14 @@ from soundings.schemas.enums import (
     EvidenceKind,
     FeatureName,
     HailReply,
+    Hypothesis,
     ProbeId,
     Rung,
     ToggleName,
+    Unit,
 )
 from soundings.schemas.evidence import UNKNOWN, EvidenceRow, EvidenceValue
-from soundings.schemas.geo import to_local_m
+from soundings.schemas.geo import distance_m, to_local_m
 from soundings.schemas.harbor import Harbor
 from soundings.schemas.scenario import Scenario
 from soundings.schemas.track import Track
@@ -191,7 +194,7 @@ def _spec(
 
 
 _F = FeatureName
-ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
+SECTION_5_ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
     {
         spec.probe_id: spec
         for spec in (
@@ -251,7 +254,8 @@ ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
         )
     }
 )
-"""Every section 5 probe in section 5 order (which is also ``ProbeId`` order)."""
+"""Every section 5 probe in section 5 order (which is also ``ProbeId`` order). WO-088 adds
+the two responder probes after them in ``ALLOWLIST`` (see the WO-088 block below)."""
 
 
 class ProbeNotAllowed(ValueError):
@@ -320,6 +324,10 @@ class ProbeContext:
     match_cfg: MatchConfig | None = None
     known: KnownOperatorTable | None = None
     tide_phase_for_hour: Callable[[int], Any] | None = None
+    # --- WO-088 begin --- (the harbor's responder, when one exists; LOST_VEHICLE box)
+    responder: ResponderPort | None = None
+    search_box: SearchBox | None = None
+    # --- WO-088 end ---
 
     @property
     def tick_s(self) -> float:
@@ -544,7 +552,7 @@ Executor = Callable[[ProbeContext, EvidenceTable, Mapping[str, Any], int], list[
 
 
 def _watch_executor(probe_id: ProbeId) -> Executor:
-    spec = ALLOWLIST[probe_id]
+    spec = SECTION_5_ALLOWLIST[probe_id]
 
     def run(
         ctx: ProbeContext, table: EvidenceTable, args: Mapping[str, Any], landed: int
@@ -754,7 +762,7 @@ def _request_watch_officer_look(
     return rows
 
 
-EXECUTORS: Final[Mapping[ProbeId, Executor]] = MappingProxyType(
+SECTION_5_EXECUTORS: Final[Mapping[ProbeId, Executor]] = MappingProxyType(
     {
         ProbeId.REGISTRY_LOOKUP: _registry_lookup,
         ProbeId.KINEMATICS_PROFILE: _watch_executor(ProbeId.KINEMATICS_PROFILE),
@@ -769,6 +777,460 @@ EXECUTORS: Final[Mapping[ProbeId, Executor]] = MappingProxyType(
         ProbeId.REQUEST_WATCH_OFFICER_LOOK: _request_watch_officer_look,
     }
 )
+
+
+# --- WO-088 begin ---
+# Responder platform probes (CLAUDE.md section 8 A2). The responder is a mobile probe at
+# rung ask: it is dispatched to look at a contact (and orbits at standoff, never inside)
+# or to search a LOST_VEHICLE drift box. It is never an action against anything. The
+# planner may request a look, never a position: the station point, the standoff and the
+# geofence belong to the responder simulation (``soundings.sim.responder``).
+
+RESPONDER_PROBES: Final[frozenset[ProbeId]] = frozenset(
+    {ProbeId.RESPONDER_LOOK, ProbeId.RESPONDER_SEARCH_BOX}
+)
+ON_STATION: Final = "ON_STATION"
+LOOK_BASE_CONFIDENCE: Final = 0.9
+"""Demo value: a close look in clear water at standoff (scaled by visibility and range)."""
+CLOSE_ACOUSTIC_CONFIDENCE: Final = 0.9
+"""Demo value: close-range acoustic features heard at standoff (no visibility term)."""
+LOOK_RANGE_REF_M: Final = 25.0
+"""Demo value: the range factor is 1 at or inside this range, ``ref / range`` beyond."""
+SEARCH_DETECT_RADIUS_M: Final = 50.0
+"""Demo value: the responder's search sensor sees a vehicle within this range."""
+SEARCH_CONFIDENCE: Final = 0.9
+"""Demo value: confidence of a ``search_result`` row (found or not found)."""
+NOMINAL_RESPONDER_SPEED_MPS: Final = 1.5
+"""Demo value (config/responder.yaml ``speed_mps``); used only without a responder."""
+NOMINAL_LOOK_TRANSIT_S: Final = 400.0
+"""Demo value: the static ``latency_s`` of ``responder_look`` (600 m at 1.5 m/s); a real
+dispatch uses the transit time from the responder's position (``responder_args``)."""
+STATION_ROUND_M: Final = (math.pi + 2.0) * 25.0
+"""Demo value: half an orbit plus a diameter at the 25 m standoff."""
+MAX_MOVING_CONTACT_FACTOR: Final = 3.0
+"""Demo value: cap on the transit stretch for a moving contact (it may never be reached;
+the look then lands with no rows)."""
+SPEED_WINDOW_S: Final = 120.0
+"""Demo value: the contact's speed for the transit estimate is its net displacement over
+the last two minutes of track."""
+NOMINAL_SEARCH_S: Final = 900.0
+"""Demo value: the static ``latency_s`` of ``responder_search_box``."""
+LOOK_ACOUSTIC_FEATURES: Final[tuple[FeatureName, ...]] = (
+    FeatureName.PROPELLER_TONAL_PRESENT,
+    FeatureName.TONAL_BAND,
+    FeatureName.CAVITATION_INDEX,
+    FeatureName.BREATHING_OR_CLICK_PRESENT,
+)
+LOOK_RETURNS: Final[tuple[FeatureName, ...]] = (
+    FeatureName.VISUAL_CLASS,
+    FeatureName.DEPTH,
+    FeatureName.TRANSIT_PATTERN,
+    *LOOK_ACOUSTIC_FEATURES,
+)
+SEARCH_RETURNS: Final[tuple[FeatureName, ...]] = (
+    FeatureName.SEARCH_RESULT,
+    FeatureName.SEARCH_POSITION,
+)
+_RESPONDER_UNITS: Final[Mapping[FeatureName, Unit]] = MappingProxyType(
+    {
+        FeatureName.VISUAL_CLASS: Unit.CATEGORY,
+        FeatureName.SEARCH_RESULT: Unit.CATEGORY,
+        FeatureName.SEARCH_POSITION: Unit.ID,
+    }
+)
+VISUAL_CLASS_OF: Final[Mapping[Hypothesis, str]] = MappingProxyType(
+    {
+        Hypothesis.FILED_ON_PLAN: "uuv",
+        Hypothesis.FILED_OFF_PLAN: "uuv",
+        Hypothesis.UNFILED_KNOWN_OPERATOR: "uuv",
+        Hypothesis.UNAUTHORIZED_UUV: "uuv",
+        Hypothesis.BIOLOGIC: "marine_life",
+        Hypothesis.DEBRIS_OR_DRIFT: "debris",
+        Hypothesis.SURFACE_VESSEL_AIS_OFF: "surface_vessel",
+        Hypothesis.UNAUTHORIZED_DIVER: "diver",
+    }
+)
+"""What a close look sees for each simulated contact (a class, never a hypothesis id)."""
+
+RESPONDER_ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
+    {
+        ProbeId.RESPONDER_LOOK: ProbeSpec(
+            probe_id=ProbeId.RESPONDER_LOOK,
+            rung_required=Rung.ASK,
+            cost_usd=0.0,
+            latency_s=NOMINAL_LOOK_TRANSIT_S,
+            interruption=0,
+            returns=LOOK_RETURNS,
+            nominal_confidence=CLOSE_ACOUSTIC_CONFIDENCE,
+        ),
+        ProbeId.RESPONDER_SEARCH_BOX: ProbeSpec(
+            probe_id=ProbeId.RESPONDER_SEARCH_BOX,
+            rung_required=Rung.ASK,
+            cost_usd=0.0,
+            latency_s=NOMINAL_SEARCH_S,
+            interruption=0,
+            returns=SEARCH_RETURNS,
+            nominal_confidence=SEARCH_CONFIDENCE,
+        ),
+    }
+)
+"""The two responder probes: rung ask, no money, latency = transit (and search) time."""
+
+ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
+    {**SECTION_5_ALLOWLIST, **RESPONDER_ALLOWLIST}
+)
+"""Section 5 in order, then the WO-088 responder probes (``ProbeId`` order)."""
+
+
+class _SnapshotLike(Protocol):
+    """The ``ResponderSnapshot`` fields a probe reads (``soundings.sim.responder``)."""
+
+    @property
+    def tick(self) -> int: ...
+    @property
+    def lat(self) -> float: ...
+    @property
+    def lon(self) -> float: ...
+    @property
+    def state(self) -> Any: ...
+    @property
+    def distance_to_target_m(self) -> float | None: ...
+
+
+class _DispatchLike(Protocol):
+    @property
+    def accepted(self) -> bool: ...
+    @property
+    def reason(self) -> str: ...
+    @property
+    def eta_s(self) -> float: ...
+
+
+class ResponderPort(Protocol):
+    """The responder simulation as the probe runner sees it (WO-088 contract)."""
+
+    def dispatch_to_look(
+        self, contact_id: str, contact_lat: float, contact_lon: float, tick: int
+    ) -> _DispatchLike: ...
+
+    def dispatch_search(self, contact_id: str, search_box: Any, tick: int) -> _DispatchLike: ...
+
+    def step(
+        self,
+        tick: int,
+        *,
+        contact_lat: float | None = None,
+        contact_lon: float | None = None,
+        contact_speed_mps: float | None = None,
+        nearest_asset_lat: float | None = None,
+        nearest_asset_lon: float | None = None,
+    ) -> _SnapshotLike: ...
+
+    @property
+    def snapshot(self) -> _SnapshotLike: ...
+
+    def travel_time_s(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float: ...
+
+
+def catch_up(port: ResponderPort, tick: int) -> _SnapshotLike:
+    """Step an idle or returning responder up to ``tick`` (no contact: it carries on
+    with what it was doing, usually the return to dock). Deterministic; no clock."""
+    snap = port.snapshot
+    for t in range(int(snap.tick) + 1, tick + 1):
+        snap = port.step(t)
+    return snap
+
+
+def release(port: ResponderPort, tick: int) -> None:
+    """The look or search is done: return to dock (``recall``), if the port has one."""
+    recall = getattr(port, "recall", None)
+    if callable(recall):
+        recall(tick)
+
+
+def state_name(snapshot: _SnapshotLike) -> str:
+    """The responder state as a plain string (``ResponderState`` member or str)."""
+    state = snapshot.state
+    return str(getattr(state, "name", state))
+
+
+def on_station(snapshot: _SnapshotLike | None) -> bool:
+    return snapshot is not None and state_name(snapshot) == ON_STATION
+
+
+def _contact_fix(ctx: ProbeContext, tick: int) -> tuple[float, float, float | None] | None:
+    """The contact's last observed (lat, lon, speed) at or before ``tick``."""
+    track = track_upto(ctx.run, ctx.contact_id, tick)
+    if track is None:
+        return None
+    last = track.points[-1]
+    speed: float | None = None
+    window = [p for p in track.points if (last.tick - p.tick) * ctx.tick_s <= SPEED_WINDOW_S]
+    first = window[0]
+    dt_s = (last.tick - first.tick) * ctx.tick_s
+    if dt_s > 0:  # net displacement over the window (single-reading noise averages out)
+        speed = distance_m(first.lat, first.lon, last.lat, last.lon) / dt_s
+    return float(last.lat), float(last.lon), speed
+
+
+def _responder_eta_s(ctx: ProbeContext, pid: ProbeId) -> float:
+    """Transit time from where the responder is to the contact (or to the drift box)."""
+    port = ctx.responder
+    if port is None:
+        return ALLOWLIST[pid].latency_s
+    snap = port.snapshot
+    if pid is ProbeId.RESPONDER_SEARCH_BOX:
+        box = ctx.search_box
+        if box is None:
+            return ALLOWLIST[pid].latency_s
+        transit = port.travel_time_s(snap.lat, snap.lon, box.center_lat, box.center_lon)
+        side = 2.0 * box.radius_m
+        lanes = max(1, math.ceil(side / (2.0 * SEARCH_DETECT_RADIUS_M)))
+        sweep_m = lanes * side + side
+        speed = NOMINAL_RESPONDER_SPEED_MPS
+        return transit + sweep_m / speed
+    fix = _contact_fix(ctx, ctx.tick)
+    if fix is None:
+        return ALLOWLIST[pid].latency_s
+    transit = port.travel_time_s(snap.lat, snap.lon, fix[0], fix[1])
+    # Room to come round to the station point on the far side of the contact.
+    base = transit + STATION_ROUND_M / NOMINAL_RESPONDER_SPEED_MPS
+    speed = NOMINAL_RESPONDER_SPEED_MPS
+    contact_speed = fix[2] if fix[2] is not None else 0.0
+    if contact_speed >= speed:
+        return base * MAX_MOVING_CONTACT_FACTOR
+    return base * min(MAX_MOVING_CONTACT_FACTOR, speed / (speed - contact_speed))
+
+
+def responder_args(pid: ProbeId, ctx: ProbeContext) -> dict[str, Any]:
+    """``{"eta_ticks": n}``: the ticks the dispatch takes, fixed when it is chosen."""
+    return {"eta_ticks": latency_ticks(round6(_responder_eta_s(ctx, pid)), ctx.tick_s)}
+
+
+def key_args(pid: ProbeId, args: Mapping[str, Any]) -> dict[str, Any]:
+    """The args in the idempotency key: a responder's ``eta_ticks`` depends on where the
+    responder is now, so it is left out (one dispatch per contact and bucket)."""
+    if pid in RESPONDER_PROBES:
+        return {k: v for k, v in sorted(args.items()) if k != "eta_ticks"}
+    return dict(args)
+
+
+def probe_latency_ticks(pid: ProbeId, args: Mapping[str, Any], tick_s: float) -> int:
+    """Ticks from send to landing: the allowlist latency, or a responder's ``eta_ticks``."""
+    eta = args.get("eta_ticks") if pid in RESPONDER_PROBES else None
+    if isinstance(eta, int) and not isinstance(eta, bool) and eta >= 0:
+        return eta
+    return latency_ticks(ALLOWLIST[pid].latency_s, tick_s)
+
+
+def _responder_row(
+    ctx: ProbeContext,
+    pid: ProbeId,
+    feature: FeatureName,
+    value: EvidenceValue,
+    confidence: float,
+    t: int,
+) -> EvidenceRow:
+    unit = _RESPONDER_UNITS.get(feature)
+    if unit is None:
+        return _fact(ctx, pid, feature, value, confidence, t)
+    known = not _is_unknown(value)
+    return EvidenceRow(
+        contact_id=ctx.contact_id,
+        t=t,
+        feature=feature,
+        value=_value(value),
+        unit=unit,
+        source=probe_source(pid),
+        confidence=round6(confidence) if known and confidence > 0 else UNKNOWN_CONFIDENCE,
+        kind=EvidenceKind.FACT,
+        probe_id=pid,
+    )
+
+
+def _responder_unknown(ctx: ProbeContext, pid: ProbeId, t: int) -> list[EvidenceRow]:
+    return [
+        _responder_row(ctx, pid, f, UNKNOWN, UNKNOWN_CONFIDENCE, t) for f in ALLOWLIST[pid].returns
+    ]
+
+
+def _nearest_asset(ctx: ProbeContext, lat: float, lon: float) -> tuple[float, float] | None:
+    asset = ctx.harbor.nearest_asset(lat, lon)
+    return None if asset is None else (float(asset.lat), float(asset.lon))
+
+
+def _step_to(ctx: ProbeContext, port: ResponderPort, start: int, end: int) -> _SnapshotLike | None:
+    """Step the responder tick by tick over ``(start, end]`` with the contact's last fix;
+    the last ``ON_STATION`` snapshot on the way (None if it never got on station)."""
+    snap = port.snapshot
+    best = snap if on_station(snap) else None
+    for t in range(max(start, int(snap.tick)) + 1, end + 1):
+        fix = _contact_fix(ctx, t)
+        asset = None if fix is None else _nearest_asset(ctx, fix[0], fix[1])
+        snap = port.step(
+            t,
+            contact_lat=None if fix is None else fix[0],
+            contact_lon=None if fix is None else fix[1],
+            contact_speed_mps=None if fix is None else fix[2],
+            nearest_asset_lat=None if asset is None else asset[0],
+            nearest_asset_lon=None if asset is None else asset[1],
+        )
+        if on_station(snap):
+            best = snap
+    return best
+
+
+def range_factor(range_m: float | None) -> float:
+    """1 at or inside ``LOOK_RANGE_REF_M``, ``ref / range`` beyond (0 when unknown)."""
+    if range_m is None or range_m < 0:
+        return 0.0
+    return 1.0 if range_m <= LOOK_RANGE_REF_M else LOOK_RANGE_REF_M / range_m
+
+
+def _close_acoustics(ctx: ProbeContext, t: int) -> dict[FeatureName, EvidenceValue]:
+    """The contact's acoustic signature from its latest real detection at or before ``t``."""
+    dets = [
+        d
+        for d in ctx.run.detections
+        if d.observed_contact_id == ctx.contact_id and d.tick <= t and not d.is_false_alarm
+    ]
+    if not dets:
+        return {}
+    d = max(dets, key=lambda x: (x.tick, x.node_id))
+    return {
+        FeatureName.PROPELLER_TONAL_PRESENT: bool(d.propeller_tonal_present),
+        FeatureName.TONAL_BAND: d.tonal_band.value,
+        FeatureName.CAVITATION_INDEX: float(d.cavitation_index),
+        FeatureName.BREATHING_OR_CLICK_PRESENT: bool(d.breathing_or_click_present),
+    }
+
+
+def _responder_look(
+    ctx: ProbeContext, table: EvidenceTable, args: Mapping[str, Any], landed: int
+) -> list[EvidenceRow]:
+    """Dispatch to look, step to the landing tick, and read only once ``ON_STATION``.
+
+    Without a responder (none in this harbor) every feature is an ``unknown`` row. A
+    dispatch the responder declines (outside the geofence, battery, already busy) is
+    ``unknown`` too. Before ``ON_STATION`` the look returns no rows at all.
+    """
+    pid = ProbeId.RESPONDER_LOOK
+    port = ctx.responder
+    fix = _contact_fix(ctx, ctx.tick)
+    if port is None or fix is None:
+        return _responder_unknown(ctx, pid, landed)
+    catch_up(port, ctx.tick)
+    dispatch = port.dispatch_to_look(ctx.contact_id, fix[0], fix[1], ctx.tick)
+    if not dispatch.accepted:
+        return _responder_unknown(ctx, pid, landed)
+    snap = _step_to(ctx, port, ctx.tick, landed)
+    release(port, landed)
+    if snap is None:
+        return []
+    visibility = camera_visibility(ctx, landed)
+    factor = range_factor(snap.distance_to_target_m)
+    truth = ctx.run.contact_truth.get(ctx.contact_id)
+    rows: list[EvidenceRow] = []
+    visual: EvidenceValue = UNKNOWN
+    if truth is not None and visibility > 0.0 and factor > 0.0:
+        visual = VISUAL_CLASS_OF[truth.hypothesis]
+    rows.append(
+        _responder_row(
+            ctx, pid, FeatureName.VISUAL_CLASS, visual,
+            LOOK_BASE_CONFIDENCE * visibility * factor, landed,
+        )
+    )  # fmt: skip
+    seen = [p for p in _simulated_path(ctx) if p[0] <= landed]
+    depth_value: EvidenceValue = seen[-1][3] if seen else UNKNOWN
+    close = CLOSE_ACOUSTIC_CONFIDENCE * factor
+    rows.append(_responder_row(ctx, pid, FeatureName.DEPTH, depth_value, close, landed))
+    window = [p for p in seen if p[0] * ctx.tick_s >= landed * ctx.tick_s - PATTERN_WINDOW_S]
+    pattern_value: EvidenceValue = UNKNOWN
+    if window:
+        xy = [to_local_m(lat, lon) for _, lat, lon, _ in window]
+        arrays = TrackArrays.from_columns(
+            [p[0] * ctx.tick_s for p in window],
+            [x for x, _ in xy],
+            [y for _, y in xy],
+            [p[3] for p in window],
+            [1.0] * len(window),
+            [EYES_ON_SIGMA_M] * len(window),
+        )
+        pattern = classify_transit_pattern(arrays)
+        pattern_value = UNKNOWN if pattern is None else pattern.value
+    rows.append(_responder_row(ctx, pid, FeatureName.TRANSIT_PATTERN, pattern_value, close, landed))
+    heard = _close_acoustics(ctx, landed)
+    for feature in LOOK_ACOUSTIC_FEATURES:
+        value = heard.get(feature, UNKNOWN)
+        rows.append(_responder_row(ctx, pid, feature, value, close, landed))
+    return rows
+
+
+def _truth_at(ctx: ProbeContext, tick: int) -> tuple[float, float] | None:
+    seen = [p for p in _simulated_path(ctx) if p[0] <= tick]
+    return None if not seen else (seen[-1][1], seen[-1][2])
+
+
+def _responder_search_box(
+    ctx: ProbeContext, table: EvidenceTable, args: Mapping[str, Any], landed: int
+) -> list[EvidenceRow]:
+    """Lawnmower the LOST_VEHICLE drift box; ``found`` with a position or ``not_found``.
+
+    The responder's search sensor is simulated: it sees the vehicle when the simulated
+    vehicle is within ``SEARCH_DETECT_RADIUS_M`` of the responder at a tick.
+    """
+    pid = ProbeId.RESPONDER_SEARCH_BOX
+    port = ctx.responder
+    box = ctx.search_box
+    if port is None or box is None:
+        return _responder_unknown(ctx, pid, landed)
+    catch_up(port, ctx.tick)
+    dispatch = port.dispatch_search(ctx.contact_id, box, ctx.tick)
+    if not dispatch.accepted:
+        return _responder_unknown(ctx, pid, landed)
+    found: tuple[float, float] | None = None
+    snap = port.snapshot
+    for t in range(max(ctx.tick, int(snap.tick)) + 1, landed + 1):
+        snap = port.step(t)
+        where = _truth_at(ctx, t)
+        if where is not None and distance_m(snap.lat, snap.lon, *where) <= SEARCH_DETECT_RADIUS_M:
+            found = where
+            break
+    release(port, int(snap.tick))
+    if found is None:
+        return [
+            _responder_row(
+                ctx, pid, FeatureName.SEARCH_RESULT, "not_found", SEARCH_CONFIDENCE, landed
+            ),
+            _responder_row(ctx, pid, FeatureName.SEARCH_POSITION, UNKNOWN, 0.0, landed),
+        ]
+    position = f"{round6(found[0]):.6f},{round6(found[1]):.6f}"
+    return [
+        _responder_row(ctx, pid, FeatureName.SEARCH_RESULT, "found", SEARCH_CONFIDENCE, landed),
+        _responder_row(ctx, pid, FeatureName.SEARCH_POSITION, position, SEARCH_CONFIDENCE, landed),
+    ]
+
+
+def search_position(rows: Sequence[EvidenceRow]) -> tuple[float, float] | None:
+    """The ``(lat, lon)`` a ``responder_search_box`` found, or ``None``."""
+    for row in rows:
+        if row.feature is FeatureName.SEARCH_POSITION and isinstance(row.value, str):
+            if row.value != UNKNOWN and "," in row.value:
+                lat, lon = row.value.split(",", 1)
+                return float(lat), float(lon)
+    return None
+
+
+RESPONDER_EXECUTORS: Final[Mapping[ProbeId, Executor]] = MappingProxyType(
+    {
+        ProbeId.RESPONDER_LOOK: _responder_look,
+        ProbeId.RESPONDER_SEARCH_BOX: _responder_search_box,
+    }
+)
+EXECUTORS: Final[Mapping[ProbeId, Executor]] = MappingProxyType(
+    {**SECTION_5_EXECUTORS, **RESPONDER_EXECUTORS}
+)
+# --- WO-088 end ---
 
 
 # --- the entry point ----------------------------------------------------------------------
@@ -790,6 +1252,8 @@ def resolve_args(
     pid = as_probe_id(probe_id)
     if args:
         return dict(sorted(args.items()))
+    if pid in RESPONDER_PROBES:  # WO-088: the transit time is part of the key
+        return responder_args(pid, ctx)
     if pid in (ProbeId.REGISTRY_LOOKUP, ProbeId.ASK_OPERATOR_BY_PHONE):
         modem = _modem_arg(table, ctx.contact_id)
         if modem is not None:
@@ -805,9 +1269,8 @@ def probe_key(
 ) -> str:
     """The section 5 idempotency key ``run_probe`` would use for this call."""
     pid = as_probe_id(probe_id)
-    return idempotency_key(
-        ctx.contact_id, pid.value, resolve_args(pid, ctx, table, args), ctx.bucket()
-    )
+    resolved = key_args(pid, resolve_args(pid, ctx, table, args))  # WO-088
+    return idempotency_key(ctx.contact_id, pid.value, resolved, ctx.bucket())
 
 
 def run_probe(
@@ -833,11 +1296,11 @@ def run_probe(
             f"the contact is at {Rung(ctx.current_rung).value}"
         )
     resolved = resolve_args(pid, ctx, table, args)
-    key = idempotency_key(ctx.contact_id, pid.value, resolved, ctx.bucket())
+    key = idempotency_key(ctx.contact_id, pid.value, key_args(pid, resolved), ctx.bucket())
     hit = cache.get(key)
     if hit is not None:
         return hit.model_copy(update={"cached": True})
-    landed = ctx.tick + latency_ticks(spec.latency_s, ctx.tick_s)
+    landed = ctx.tick + probe_latency_ticks(pid, resolved, ctx.tick_s)  # WO-088: dynamic
     rows = EXECUTORS[pid](ctx, table, resolved, landed)
     cache._executed(pid)
     for row in rows:
@@ -861,6 +1324,18 @@ def run_probe(
 __all__ = [
     "ALLOWLIST",
     "EXECUTORS",
+    "RESPONDER_ALLOWLIST",
+    "RESPONDER_PROBES",
+    "SECTION_5_ALLOWLIST",
+    "ResponderPort",
+    "on_station",
+    "probe_latency_ticks",
+    "key_args",
+    "responder_args",
+    "search_position",
+    "catch_up",
+    "release",
+    "state_name",
     "NOMINAL_CONFIDENCE",
     "PROBE_SOURCE_PREFIX",
     "TICK_BUCKET_S",
