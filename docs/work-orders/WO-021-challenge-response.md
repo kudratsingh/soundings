@@ -121,7 +121,7 @@ ask (the `acoustic_hail` probe). Nothing above ask.
 - §2.6: `-k evidence_rows` and the honesty docstring.
 
 ## Done
-PR: see PR from branch `wo/021-challenge-response` · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0; full suite 395 passed after rebase on WO-020; hail 65 passed (unit `tests/test_hail.py` 55, integration `tests/test_hail_integration.py` 10); `-k config_agree` runs unskipped against WO-020's `config/registry.yaml` · STATE.md updated: yes (WO-021 row)
+PR: [#5](https://github.com/kudratsingh/soundings/pull/5) (branch `wo/021-challenge-response`) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0; full suite 395 passed after rebase on WO-020; hail 65 passed (unit `tests/test_hail.py` 55, integration `tests/test_hail_integration.py` 10); `-k config_agree` runs unskipped against WO-020's `config/registry.yaml` · STATE.md updated: yes (WO-021 row)
 
 - Every exit test above passes with `MODEL_MODE=replay`; the `soundings.llm` grep and the denylist grep print nothing.
 - Determinism: hailing every observed contact every 10 ticks on S01..S08 at loss 0.0 and 0.5 gives identical row-id and result hashes under `PYTHONHASHSEED=0` and `=1` (empty diff); seeds 3 and 4 differ at loss 0.5.
