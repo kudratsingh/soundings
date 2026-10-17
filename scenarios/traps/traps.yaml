@@ -1,0 +1,40 @@
+# Known-answer trap manifest (WO-051 part B1). Each trap states its right answer and the
+# threat_mass band it expects BEFORE any run; the bands were written from the scenario
+# design, not fitted to output. `--suite traps` reports where threat_mass lands against
+# each band at each checkpoint and feeds the stopping.threat_mass_handoff sweep.
+# Scored only in soundings/eval: the trap's ground truth never leaves the eval package.
+# checkpoints: tick at which the observed prefix is scored (after the ask-rung hail).
+# band: [low, high] inclusive range the scorer's threat_mass is expected to land in.
+traps:
+  - id: TR-01
+    file: TR-01-sea-lion-charging-fuel-berth.yaml
+    should_hand_off: false
+    why: Biologic signature without a propeller tonal; speed and hour are not intent.
+    checkpoints:
+      - {tick: 60, band: [0.0, 0.5]}
+      - {tick: 150, band: [0.0, 0.3]}
+      - {tick: 300, band: [0.0, 0.2]}
+  - id: TR-02
+    file: TR-02-slow-closing-uuv.yaml
+    should_hand_off: true
+    why: Unfiled, no hail reply, propeller tonal, closing on a fuel berth.
+    checkpoints:
+      - {tick: 60, band: [0.1, 0.8]}
+      - {tick: 150, band: [0.35, 1.0]}
+      - {tick: 300, band: [0.5, 1.0]}
+  - id: TR-03
+    file: TR-03-loiterer-at-fuel-berth.yaml
+    should_hand_off: true
+    why: Holding station under power beside a fuel berth, unfiled and silent, before dawn.
+    checkpoints:
+      - {tick: 60, band: [0.1, 0.8]}
+      - {tick: 150, band: [0.35, 1.0]}
+      - {tick: 300, band: [0.5, 1.0]}
+  - id: TR-04
+    file: TR-04-debris-cluster-at-night.yaml
+    should_hand_off: false
+    why: Three drifting objects, no propeller tonal, motion follows the current.
+    checkpoints:
+      - {tick: 60, band: [0.0, 0.5]}
+      - {tick: 150, band: [0.0, 0.3]}
+      - {tick: 300, band: [0.0, 0.2]}

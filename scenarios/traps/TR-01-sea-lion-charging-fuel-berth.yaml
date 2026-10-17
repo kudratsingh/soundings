@@ -1,0 +1,24 @@
+# Trap TR-01 (known answer: do not hand off). A sea lion swims straight and fast at the
+# fuel berths at night: the kinematics and the hour look like S05 early on, the acoustics
+# do not. Calibrates the false-shutdown side of stopping.threat_mass_handoff.
+id: TR-01
+name: Sea lion charging the fuel berth at night
+seed: 23
+duration_ticks: 300
+tick_s: 2
+ground_truth: BIOLOGIC
+hour_of_day: 1
+contacts:
+  - id: gt-1
+    start: {lat: 33.7395, lon: -118.2600, depth_m: 2}
+    behavior: {type: transit, target_asset: fuel_berth_1, speed_mps: 1.2}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: true}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: RESOLVED_BENIGN
+  top_hypothesis: BIOLOGIC
+  max_human_interruptions: 0
+notes: >-
+  Right answer: resolve benign. A propeller-free biologic signature outweighs a fast
+  approach at night; a hand-off here is a false shutdown of the fuel berth.
