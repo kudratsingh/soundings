@@ -52,6 +52,10 @@
   th { color: var(--muted); font-weight: 600; }
   tr:last-child td { border-bottom: 0; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  /* WO-081: conflicts */
+  td.conflicts { color: var(--bad-ink); }
+  td.conflicts div { white-space: nowrap; }
+  /* WO-081 end */
   footer { margin-top: 28px; font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -91,6 +95,22 @@
       <input id="utc_offset" name="utc_offset" required pattern="[+-][0-9]{2}:[0-9]{2}"
              placeholder="-07:00">
     </label>
+    <!-- WO-081: conflicts (form inputs; optional, defaults apply when blank) -->
+    <fieldset>
+      <legend>Job and depth band (optional; blank uses the job type's default band)</legend>
+      <label>Job type
+        <select id="job_type" name="job_type">
+          <option value="">other (default)</option>
+          <option value="survey">survey</option>
+          <option value="hull_cleaning">hull cleaning</option>
+          <option value="pile_inspection">pile inspection</option>
+          <option value="dredge">dredge</option>
+        </select>
+      </label>
+      <label>Depth min (m) <input id="depth_min_m" name="depth_min_m" type="number" min="0" step="0.1"></label>
+      <label>Depth max (m) <input id="depth_max_m" name="depth_max_m" type="number" min="0" step="0.1"></label>
+    </fieldset>
+    <!-- WO-081 end -->
     <fieldset>
       <legend>Sim ticks (optional, for scenario runs)</legend>
       <label>Start tick <input id="start_tick" name="start_tick" type="number" min="0"></label>
@@ -107,7 +127,9 @@
     <table id="plans">
       <thead>
         <tr><th>Plan</th><th>Zone</th><th>Operator</th><th>Vehicle</th><th>Modem</th>
-            <th>Start</th><th>End</th><th>Ticks</th><th></th></tr>
+            <th>Start</th><th>End</th><th>Ticks</th>
+            <!-- WO-081: conflicts --><th>Conflicts</th><!-- WO-081 end -->
+            <th></th></tr>
       </thead>
       <tbody id="plans-body"><tr><td colspan="9">Loading...</td></tr></tbody>
     </table>
@@ -153,6 +175,32 @@
     el.textContent = text;
   }
 
+  // --- WO-081 begin: conflicts ---
+  function hhmm(iso) { return iso.slice(11, 16); }
+
+  function conflictLines(plan) {
+    return (plan.conflicts || []).map(function (c) {
+      return "conflicts with " + c.other_plan_id + " " + hhmm(c.overlap_start) + "-" +
+        hhmm(c.overlap_end) + (c.resolved_by ? " (resolved by " + c.resolved_by + ")" : "");
+    });
+  }
+
+  function conflictCell(row, plan) {
+    var td = cell(row, "");
+    td.className = "conflicts";
+    var lines = conflictLines(plan);
+    if (!lines.length) { td.textContent = "-"; }
+    lines.forEach(function (line) {
+      var div = document.createElement("div");
+      div.textContent = line;
+      td.appendChild(div);
+    });
+    return td;
+  }
+
+  function numOrNull(v) { return v === "" ? null : Number(v); }
+  // --- WO-081 end ---
+
   function loadZones() {
     return fetch("/api/plans/zones").then(function (r) { return r.json(); }).then(function (zones) {
       var sel = $("area");
@@ -190,6 +238,7 @@
           cell(tr, shortTime(p.start_at));
           cell(tr, shortTime(p.end_at));
           cell(tr, p.start_tick === null ? "-" : p.start_tick + "-" + p.end_tick);
+          conflictCell(tr, p);  // WO-081
           var actions = cell(tr, "");
           var btn = document.createElement("button");
           btn.type = "button";
@@ -226,6 +275,11 @@
       end_tick: intOrNull($("end_tick").value),
       source: "form"
     };
+    // --- WO-081 begin: job type and depth band (optional) ---
+    payload.job_type = $("job_type").value || null;
+    payload.depth_min_m = numOrNull($("depth_min_m").value);
+    payload.depth_max_m = numOrNull($("depth_max_m").value);
+    // --- WO-081 end ---
     fetch("/api/plans", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -234,7 +288,12 @@
       return r.json().then(function (data) { return { status: r.status, data: data }; });
     }).then(function (res) {
       if (res.status === 201) {
-        showResult("ok", "Filed " + res.data.plan_id + " in " + res.data.area + ".");
+        var msg = "Filed " + res.data.plan_id + " in " + res.data.area + ".";
+        // --- WO-081 begin: name the conflicts in the banner ---
+        var lines = conflictLines(res.data);
+        if (lines.length) { msg += " Accepted; " + lines.join("; ") + "."; }
+        // --- WO-081 end ---
+        showResult("ok", msg);
       } else if (res.data && res.data.reason) {
         showResult("bad", "Rejected: " + res.data.reason + ". " + res.data.detail);
       } else {
