@@ -44,7 +44,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | merged (part A #18, 77e5b48; part B #37) | wo/042b-sitrep-writer-handoff (part B) | #37 | squash on merge | 1734 passed after rebase (part B: test_sitrep +17, test_audit +4) |
-| 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
+| 043 | watch after handoff | merged (part A #26; part B runner v3, approvals path, catalog verifier) | wo/043b-runner-v3 | #26, part B PR | part A 8fee1bb; part B squash | part B: test_runner_v3 20, test_catalog_expected 11 (S04 strict xfail), +9 in driver/watch tests |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | part A merged (#24); part B1 (archives, families, grader, traps TR-01..04) merged 2026-10-17 08:11 PDT; rest of part B (soundings policy, sweeps) pending | wo/051b1-eval-archives-traps (part B1) | see PR | squash on merge | 1824 passed, 2 skipped before rebase (part B1: 39 new in test_eval_archive/families/grader/traps) |
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
@@ -52,7 +52,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 062 | demo runner | part A + presenter mode merged; recording (part B) pending | wo/062a-demo-runner-core; wo/062p-presenter-mode | #21; WO-062P see branch PR | 39c22eb (part A) | part A 53; WO-062P: test_demo_script 29, test_presenter_api 5, test_sfx 12, e2e presenter smoke 1 |
 | 080 | Busy Tuesday scenario BT-01 | part A merged (#33); part B (tick skipping, runtime, determinism) in PR | wo/080-busy-tuesday-b | #33 + part B PR | see #33 | part A 56 tests; part B +28 tick-skipping, +6 BT-01, +3 rules; BT-01 33.7 s headless |
 | 081 | conflict detection at filing | PR open (auto-merge on green); JobType via local adapter until WO-080 part A | wo/081-conflict-detection | see branch PR | | 1546 passed, 1 skipped (52 WO-081 tests) |
-| 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
+| 082 | slot proposal (CP-SAT) | PR open (auto-merge on green) | wo/082-slot-proposal | see PR | | 1823 passed, 2 skipped (38 WO-082 tests: test_slots 20, test_slots_api 12, test_slots_integration 2, e2e 1, +3 START_BOUNDS_INVALID reject cases) |
 | 083 | separation advisories (CPA/TCPA) | PR open (auto-merge) | wo/083-separation-advisories | see PR | | make check green; 25 WO-083 tests (BT-01 cases skip until WO-080 part A merges) |
 | 084 | projected tracks (Kalman) | PR open (flag flipped to kalman for build_evidence; runner stays window) | wo/084-projected-tracks | see PR | | 1436 passed (24 test_kalman*) |
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |

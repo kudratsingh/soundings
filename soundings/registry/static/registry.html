@@ -56,6 +56,17 @@
   td.conflicts { color: var(--bad-ink); }
   td.conflicts div { white-space: nowrap; }
   /* WO-081 end */
+  /* WO-082: slot proposals */
+  #proposal-panel { margin-top: 16px; background: var(--panel); border: 1px solid var(--line);
+                    border-radius: 8px; padding: 14px 16px; }
+  #proposal-panel[hidden] { display: none; }
+  #proposal-panel h3 { font-size: 15px; margin: 0 0 8px; }
+  #proposal-panel ul { margin: 0 0 10px; padding-left: 18px; }
+  #proposal-panel li { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  #proposal-panel .detail { color: var(--muted); margin: 0 0 10px; }
+  #proposal-panel .detail.bad { color: var(--bad-ink); }
+  #proposal-panel .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  /* WO-082 end */
   footer { margin-top: 28px; font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -135,6 +146,21 @@
     </table>
   </div>
 
+  <!-- WO-082: slot proposals -->
+  <section id="proposal-panel" aria-live="polite" hidden>
+    <h3 id="proposal-title">Proposed slot</h3>
+    <p class="detail" id="proposal-detail"></p>
+    <ul id="proposal-lines"></ul>
+    <p class="detail" id="proposal-total"></p>
+    <div class="buttons">
+      <button type="button" id="proposal-accept">Accept proposed slot</button>
+      <button type="button" class="secondary" id="proposal-decline">Decline</button>
+    </div>
+    <p class="detail">A proposed slot changes nothing until you accept it. Accepting edits
+      registry records only; tell your crew about the new window yourself.</p>
+  </section>
+  <!-- WO-082 end -->
+
   <footer>Registry entries are retained for at most 30 days. Simplified for demonstration.</footer>
 </main>
 <script>
@@ -201,6 +227,94 @@
   function numOrNull(v) { return v === "" ? null : Number(v); }
   // --- WO-081 end ---
 
+  // --- WO-082 begin: slot proposals (nothing changes until the operator accepts) ---
+  var currentProposal = null;
+
+  function proposeButton(planId) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "secondary propose";
+    btn.textContent = "Propose slot";
+    btn.addEventListener("click", function () { proposeSlot(planId); });
+    return btn;
+  }
+
+  function shiftLine(s) {
+    var sign = s.shift_min > 0 ? "+" : "";
+    return s.plan_id + " " + hhmm(s.start_at) + "-" + hhmm(s.end_at) + " \u2192 " +
+      hhmm(s.new_start_at) + "-" + hhmm(s.new_end_at) + " (" + sign + s.shift_min + " min)";
+  }
+
+  function renderProposal(p) {
+    currentProposal = p;
+    var panel = $("proposal-panel");
+    var lines = $("proposal-lines");
+    lines.textContent = "";
+    var feasible = p.status === "feasible";
+    $("proposal-title").textContent = "Proposed slot for " + p.target_plan_id + " (" +
+      p.zone_id + ", capacity " + p.capacity + ")";
+    var detail = $("proposal-detail");
+    detail.textContent = p.detail;
+    detail.className = feasible ? "detail" : "detail bad";
+    if (feasible) {
+      p.shifts.forEach(function (s) {
+        var text = null;
+        if (s.shift_min !== 0) { text = shiftLine(s); }
+        else if (s.pinned === "in_water") { text = s.plan_id + " in the water, not moved"; }
+        if (text) {
+          var li = document.createElement("li");
+          li.textContent = text;
+          lines.appendChild(li);
+        }
+      });
+      $("proposal-total").textContent = "Total delay: " + p.total_delay_min + " min" +
+        (p.optimal ? "" : " (best found in 2 s)");
+    } else {
+      $("proposal-total").textContent = "";
+    }
+    $("proposal-accept").hidden = !feasible;
+    $("proposal-decline").hidden = false;
+    panel.hidden = false;
+  }
+
+  function closeProposal() {
+    currentProposal = null;
+    $("proposal-panel").hidden = true;
+  }
+
+  function proposeSlot(planId) {
+    fetch("/api/plans/" + encodeURIComponent(planId) + "/proposal", { method: "POST" })
+      .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (res.status === 200) { renderProposal(res.data); return; }
+        showResult("bad", "No proposed slot: " + (res.data.reason || res.data.detail || res.status) + ".");
+      });
+  }
+
+  function decideProposal(choice) {
+    var p = currentProposal;
+    if (!p) { return; }
+    var route = choice === "accept" ? "/proposal/accept" : "/proposal/decline";
+    fetch("/api/plans/" + encodeURIComponent(p.target_plan_id) + route, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proposal_id: p.proposal_id })
+    }).then(function (r) {
+      return r.json().then(function (d) { return { status: r.status, data: d }; });
+    }).then(function (res) {
+      if (res.status === 200) {
+        showResult("ok", (choice === "accept" ? "Accepted " : "Declined ") + "proposed slot " +
+          p.proposal_id + ".");
+      } else {
+        showResult("bad", "Could not " + choice + " " + p.proposal_id + ": " +
+          (res.data.reason || res.status) + ".");
+      }
+      closeProposal();
+      return loadPlans();
+    });
+  }
+  // --- WO-082 end ---
+
   function loadZones() {
     return fetch("/api/plans/zones").then(function (r) { return r.json(); }).then(function (zones) {
       var sel = $("area");
@@ -246,6 +360,7 @@
           btn.textContent = "Expire";
           btn.addEventListener("click", function () { expirePlan(p.plan_id); });
           actions.appendChild(btn);
+          if (p.status === "conflicted") { actions.appendChild(proposeButton(p.plan_id)); }  // WO-082
           body.appendChild(tr);
         });
       });
@@ -305,6 +420,10 @@
 
   $("utc_offset").value = browserOffset();
   $("plan-form").addEventListener("submit", submitPlan);
+  // --- WO-082 begin ---
+  $("proposal-accept").addEventListener("click", function () { decideProposal("accept"); });
+  $("proposal-decline").addEventListener("click", function () { decideProposal("decline"); });
+  // --- WO-082 end ---
   loadZones().then(loadPlans);
 })();
 </script>
