@@ -182,4 +182,14 @@ None executed. This WO defines the typed vocabulary for all five rungs (watch, a
 - §2.6: `test_evidence_row_rules` (fact, assumption, and derived are distinct; assumptions name what they assume; derived rows name their sources; no nulls).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: [#1](https://github.com/kudratsingh/soundings/pull/1) · Merged commit: squash commit on main (see PR #1) · Test summary: `64 passed` (`make check` exit 0; every exit test passes; PYTHONHASHSEED diff empty, hash `286a84d5…3b3f59`) · STATE.md updated: yes (WO-010 row)
+
+Every public name in Interfaces exists exactly as written. Notes for WO-011 and WO-012:
+- Models are strict and frozen, so sequence fields take **tuples**; a list is rejected in Python mode. YAML and GeoJSON go through `soundings.schemas._base.from_file_data`, which turns lists into tuples. Enum fields accept member values given as strings.
+- `Zone.polygon` holds `(lat, lon)` vertices without the closing duplicate. `geo.point_in_polygon(lat, lon, polygon)` uses the same order. `to_local_m` returns `(x_east_m, y_north_m)` about (33.74, -118.265).
+- `Harbor` fields are `name`, `zones`, `assets`, `sensor_nodes`. Additions: `Harbor.node(id)` (raises KeyError), `Zone.contains(lat, lon)`, and `harbor_from_geojson(doc)`. `nearest_asset` returns None when no asset meets `min_criticality`.
+- `AcousticReading` fields are each `value | "unknown"`, defaulting to `"unknown"`. `TrackPoint.acoustic` defaults to all-unknown. `Track.points` needs at least one point. `TrackGap.n_ticks` is a property.
+- `ScenarioContact.id` matches `^[a-z][a-z0-9_-]*$` (for example `gt-1`). `Toggle.contact_id` must name a scenario contact. `Toggle.at_tick`, `fault_tick` and `silent_after_tick` must be `< duration_ticks`. `ContactRegistrySpec.plan_id` implies `filed: true`. `BehaviorSpec.waypoint` is a `Waypoint{lat, lon}` (also exported). `ScenarioContact.acoustic` defaults to all-None.
+- `soundings.schemas.scenario` also exposes `scenario_from_data(dict)`, `check_scenario_refs(scenario, harbor)` and `scenario_paths(root)`. `load_scenarios(root, harbor=None)` defaults root to `scenarios/`.
+- The config loaders return `LikelihoodSpec`, `Priors` (`.base: dict[Hypothesis, float]`, `.adjustments`), `LadderConfig` and `StandingOrders`. The signature is `load_standing_orders(harbor=None, path=...)`.
+- `round6(0.1234565) == 0.123456`: Python rounds the exact binary value, and Phase 0 goldens pin that behaviour.
