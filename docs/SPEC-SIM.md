@@ -21,6 +21,22 @@ Coordinates can be approximate; label "simplified for demonstration" in the Abou
 
 Required property tests: monotone range falloff; false-alarm rate within tolerance; gap rate within tolerance; byte-identical output per seed.
 
+## 2a. Amendment: passive-sonar-equation detection (owner directive 2026-10-17 07:50 PT, WO-089)
+
+Section 2 is the model that runs until WO-089 merges. After that, it stays available as `detection.model: gaussian` in `config/sim.yaml` for comparison, and the default becomes `sonar_equation`. Full detail is in `docs/work-orders/WO-089-physics-cards.md`.
+
+- **Detection.** The signal excess is `SE = SL − TL − NL − DT`, with `TL = 20·log10(r) + α·r`. The per-tick probability is `p = p_max · health · logistic(SE / k)`. `SL` depends on the acoustic class: propeller tonal present, propeller tonal absent, or biologic. Nothing is detected beyond `max_range_factor` × the effective range at base NL. SL, DT and k are tuned so that the effective range (p = ½ of the logistic term) at base NL is about the former r0 = 400 m.
+- **Ambient noise.** `NL` combines a base level and a sea-state term with nearby vessel transits (`SimRun.ais_tracks`, WO-080). Each transit is weighted by its distance to the node, and the terms are summed in the power domain. NL therefore rises while a vessel passes, and the sensor range rings on the map shrink.
+- **Other laws.**
+  - Hail travel time: `2r / 1500 m/s`. It is added to the simulated modem turnaround.
+  - Camera visibility: `exp(−k·depth) · exp(−turbidity)`. It multiplies the hour-of-day default.
+  - Responder battery drain: proportional to v³.
+  - The current field is unchanged.
+- **Parameters.** Every parameter is in `config/physics.yaml` as `{value, unit, source, label: "demo value"}`.
+- **What we do NOT model:** hydrodynamics, beam patterns, multipath, bottom type, or frequency-dependent spectra. The About → Physics cards say so.
+- **Honesty.** This is still "simulated for this demonstration". The cards show the equation; they do not claim operational acoustics.
+- **Required property tests** (in addition to section 2's): detection probability monotone in range and in noise; the effective range inverts the probability; every parameter has a source string; S07/S08 and the catalog outcomes are unchanged, or the change is explained in DECISIONS; byte-identical output per seed.
+
 ## 3. Scenario catalog v1 (`scenarios/*.yaml`)
 
 | id | name | ground truth | expected outcome | ordinary-day or crisis |

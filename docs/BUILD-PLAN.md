@@ -2,7 +2,7 @@
 
 Clock: build opens Fri Oct 16 ~9:30 PM PT. Submission locks Sat Oct 17 10:00 PM PT. Twists: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM (six hours to respond to each). Finalist deck due Sun 9:00 AM; Devpost links lock Sun 11:00 AM; pitches Sun 1:15 PM.
 
-Each phase is one or more work orders (WOs) under `docs/work-orders/`. A phase is done only when every exit test passes with `MODEL_MODE=replay`. Phases 0–6 are the product. Phase 7–8 are the submission. Phase 9 is reserved for the twists and runs in parallel.
+Each phase is one or more work orders (WOs) under `docs/work-orders/`. A phase is done only when every exit test passes with `MODEL_MODE=replay`. Phases 0–6 are the product. Phase 7 is the owner's Saturday-morning directives (ATC at scale, physics cards). Phase 8 is the submission. Phase 9 is reserved for the twists and runs in parallel. (Until 2026-10-17 the twist section below was headed Phase 7; older work-order text that says "Phase 7 twist proofs" means Phase 9.)
 
 Rule of thumb for the agent: when a phase is behind by more than an hour, cut from the "stretch" list, never from the exit tests.
 
@@ -124,20 +124,38 @@ Rule of thumb for the agent: when a phase is behind by more than an hour, cut fr
 
 ---
 
-## Phase 7 — Twist responses (runs in parallel: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM)
+## Phase 7 — Owner directives: ATC at scale and physics cards (Sat Oct 17, 06:05–07:50 PT)
 
-**Goal.** Each twist response changes the build and ships proof. Pipeline in `docs/TWIST-PLAYBOOK.md`.
+**Goal.** The same product at a working harbor's scale, with the physics made explicit. Soundings proposes slots and advisories, and operators accept them. It never steers anything, and the work stops at the handoff. There is no route planning and no vehicle command.
 
-**Exit tests (per twist).**
-- `twists/0N/notice.md` (verbatim), `twists/0N/delta.json` (parsed constraint diff, facts vs assumptions), `twists/0N/response.md` (what changed, why, proof), `twists/0N/proof/` (test output, screenshots, eval diff), commit hash of the change.
-- The twist's scenario toggle exists in the catalog and is covered by a test.
-- Submitted through the portal within 6 h; timestamp recorded in `docs/STATE.md`.
+**Work orders** (each written from the template with exit tests before coding; waves and drop rule in `docs/STATE.md` → Phase 7 directives):
+
+| WO | title | wave | depends on |
+|---|---|---|---|
+| WO-080 | Busy Tuesday scenario BT-01 (40 filed jobs, vessel transits on an AIS-style feed, one rogue) | A | WO-011, WO-012, WO-020, WO-021, WO-022 |
+| WO-081 | conflict detection at filing (shapely STRtree) | B | WO-020, WO-080 part A |
+| WO-082 | slot proposal (OR-Tools CP-SAT) | C (dropped if Wave C is not merged by 3:00 PM) | WO-081 |
+| WO-083 | separation advisories (CPA/TCPA through the guards) | B | WO-080 part A, WO-041, WO-042 part A |
+| WO-084 | projected tracks (2-D constant-velocity Kalman) | C (dropped if Wave C is not merged by 3:00 PM) | WO-010, WO-011, WO-012 |
+| WO-085 | surge triage queue | D | WO-080 parts A and B, WO-033, WO-043, WO-031, WO-030 |
+| WO-086 | rung ledger, blunt-policy counter, radar styling | D | WO-050, WO-051, WO-060, WO-061, WO-080, WO-084 |
+| WO-087 | bounded live mode (built now, enabled on stage Sunday only by the owner's approval phrase) | C | WO-032, WO-042, WO-061 |
+| WO-088 | responder platform | in flight | work order not yet on `main` |
+| WO-089 | physics cards: passive-sonar-equation detection, sourced `config/physics.yaml`, hail/camera/battery laws, About → Physics, live range rings, deck slide 10 (the owner numbered it WO-088; renumbered) | after WO-080 part A | WO-011, WO-012, WO-021, WO-060, WO-080, WO-088, WO-090 |
+
+Addenda: WO-061 (QR code to the registry form), WO-062 (presenter mode, 3:00 shot list, sound design), WO-051 (mis-specified sim ±20%, toggle sweep, threshold sensitivity, BT-01 at scale, seeds 1–20, planner ablation).
+
+**Exit tests.** Each work order's own list. Two are common to all of them:
+- The catalog S01..S08 expected outcomes do not move. Any move is a spec change, with a line in `docs/log/DECISIONS.md` and an explanation in the PR.
+- `make check` is green with `MODEL_MODE=replay`.
 
 ---
 
 ## Phase 8 — Submission (target: Sat 9:00 PM; hard stop 9:45 PM)
 
 **Goal.** Devpost complete, deck inputs ready, video uploaded.
+
+**Work orders.** WO-090 deck + Devpost fields; WO-091 README for the review committee; WO-092 mentor brief (owner Phase 8 directive, 2026-10-17 06:45 PT; hourly STATUS lines are coordinator work, not a WO).
 
 **Checklist.** Project name + lens (Crisis Mitigation) + one line · pitch deck · demo video · code repo link · all teammates added · two-line responsible-use note · tools used (including the owner's own open-source agent framework, Anthropic API, OpenSeaMap tiles, Leaflet, FastAPI, any IBM Bob use if claiming that prize) · hardware: n/a.
 
@@ -146,6 +164,18 @@ Rule of thumb for the agent: when a phase is behind by more than an hour, cut fr
 - `docs/DECK-INPUTS.md` contains: the ladder slide, the boundary table slide, the three-tests slide, the eval table, the three twist diffs, the one-liner, the responsible-use note.
 - `artifacts/demo-fallback.mp4` ≤ 3 min, uploaded.
 - Devpost shows all required fields; a screenshot is committed to `docs/log/`.
+
+---
+
+## Phase 9 — Twist responses (runs in parallel: Fri 11:30 PM, Sat 4:30 AM, Sat 7:00 AM)
+
+**Goal.** Each twist response changes the build and ships proof. Pipeline in `docs/TWIST-PLAYBOOK.md`.
+
+**Exit tests (per twist).**
+- `twists/0N/notice.md` (verbatim), `twists/0N/delta.json` (parsed constraint diff, facts vs assumptions), `twists/0N/response.md` (what changed, why, proof), `twists/0N/proof/` (test output, screenshots, eval diff), commit hash of the change.
+- The twist's scenario toggle exists in the catalog and is covered by a test.
+- Submitted through the portal within 6 h; timestamp recorded in `docs/STATE.md`.
+- Amended 2026-10-17 (STATE → Phase 7 directives): twists are scored at final submission only, with no per-twist deadline. Twists 2 and 3 must each produce a toggle, scenario, or feature with a test. The Devpost writeup paragraphs live in `docs/DECK-INPUTS.md` → Twists.
 
 ---
 
