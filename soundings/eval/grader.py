@@ -200,6 +200,17 @@ def _flag(attr: str) -> Rule:
     return rule
 
 
+# --- WO-080 begin: per-contact expectations (BT-01) ---
+PER_CONTACT = "graded per contact by soundings.sim.grading.check_expected_contacts (WO-080)"
+
+
+def _contacts(key: str, want: object, _s: _Subject, _o: Observations) -> KeyGrade:
+    return _not_graded(key, want, PER_CONTACT)
+
+
+# --- WO-080 end ---
+
+
 RULES: dict[str, Rule] = {
     "terminal_state": _terminal,
     "passes_through": _passes,
@@ -209,6 +220,7 @@ RULES: dict[str, Rule] = {
     "max_probes": _probes,
     "sitrep_has_search_box": _flag("sitrep_has_search_box"),
     "search_box_contains_truth": _flag("search_box_contains_truth"),
+    "contacts": _contacts,  # WO-080
 }
 
 
