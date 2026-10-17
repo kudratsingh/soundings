@@ -68,6 +68,7 @@ from soundings.stream.projection import projection_series
 # --- WO-088 begin ---
 from soundings.stream.responder import (
     ResponderSnapshotLike,
+    real_responder_trail,  # WO-088D
     responder_payloads,
     responder_snapshots,
 )
@@ -335,6 +336,11 @@ class SourceRequest:
     speed: float
     toggles: tuple[ToggleName, ...] = ()
     use_llm: bool = False
+    # --- WO-088D begin ---
+    responder: bool = False
+    """True: the run has the harbor's real responder (``config/responder.yaml``); its
+    trail comes from runner v2 with the responder when the run itself carries none."""
+    # --- WO-088D end ---
 
 
 class RunSource(Protocol):
@@ -373,7 +379,12 @@ class BatchReplaySource:
                 speed=self.req.speed,
                 toggles=self.req.toggles,
                 # --- WO-088 begin ---
-                responder=responder_snapshots(result, self.req.scenario),
+                responder=responder_snapshots(result, self.req.scenario)
+                or (  # WO-088D: the real responder when the request asks for one
+                    real_responder_trail(self.req.scenario, self.req.seed)
+                    if self.req.responder
+                    else None
+                ),
                 # --- WO-088 end ---
             )
         return self._events
@@ -579,6 +590,7 @@ class RunEngine:
         toggles: Sequence[ToggleName] = (),
         use_llm: bool = False,
         source: str = "batch",
+        responder: bool = False,  # WO-088D: the API (UI runs) passes True
     ) -> RunHandle:
         sc = resolve_scenario(scenario) if isinstance(scenario, str) else scenario
         factory = _SOURCES.get(source)
@@ -601,6 +613,7 @@ class RunEngine:
                 speed=pace,
                 toggles=tuple(toggles),
                 use_llm=use_llm,
+                responder=responder,  # WO-088D
             )
         )
         # --- WO-060B begin: a lazy source shares its growing buffer with the handle, and
@@ -707,11 +720,21 @@ def get_engine() -> RunEngine:
 
 
 def stream_events(
-    scenario: Scenario | str, seed: int | None = None, *, run_id: str = "cli"
+    scenario: Scenario | str,
+    seed: int | None = None,
+    *,
+    run_id: str = "cli",
+    responder: bool = False,  # WO-088D
 ) -> list[StreamEvent]:
     """The unpaced event stream of one batch run (the CLI and the determinism diff)."""
     sc = resolve_scenario(scenario) if isinstance(scenario, str) else scenario
-    req = SourceRequest(scenario=sc, seed=sc.seed if seed is None else seed, run_id=run_id, speed=0)
+    req = SourceRequest(
+        scenario=sc,
+        seed=sc.seed if seed is None else seed,
+        run_id=run_id,
+        speed=0,
+        responder=responder,  # WO-088D
+    )
     # --- WO-086 begin ---
     blunt = BluntCounter(sc, req.seed).start()
     return ledger_stream(BatchReplaySource(req).events(), blunt)

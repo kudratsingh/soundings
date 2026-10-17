@@ -208,6 +208,50 @@ class DemoResult:
         return "".join(f"{line.render()}\n" for line in self.lines)
 
 
+# --- WO-088D begin ---
+def responder_note(scenario: Scenario, seed: int) -> str:
+    """The responder beat of a run (runner v2 with the harbor's real responder): each
+    dispatch to look or search, when it was on station and what it found. Sim data only."""
+    from soundings.investigation.probes import RESPONDER_PROBES, search_position
+    from soundings.runner import DEFAULT_RESPONDER, ScenarioRunnerV2
+    from soundings.schemas.enums import FeatureName
+
+    result = ScenarioRunnerV2(scenario, seed=seed).run(responder=DEFAULT_RESPONDER)
+    trail = result.responder_trail
+    tick_s = float(result.sim.tick_s)
+    parts: list[str] = []
+    for kind, cid, tick, accepted in result.responder_dispatches:
+        if not accepted:
+            continue
+        station = [
+            s
+            for s in trail
+            if s.target_contact_id == cid and str(s.state.value) == "ON_STATION" and s.tick >= tick
+        ]
+        rows = [
+            r for r in result.evidence if r.contact_id == cid and r.probe_id in RESPONDER_PROBES
+        ]
+        what = f"responder: {kind} {cid} dispatched t={tick * tick_s:.0f} s"
+        if station:
+            what += f", on station t={station[0].tick * tick_s:.0f} s"
+            ranges = [s.distance_to_target_m for s in station if s.distance_to_target_m is not None]
+            if ranges:
+                what += f" at {min(ranges):.0f} m (standoff 25 m)"
+        found = search_position(rows)
+        if kind == "search":
+            what += (
+                f", found at {found[0]:.6f}, {found[1]:.6f}" if found else ", not found in the box"
+            )
+        visual = [r for r in rows if r.feature is FeatureName.VISUAL_CLASS]
+        if visual:
+            what += f", visual_class {visual[-1].value} ({visual[-1].confidence})"
+        parts.append(what)
+    return " ; ".join(parts) or "responder: docked, no dispatch before the call was made"
+
+
+# --- WO-088D end ---
+
+
 def run_step(
     step: DemoStep,
     *,
@@ -238,6 +282,8 @@ def run_step(
             scenario = with_toggles(scenario, step)
         seed = scenario.seed if step.seed is None else step.seed
         outcome = headline(executor.run_scenario(scenario, seed), seed, scenario.duration_ticks)
+        if not (step.kind == TWIST or twist_action):  # WO-088D: the look / search beat
+            notes.append(responder_note(scenario, seed))
     if step.approve:
         notes.append(APPROVE_PENDING)
     notes.extend(step.pending)

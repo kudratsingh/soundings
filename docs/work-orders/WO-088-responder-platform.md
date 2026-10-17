@@ -95,3 +95,13 @@ ask (the responder look and search are ask-rung probes); hand to a person (a sec
 
 ## Done
 PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+
+## Part D done
+2026-10-17 11:06 PDT · branch `wo/088d-responder-integration` · the real `soundings.sim.responder.Responder` behind the `ResponderPort` Protocol everywhere a run is built for the UI, the demo and the catalog verifier.
+- Factory: `soundings.runner.make_responder(harbor, tick_s)` / `DEFAULT_RESPONDER = "config"`; `ScenarioRunnerV3.start/run` and `RunEngine.start` default to it; `responder=None` opts out; runner v2 and `stream_events` keep none unless asked. The investigation and ladder packages still import nothing from `soundings.sim` (the run's `ResponderSession` in `soundings/investigation_wiring.py` wraps the injected port).
+- Dock: 33.7405, -118.2668 (pier at the east end of `inner_basin_research`; demo value; DECISIONS 2026-10-17 11:06 PDT).
+- Search: one lane spacing (`search_track_spacing_m`, 50 m) for the lawnmower, the ETA and the sensor window; datum first; the flown box is the drift box at arrival. S02 seed 3: dispatched at tick 598, finds the glider at tick ~700 within 4 m of the flown box centre; the second LOST_VEHICLE notice carries the position.
+- Look: dispatched when chosen, stepped every tick, lands at the real ETA + 20 s settle; reads only ON_STATION (S03 seed 5: on station at tick 441, depth row confidence 0.9 x 25 / 29.66). S05/S06 primaries: no look (the call is made 20 s after the hail; routes are 226-381 s) - open question.
+- Catalog with the responder: terminal states, graded interruptions and expected-block results unchanged (tests/test_responder_integration.py).
+- Battery: `soundings.physics.battery_drain_min` not on main; the local cubic law stays.
+

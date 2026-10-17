@@ -46,6 +46,7 @@ def start_run(body: StartRunBody) -> dict[str, Any]:
             toggles=body.toggles,
             use_llm=body.use_llm,
             source=body.source,
+            responder=True,  # WO-088D: UI runs have the harbor's real responder
         )
     except UnknownScenarioError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
