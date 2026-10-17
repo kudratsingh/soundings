@@ -30,6 +30,8 @@ Say this once at the start of each session: detection is simulated for this demo
 | 2 | step 2 (0:30): S02, filed glider goes silent; lost-vehicle report with a search box goes to the operator, not the watch officer | `scenarios/S02-filed-vehicle-gone-silent.yaml` |
 | 3 | step 7 (4:00): catalog vs close-the-berth vs send-everything-to-a-human, shutdown-minutes and the "$0: no mentor-validated figure yet" label | `artifacts/eval/report.md` if present; otherwise `config/ladder.yaml` `costs` and `config/eval.yaml` `baselines` |
 
+**If merged by 10:00:** Busy Tuesday (WO-080, 40 filed plans) and conflict detection at filing (WO-081). Show one plan flagged for overlapping another in area, depth band and window. This is the "flight plan for the water" story, and it feeds question 1. Not on `main` as of 06:45 PDT.
+
 **Have open:** `config/ladder.yaml` (the `boundary` table: what decides alone, what runs under standing orders, what a person approves) · `config/standing_orders.yaml` · `docs/DECK-INPUTS.md` ("Second customer and their Tuesday").
 
 <div style="page-break-after: always"></div>
