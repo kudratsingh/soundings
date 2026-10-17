@@ -13,6 +13,7 @@ any contact is AWAITING_APPROVAL), and the stream is the v3 stream event for eve
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -250,6 +251,10 @@ class DeferredSteppedSource:
         self._inner.annotate(annotator)
 
     def pull(self, until_t_s: float) -> int:
+        """Step the built run; an unpaced pull (``inf``) waits for the build instead of
+        spinning (the engine's speed-0 fill loops until the stream is exhausted)."""
+        if self._inner is None and until_t_s == math.inf:
+            self._ready.wait()
         inner = self._inner
         return 0 if inner is None else inner.pull(until_t_s)
 
