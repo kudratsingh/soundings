@@ -7,8 +7,9 @@
 # through POST /api/runs) or action (named; see soundings/demo/script.py ACTIONS for the
 # WO that ships each one; until then presenter mode shows caption + spotlight and logs
 # "action pending WO-0xx"), optional beats (pending actions inside a scenario step),
-# optional spotlight (element to highlight), optional pause_for_click, and say (a short
-# line for the headless transcript). `end` is when the last shot ends.
+# optional spotlight (element to highlight), optional pause_for_click, optional subcaption
+# (WO-088: a second, smaller caption line), and say (a short line for the headless
+# transcript). `end` is when the last shot ends.
 end: "3:00"
 steps:
   # TODO(WO-080): use BT-01 for the cold open and Busy Tuesday once scenarios/BT-01.yaml is on main.
@@ -33,14 +34,16 @@ steps:
     beats: [file_plan_qr, propose_slot, vessel_advisory]
     spotlight: state-timeline
     caption: "Busy Tuesday. Filed jobs clear at ask; a plan is filed from a phone, conflict → proposed slot → accepted."
-    say: "Busy Tuesday at 20x. Filed jobs clear at ask."
+    say: "Busy Tuesday at 20x. Filed jobs clear at ask. A silent glider is found in the drift box."
   - t: "1:00"
     scenario: S05
     speed: 1x
     spotlight: evidence-ledger
     pause_for_click: true
     caption: "Our work stops here. The call is a person's."
-    say: "Harbor Night. Unfiled, closing on the fuel berth, no reply. Hold, SITREP, approve, handed off."
+    # WO-088: the look beat before the hold (the responder is a probe at rung ask).
+    subcaption: "The platform goes to look. It never goes closer than 25 m. The call is still a person's."
+    say: "Harbor Night. Unfiled, closing on the fuel berth, no reply. The platform goes to look at 25 m standoff. Hold, SITREP, approve, handed off."
   - t: "1:50"
     action: twist_toggles
     scenario_ref: S05

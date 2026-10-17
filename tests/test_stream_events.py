@@ -77,6 +77,25 @@ def _sample(s02: list[StreamEvent]) -> dict[str, StreamEvent]:
         ),
     )
     # --- WO-089 end ---
+    # --- WO-088 begin ---
+    out["responder"] = ev.ResponderEvent(
+        **env,
+        payload=ev.ResponderPayload(
+            id="resp_1",
+            state="ON_STATION",
+            lat=33.736,
+            lon=-118.262,
+            heading_deg=90.0,
+            speed_mps=1.5,
+            battery_min=71.5,
+            battery_capacity_min=90.0,
+            standoff_m=25.0,
+            target_contact_id="c-0001",
+            distance_to_target_m=25.0,
+            trail=[ev.ResponderTrailPoint(tick=2, lat=33.736, lon=-118.262)],
+        ),
+    )
+    # --- WO-088 end ---
     return out
 
 

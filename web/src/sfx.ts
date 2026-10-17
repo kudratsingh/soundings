@@ -1,6 +1,7 @@
 // Sound events (WO-062P). One module, fed by the same WebSocket events the audit log
 // records: each `transition` into a sounding state, and a run that starts with twist
-// toggles. Routine ticks, evidence rows and rungs make no sound. The five files are made
+// toggles, and (WO-088) a `responder` event that starts a dispatch to look. Routine ticks,
+// evidence rows and rungs make no sound. The files (five, plus WO-088's one) are made
 // by scripts/gen_sfx.py (numpy, -18 dBFS peak, each < 1 s) and served from /sfx/.
 //
 // Mute: presenter mode defaults to UNMUTED, the normal screen to muted; each mode keeps its
@@ -10,9 +11,26 @@ import { useEffect, useRef } from 'react'
 import type { LadderState } from './events'
 import type { RunState, TimelineEntry } from './useRun'
 
-export type SoundName = 'hail_ping' | 'advisory_chime' | 'hold_tone' | 'handoff_chime' | 'twist_klaxon_lite'
+export type SoundName =
+  | 'hail_ping'
+  | 'advisory_chime'
+  | 'hold_tone'
+  | 'handoff_chime'
+  | 'twist_klaxon_lite'
+  // --- WO-088 begin ---
+  | 'responder_dispatch'
+// --- WO-088 end ---
 
-export const SOUND_NAMES: SoundName[] = ['hail_ping', 'advisory_chime', 'hold_tone', 'handoff_chime', 'twist_klaxon_lite']
+export const SOUND_NAMES: SoundName[] = [
+  'hail_ping',
+  'advisory_chime',
+  'hold_tone',
+  'handoff_chime',
+  'twist_klaxon_lite',
+  // --- WO-088 begin ---
+  'responder_dispatch',
+  // --- WO-088 end ---
+]
 
 /** A transition into one of these states is the audit event that sounds. */
 export const STATE_SOUND: Partial<Record<LadderState, SoundName>> = {
@@ -24,6 +42,16 @@ export const STATE_SOUND: Partial<Record<LadderState, SoundName>> = {
 
 /** A run whose run_started carries toggles (or a presenter twist step) sounds this. */
 export const TWIST_SOUND: SoundName = 'twist_klaxon_lite'
+
+// --- WO-088 begin ---
+/** A `responder` event that starts a dispatch to look sounds this (two short notes). */
+export const RESPONDER_DISPATCH_SOUND: SoundName = 'responder_dispatch'
+
+/** How many dispatch cues are new since `seen` (never negative). Pure. */
+export function newDispatches(seen: number, total: number): number {
+  return Math.max(0, total - seen)
+}
+// --- WO-088 end ---
 
 /** The same sound at most once per window, so a 20x replay does not stack pings. */
 export const MIN_GAP_MS = 250
@@ -123,4 +151,16 @@ export function useSfx(run: RunState, muted: boolean): void {
       for (const sound of soundsForTransitions(fresh)) playSound(sound, mutedRef.current)
     }
   }, [run.runId, run.started, run.timeline])
+
+  // --- WO-088 begin ---
+  const dispatchSeen = useRef<{ runId: string | null; n: number }>({ runId: null, n: 0 })
+  useEffect(() => {
+    if (dispatchSeen.current.runId !== run.runId) dispatchSeen.current = { runId: run.runId, n: 0 }
+    const cur = dispatchSeen.current
+    if (newDispatches(cur.n, run.responderDispatches) > 0) {
+      cur.n = run.responderDispatches
+      playSound(RESPONDER_DISPATCH_SOUND, mutedRef.current)
+    }
+  }, [run.runId, run.responderDispatches])
+  // --- WO-088 end ---
 }
