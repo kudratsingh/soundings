@@ -1141,6 +1141,7 @@ from soundings.investigation.posterior import (  # noqa: E402
 )
 from soundings.investigation.probes import (  # noqa: E402  # WO-088
     ResponderPort,
+    latency_ticks,  # WO-088D
     run_probe,
     search_position,
 )
@@ -1148,6 +1149,8 @@ from soundings.investigation_wiring import (  # noqa: E402
     DEFAULT_VIOLATIONS_PATH,
     InvestigationHandle,
     ProbeWorld,
+    ResponderSession,  # WO-088D
+    advance_responder,  # WO-088D
     make_kit,
     responder_available,  # WO-088
 )
@@ -1156,6 +1159,34 @@ from soundings.investigation_wiring import (  # noqa: E402
 RESPONDER_SOURCE = "responder"
 """``ProbeCall.source`` of a dispatch the runner makes itself (the S02 search beat)."""
 # --- WO-088 end ---
+
+# --- WO-088D begin ---
+DEFAULT_RESPONDER = "config"
+"""``responder="config"``: the harbor's real responder, built from ``config/responder.yaml``
+(``make_responder``). ``responder=None`` keeps a run without one (unit tests, evals)."""
+
+ResponderOption = Any
+"""A ``ResponderPort``, ``None`` (no responder) or ``DEFAULT_RESPONDER``."""
+
+
+def make_responder(harbor: Harbor, tick_s: float, path: str | Path | None = None) -> Any:
+    """The harbor's responder (``soundings.sim.responder.Responder``) from
+    ``config/responder.yaml``: a mobile probe at rung ask, docked at its pier."""
+    from soundings.sim.responder import Responder, load_responder_config
+
+    return Responder(load_responder_config(path), harbor, tick_s=tick_s)
+
+
+def resolve_responder(option: ResponderOption, harbor: Harbor, tick_s: float) -> Any:
+    """``DEFAULT_RESPONDER`` -> a fresh ``make_responder``; anything else as given."""
+    if isinstance(option, str):
+        if option != DEFAULT_RESPONDER:
+            raise ValueError(f"unknown responder option {option!r}")
+        return make_responder(harbor, tick_s)
+    return option
+
+
+# --- WO-088D end ---
 
 OUTCOME_STATES: dict[StopOutcome, LadderState] = {
     StopOutcome.RESOLVED_BENIGN: S.RESOLVED_BENIGN,
@@ -1227,6 +1258,12 @@ class RunResultV2(RunResult):
     # --- WO-094 begin ---
     carryovers: tuple[CarryOver, ...] = ()
     # --- WO-094 end ---
+    # --- WO-088D begin ---
+    responder_trail: tuple[Any, ...] = ()
+    """The responder's snapshots, one per tick it was stepped (empty without one)."""
+    responder_dispatches: tuple[tuple[str, str, int, bool], ...] = ()
+    """``(kind, contact_id, tick, accepted)`` for every dispatch asked for."""
+    # --- WO-088D end ---
 
 
 def nested_log_text(lines: Iterable[str]) -> str:
@@ -1243,10 +1280,15 @@ class _V2Run(_V1Run):
         llm_roles: bool,
         violations_path: Path,
         fixture_store: Any,
-        responder: ResponderPort | None = None,  # WO-088
+        responder: ResponderPort | str | None = None,  # WO-088
     ) -> None:
         super().__init__(runner)
         sc = runner.scenario
+        # --- WO-088D begin ---
+        port = resolve_responder(responder, self.harbor, self.tick_s)
+        self.session = None if port is None else ResponderSession(port)
+        responder = self.session
+        # --- WO-088D end ---
         world = ProbeWorld(
             run=self.sim,
             scenario=sc,
@@ -1311,7 +1353,8 @@ class _V2Run(_V1Run):
         if world.responder is None or not responder_available(world, c.cid, self.table, tick):
             return
         ctx = world.context(c.cid, tick, self.kit.rung)
-        ctx = dataclasses.replace(ctx, search_box=notice.search_box)
+        searched = self.search_box_at_arrival(notice.search_box, tick)  # WO-088D
+        ctx = dataclasses.replace(ctx, search_box=searched)
         res = run_probe(ProbeId.RESPONDER_SEARCH_BOX, ctx, self.table, cache=self.kit.cache)
         self.calls.append(
             ProbeCall(
@@ -1326,12 +1369,13 @@ class _V2Run(_V1Run):
             )
         )
         ids = tuple(sorted({r.row_id for r in res.rows}))
+        result_tick = max((r.t for r in res.rows), default=res.landed_tick)  # WO-088D
         line = {
             "case_id": case.case_id,
             "contact_id": c.cid,
             "probe_id": res.probe_id,
             "sent_tick": res.sent_tick,
-            "landed_tick": res.landed_tick,
+            "landed_tick": result_tick,  # WO-088D: a find reports when it was made
             "rows": list(ids),
         }
         self.nested.append(canonical_json({"responder": line}))
@@ -1345,13 +1389,19 @@ class _V2Run(_V1Run):
         )
         text = (
             f"responder searched the drift box (dispatched at tick {tick}, result at tick "
-            f"{res.landed_tick}): {where}"
+            f"{result_tick}): {where}"
         )
+        if searched is not notice.search_box:  # WO-088D: the box it actually flew
+            text += (
+                f"; box drifted to tick {searched.to_tick}: centre "
+                f"{searched.center_lat:.6f}, {searched.center_lon:.6f}, "
+                f"radius {searched.radius_m:.0f} m"
+            )
         extra = NoticeLine(section="Search box", text=text, evidence_row_ids=ids)
         self.notices.append(
             notice.model_copy(
                 update={
-                    "tick": res.landed_tick,
+                    "tick": result_tick,  # WO-088D
                     "lines": (*notice.lines, extra),
                     "evidence_row_ids": tuple(sorted({*notice.evidence_row_ids, *ids})),
                 }
@@ -1531,6 +1581,28 @@ class _V2Run(_V1Run):
         self.nested.append(canonical_json({"carryover": record.canonical()}))
 
     # --- WO-094 end ---
+    # --- WO-088D begin ---
+    def search_box_at_arrival(self, box: SearchBox, tick: int) -> SearchBox:
+        """The drift box the responder flies: the notice's box advected and grown (the
+        same drift model, ``drift_search_box``) to the tick the responder reaches it.
+        Without a real responder (no route time to the box) the notice's box as is."""
+        port = self.kit.world.responder
+        if port is None or not callable(getattr(port, "search_eta_s", None)):
+            return box
+        snap = port.snapshot
+        transit_s = float(port.travel_time_s(snap.lat, snap.lon, box.center_lat, box.center_lon))
+        arrive = tick + latency_ticks(round(transit_s, 6), self.tick_s)
+        return drift_search_box(
+            box.anchor,
+            arrive,
+            self.tick_s,
+            self.r.current_field,
+            self.tide_phase(box.anchor.tick),
+            self.cfg,
+            assumption_row_id=box.assumption_row_id,
+        )
+
+    # --- WO-088D end ---
 
     # --- log --------------------------------------------------------------------------------
 
@@ -1560,6 +1632,7 @@ class _V2Run(_V1Run):
     # --- stepping ---------------------------------------------------------------------------
 
     def step(self, tick: int) -> None:
+        advance_responder(self.kit.world, tick, self.kit.rung)  # WO-088D: a point per tick
         super().step(tick)
         self.flush_ladder()
         for case_id in sorted(self.handles, key=_case_sort_key):
@@ -1712,6 +1785,12 @@ class _V2Run(_V1Run):
             # --- WO-094 begin ---
             carryovers=tuple(self.carry[k] for k in sorted(self.carry, key=_case_sort_key)),
             # --- WO-094 end ---
+            # --- WO-088D begin ---
+            responder_trail=()
+            if self.session is None
+            else tuple(getattr(self.session.port, "trail", ())),
+            responder_dispatches=() if self.session is None else self.session.dispatches(),
+            # --- WO-088D end ---
         )
 
 
@@ -1724,7 +1803,7 @@ class ScenarioRunnerV2(ScenarioRunner):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
-        responder: ResponderPort | None = None,
+        responder: ResponderPort | str | None = None,
     ) -> RunResultV2:
         """``llm_roles`` defaults to False (DECISIONS 23:05); when on, replay only.
         ``responder`` (WO-088, default None: the catalog run) adds the S02 search beat
@@ -2279,7 +2358,7 @@ class RunSession:
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
-        responder: ResponderPort | None = None,
+        responder: ResponderPort | str | None = DEFAULT_RESPONDER,  # WO-088D
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
@@ -2694,7 +2773,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
-        responder: ResponderPort | None = None,
+        responder: ResponderPort | str | None = DEFAULT_RESPONDER,  # WO-088D
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
@@ -2728,7 +2807,7 @@ class ScenarioRunnerV3(ScenarioRunnerV2):
         llm_roles: bool = False,
         violations_path: Path = DEFAULT_VIOLATIONS_PATH,
         fixture_store: Any = None,
-        responder: ResponderPort | None = None,
+        responder: ResponderPort | str | None = DEFAULT_RESPONDER,  # WO-088D
         orders_path: str | Path | None = STANDING_ORDERS_PATH,
         unsigned: bool = False,
         approver: ApproverPort | None = None,
