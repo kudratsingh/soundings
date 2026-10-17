@@ -113,10 +113,13 @@ def capture(base: str, out: Path, executable_path: str | None) -> None:
 
         page = _page(browser)
         page.goto(f"{base}/?scenario=S05&seed=11&speed=20&tiles=off")
+        # Over runner v3 (WO-060 part B) the auto-selected case is the re-acquired lineage
+        # on the ladder, so pin the case that is investigating (c-0006 at about t 1,150 s).
+        row = "[data-testid=case-row]:has-text('INVESTIGATING')"
+        page.wait_for_selector(row, timeout=120_000)
+        page.locator(row).first.click()  # pin the case so it holds still
         step = "[data-testid=case-view] [data-step=investigate][data-status=current]"
-        page.wait_for_selector(step, timeout=120_000)
-        page.wait_for_timeout(1_500)
-        page.locator("[data-testid=case-row]").first.click()  # pin the case so it holds still
+        page.wait_for_selector(step, timeout=15_000)
         page.wait_for_timeout(400)
         page.locator(step).first.evaluate("el => el.scrollIntoView({block: 'start'})")
         page.wait_for_timeout(400)
