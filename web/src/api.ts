@@ -117,3 +117,41 @@ export function runSocketUrl(runId: string, after: number): string {
 
 // --- WO-062 block (demo runner) ---
 // --- end WO-062 block ---
+
+// --- WO-089 begin: physics cards and sensor ranges ---
+export interface PhysicsParam {
+  key: string
+  name: string
+  value: number | string
+  unit: string
+  source: string
+  label: string
+}
+
+export interface PhysicsCard {
+  name: string
+  equation: string
+  parameters: PhysicsParam[]
+  not_modeled: string[]
+}
+
+export interface PhysicsNode {
+  node_id: string
+  name: string
+  effective_range_m: number
+  nl_db: number
+}
+
+export interface PhysicsInfo {
+  heading: string
+  label: string
+  cards: PhysicsCard[]
+  nodes: PhysicsNode[]
+  ring_class: string
+  sea_state: number | null
+  config: string
+  pending: string | null
+}
+
+export const fetchPhysics = () => getJson<PhysicsInfo>('/api/physics')
+// --- WO-089 end ---

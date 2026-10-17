@@ -1136,6 +1136,98 @@
       "title": "SearchBox",
       "type": "object"
     },
+    "SensorRangeRow": {
+      "additionalProperties": false,
+      "description": "One hydrophone node's ring: the passive-sonar p = 0.5 range at its current noise.",
+      "properties": {
+        "effective_range_m": {
+          "minimum": 0.0,
+          "title": "Effective Range M",
+          "type": "number"
+        },
+        "nl_db": {
+          "title": "Nl Db",
+          "type": "number"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "effective_range_m",
+        "nl_db"
+      ],
+      "title": "SensorRangeRow",
+      "type": "object"
+    },
+    "SensorRangesEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SensorRangesPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "sensor_ranges",
+          "default": "sensor_ranges",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "SensorRangesEvent",
+      "type": "object"
+    },
+    "SensorRangesPayload": {
+      "additionalProperties": false,
+      "description": "Every node's ring, sent every tick after the ``tick`` event, sorted by node id\n(simulated physics, ``config/physics.yaml`` demo values; a vessel transit raises NL and\nshrinks the ring).",
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/SensorRangeRow"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "SensorRangesPayload",
+      "type": "object"
+    },
     "SitrepEvent": {
       "additionalProperties": false,
       "properties": {
@@ -1510,6 +1602,7 @@
       "run_finished": "#/$defs/RunFinished",
       "run_started": "#/$defs/RunStarted",
       "rung": "#/$defs/RungEvent",
+      "sensor_ranges": "#/$defs/SensorRangesEvent",
       "sitrep": "#/$defs/SitrepEvent",
       "tick": "#/$defs/TickEvent",
       "transition": "#/$defs/TransitionEvent"
@@ -1549,6 +1642,9 @@
     },
     {
       "$ref": "#/$defs/ErrorEvent"
+    },
+    {
+      "$ref": "#/$defs/SensorRangesEvent"
     }
   ],
   "title": "SoundingsStreamEvent",
