@@ -48,7 +48,7 @@ EVAL_PENDING = "eval: pending WO-051"
 APPROVE_PENDING = "approve: wired with runner v3 (WO-043)"
 OVERLAY_NOTE = "presenter overlay"
 
-# Which case state headlines a run: the most consequential ground-truth case first.
+# Which case state headlines a run: the most consequential physical case first.
 _HEADLINE_ORDER: tuple[LadderState, ...] = (
     LadderState.FAILED,
     LadderState.HANDED_OFF,
@@ -76,8 +76,8 @@ class CaseView:
     case_id: str
     state: LadderState
     tick: int
-    ground_truth: bool
-    """False for a sim false alarm (truth id ``fa-NNNN``); presentation only."""
+    physical: bool
+    """False for a sim false alarm (graded by ``soundings.eval.truth``); presentation only."""
 
 
 @dataclass(frozen=True)
@@ -100,29 +100,28 @@ class RunnerV1Executor:
     """``soundings.runner.ScenarioRunner`` as merged (runner v1, the ask rung)."""
 
     def run_scenario(self, scenario: Scenario, seed: int) -> Sequence[CaseView]:
+        from soundings.eval.truth import physical_contact_ids
         from soundings.runner import ScenarioRunner
 
         result = ScenarioRunner(scenario, seed=seed).run()
-        truth = result.sim.contact_truth
+        physical = physical_contact_ids(result.sim)
         return [
             CaseView(
                 case_id=c.case_id,
                 state=c.state,
                 tick=c.closed_tick if c.closed_tick is not None else c.opened_tick,
-                ground_truth=(
-                    c.contact_id in truth and not truth[c.contact_id].gt_id.startswith("fa-")
-                ),
+                physical=c.contact_id in physical,
             )
             for c in result.cases
         ]
 
 
 def headline(cases: Sequence[CaseView], seed: int, n_ticks_fallback: int = 0) -> StepOutcome:
-    """The headline of a run: among ground-truth cases (all cases if none), the state
+    """The headline of a run: among physical cases (all cases if none), the state
     ranked first in ``_HEADLINE_ORDER``, at the latest tick that state was reached."""
     counts = Counter(c.state.value for c in cases)
     count_items = tuple(sorted(counts.items()))
-    pool = [c for c in cases if c.ground_truth] or list(cases)
+    pool = [c for c in cases if c.physical] or list(cases)
     if not pool:
         return StepOutcome(LadderState.WATCHING, n_ticks_fallback, seed, count_items)
     best = min(pool, key=lambda c: (_RANK.get(c.state, len(_RANK)), c.state.value))

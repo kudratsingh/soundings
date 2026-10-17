@@ -32,7 +32,7 @@ Evidence: [eval pending — run `make eval && make deck` to fill this sentence f
 **Twist 3 — (pending notice).** Must produce a toggle, scenario, or feature with a test. What changed / why / proof: TBD.
 
 ## Built with (tools used)
-- **Design pattern:** the owner's open-source agent framework, Incident Commander — typed states, a checkpoint per transition, an idempotency key per action, deterministic guards — reused as the design; all code here was written this weekend.
+- **Design pattern:** a state-machine agent design the owner has used before.
 - **Anthropic API** (probe planner, hypothesis writer, SITREP writer, twist parser) — replayed from recorded fixtures by default, with a deterministic fallback for every role; no model output becomes a control.
 - **OpenSeaMap** tiles on **Leaflet** (React + Vite + TypeScript single screen).
 - **FastAPI** + Pydantic v2 + WebSocket live contact feed; SQLModel on SQLite (registry, contacts, evidence, audit log).

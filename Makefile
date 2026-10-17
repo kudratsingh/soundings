@@ -38,7 +38,7 @@ sim-plot:
 	uv run python -m soundings.sim.plot --scenario $(scenario) --out artifacts/$(scenario).png
 
 pol:
-	uv run python -m soundings.investigation.pol --seed 42 --days 28 --out data/pol_table.json
+	uv run python -m soundings.sim.normal_month --seed 42 --days 28 --out data/pol_table.json
 
 demo:
 	uv run python -m soundings.demo --script docs/demo-script.yaml --mode replay

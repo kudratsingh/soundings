@@ -91,6 +91,7 @@ from soundings.matcher import (
     registry_lookup,
     registry_lookup_rows,
 )
+from soundings.ports import ObservedTracks, WorldRun
 from soundings.probe_keys import TICK_BUCKET_S, idempotency_key, tick_bucket
 from soundings.registry.models import PlanView
 from soundings.registry.store import RegistryStore
@@ -109,7 +110,6 @@ from soundings.schemas.geo import to_local_m
 from soundings.schemas.harbor import Harbor
 from soundings.schemas.scenario import Scenario
 from soundings.schemas.track import Track
-from soundings.sim.types import SimRun
 
 PROBE_SOURCE_PREFIX: Final = "probe:"
 PLAN_HORIZON_TICK: Final = 10**9
@@ -307,7 +307,7 @@ class ProbeContext:
     config files.
     """
 
-    run: SimRun
+    run: WorldRun
     scenario: Scenario
     harbor: Harbor
     current_field: _VectorField | CurrentAt
@@ -482,7 +482,7 @@ def latest_per_feature(rows: Sequence[EvidenceRow]) -> list[EvidenceRow]:
     return list(best.values())
 
 
-def track_upto(run: SimRun, contact_id: str, tick: int) -> Track | None:
+def track_upto(run: ObservedTracks, contact_id: str, tick: int) -> Track | None:
     """The observed track of ``contact_id`` truncated at ``tick`` (None if no point)."""
     track = run.tracks.get(contact_id)
     if track is None:
@@ -719,11 +719,12 @@ def _ask_operator_by_phone(
 
 
 def _simulated_path(ctx: ProbeContext) -> list[tuple[int, float, float, float]]:
-    """(tick, lat, lon, depth) of the simulated contact behind ``ctx.contact_id``."""
-    who = ctx.run.contact_truth.get(ctx.contact_id)
-    if who is None:
-        return []
-    return [(p.tick, p.lat, p.lon, p.depth_m) for p in ctx.run.truth_paths.get(who.gt_id, [])]
+    """(tick, lat, lon, depth) a watch officer sent to look would see.
+
+    The world answers this (``WorldRun.eyes_on_path``, inside the simulator); the probe
+    never reads ground truth itself.
+    """
+    return list(ctx.run.eyes_on_path(ctx.contact_id))
 
 
 def _request_watch_officer_look(

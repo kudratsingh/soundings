@@ -3,19 +3,20 @@ scenario ground truth. No real modem protocol, authentication, or signal process
 modelled.
 
 The ``acoustic_hail`` probe of docs/SPEC-INVESTIGATION.md section 5 (rung ask, $0.01,
-20 s). ``HailSimulator.send`` is a simulated physical exchange with the contact, so it
-may read the contact's scenario registry spec (``modem_id``, ``plan_id``) and its
-``ContactTruth`` (``replies_to_hail``, ``silent_after_tick``). Nothing it returns names a
-ground-truth hypothesis: the evidence rows carry only what a harbor would hear (did a
-reply come, which modem id, is that modem on the known-operator table).
+20 s). ``HailSimulator.send`` is a simulated physical exchange with the contact. It asks
+the world (``soundings.ports.WorldRun.hail_responder``, answered inside the simulator)
+how the thing behind an observed id would respond, and reads that contact's scenario
+registry spec (``modem_id``, ``plan_id``). It reads no ground-truth field itself, and
+nothing it returns names a hypothesis: the evidence rows carry only what a harbor would
+hear (did a reply come, which modem id, is that modem on the known-operator table).
 
 Reply rule, evaluated at ``sent_tick``; the reply lands at ``sent_tick + latency_ticks``:
 
-1. An observed id with no ``contact_truth`` entry, or one whose ground truth is a false
-   alarm (``gt_id`` ``fa-*``), does not reply.
-2. A contact replies if ``replies_to_hail`` and (``silent_after_tick`` is None or
-   ``sent_tick < silent_after_tick``). ``ContactTruth`` is read, not the scenario file,
-   so the ``contact_goes_quiet`` toggle is honoured.
+1. An observed id the world has no responder for (no source, or a sensor false alarm)
+   does not reply.
+2. A contact replies if ``HailResponder.answers_at(sent_tick)``: it is set up to reply
+   and has not gone quiet (the ``contact_goes_quiet`` toggle is honoured, because the
+   simulator answers from the run, not the scenario file).
 3. With ``reply_loss_prob > 0`` a reply is lost with that probability, drawn from
    ``numpy.random.default_rng([seed, int(stable_hash([contact_id, sent_tick])[:8], 16)])``.
    There is no shared generator: the draw depends on seed, contact and tick only.
@@ -27,7 +28,7 @@ Reply rule, evaluated at ``sent_tick``; the reply lands at ``sent_tick + latency
    never enters (DECISIONS 2026-10-16 23:05): the matcher (WO-022) judges filing.
 6. ``operator_known`` is whether the modem id is on the ``KnownOperatorTable``.
 
-The hail reads the world and never changes it: ``send`` takes the ``SimRun`` read-only and
+The hail reads the world and never changes it: ``send`` takes the run read-only and
 caches by the shared SPEC section 5 idempotency key (``soundings.probe_keys``), so a second
 send in the same 30 s bucket returns the cached result and draws nothing.
 
@@ -53,6 +54,7 @@ import yaml
 from pydantic import StrictBool, StrictStr, StringConstraints, model_validator
 
 from soundings.canonical import round6, stable_hash
+from soundings.ports import HailResponder, WorldRun
 from soundings.probe_keys import idempotency_key, tick_bucket
 from soundings.schemas._base import (
     CONFIG_DIR,
@@ -68,7 +70,6 @@ from soundings.schemas.denylist import FreeText
 from soundings.schemas.enums import EvidenceKind, FeatureName, HailReply, ProbeId, Unit
 from soundings.schemas.evidence import UNKNOWN, ContactId, EvidenceRow, EvidenceValue
 from soundings.schemas.scenario import Scenario, ScenarioContact
-from soundings.sim.types import ContactTruth, SimRun
 
 HONESTY_NOTE = (
     "Simulated acoustic challenge-response for this demonstration. Replies come from "
@@ -85,8 +86,6 @@ HAIL_SOURCE = "probe:acoustic_hail"
 REPLY_CONFIDENCE = 1.0
 NO_REPLY_CONFIDENCE = 0.9
 """Stress-test confidence on the rows of a hail that got no reply (see module docstring)."""
-
-FALSE_ALARM_PREFIX = "fa-"
 
 IdempotencyKey = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -239,7 +238,7 @@ def loss_rng(seed: int, contact_id: str, sent_tick: int) -> np.random.Generator:
 
 
 class HailSimulator:
-    """Hails the observed contacts of one ``SimRun``.
+    """Hails the observed contacts of one run (any ``soundings.ports.WorldRun``).
 
     Deterministic in (scenario, seed, contact, tick); the run is only read.
     """
@@ -247,7 +246,7 @@ class HailSimulator:
     def __init__(
         self,
         scenario: Scenario,
-        run: SimRun,
+        run: WorldRun,
         *,
         seed: int,
         known: KnownOperatorTable | None = None,
@@ -278,15 +277,8 @@ class HailSimulator:
         """The SPEC section 5 idempotency key of a hail to ``contact_id`` at ``tick``."""
         return idempotency_key(contact_id, HAIL_PROBE.value, {}, tick_bucket(tick, self.tick_s))
 
-    def _would_reply(self, truth: ContactTruth | None, sent_tick: int) -> bool:
-        if truth is None or truth.gt_id.startswith(FALSE_ALARM_PREFIX):
-            return False
-        if not truth.replies_to_hail:
-            return False
-        return truth.silent_after_tick is None or sent_tick < truth.silent_after_tick
-
-    def _modem_for(self, truth: ContactTruth) -> str | None:
-        contact = self._contacts.get(truth.gt_id)
+    def _modem_for(self, responder: HailResponder) -> str | None:
+        contact = self._contacts.get(responder.registry_contact_id)
         if contact is None:
             return None
         reg = contact.registry
@@ -304,12 +296,12 @@ class HailSimulator:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
-        truth = self._run.contact_truth.get(contact_id)
-        replied = self._would_reply(truth, tick)
+        responder = self._run.hail_responder(contact_id)
+        replied = responder is not None and responder.answers_at(tick)
         if replied and self._cfg.reply_loss_prob > 0.0:
             draw = float(loss_rng(self._seed, contact_id, tick).random())
             replied = draw >= self._cfg.reply_loss_prob
-        modem_id = self._modem_for(truth) if replied and truth is not None else None
+        modem_id = self._modem_for(responder) if replied and responder is not None else None
         if replied:
             well_formed = modem_id is not None and self._pattern.fullmatch(modem_id) is not None
             bucket = HailReply.VALID if well_formed else HailReply.INVALID
