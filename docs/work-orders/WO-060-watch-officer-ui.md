@@ -122,7 +122,7 @@ PR: · Merged commit: · Test summary: · STATE.md updated:
 - Approved dependency: Python `websockets` (runtime). Tier-2 recommendation = S05's AWAITING_APPROVAL request. While AWAITING_APPROVAL the UI paces at 1× with a configurable speed factor; ladder timers stay on sim ticks.
 
 ## Part A done (coordinator split)
-Recorded 2026-10-17 06:04 PDT. Branch `wo/060a-ui-core`. Built against runner v1 (WO-022) as merged; nothing in `soundings/runner.py`, `probes.py` or `planner.py` was touched.
+Recorded 2026-10-17 06:04 PDT. Branch `wo/060a-ui-core`, PR [#20](https://github.com/kudratsingh/soundings/pull/20). Built against runner v1 (WO-022) as merged; nothing in `soundings/runner.py`, `probes.py` or `planner.py` was touched.
 
 Built (public names as implemented):
 - `soundings/stream/events.py`: `SCHEMA_VERSION = 1`, `EventEnvelope` (`v, run_id, seq, tick, t_s`), the eleven event classes `RunStarted`, `TickEvent`, `EvidenceRowEvent`, `PosteriorEvent`, `TransitionEvent`, `RungEvent`, `ApprovalRequestEvent`, `ApprovalResultEvent`, `SitrepEvent`, `RunFinished`, `ErrorEvent` (each `type` + typed `payload`, `extra="forbid"`), the `StreamEvent` discriminated union, `parse_event`, `event_json` (canonical JSON, the wire and JSONL form), `export_json_schema()`, `POSTERIOR_LABEL`, `EVENT_TYPES`. Committed copy: `web/src/generated/stream-events.schema.json` (regenerate with `uv run python -c "import json; from soundings.stream.events import export_json_schema as e; open('web/src/generated/stream-events.schema.json','w').write(json.dumps(e(), indent=2, sort_keys=True)+'\n')"`).
