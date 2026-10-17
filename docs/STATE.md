@@ -1,14 +1,14 @@
 # STATE — read this first after CLAUDE.md
 
-Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; WO-041 merged; WO-022/030/050 in progress)
+Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; Phase 4 half; Phase 5 half)
 
 ## Where we are
-- **Phase 0 complete** (scaffold `25e7dbb`). **Phase 1 complete**: WO-010 schemas `6d7fd6c` (#1), WO-011 sim + catalog `32db5a7` (#3), WO-012 evidence table + pattern of life `26cea7d` (#7). `main` CI green, 809 tests, `make check` clean.
-- **Phase 2**: WO-020 registry `ff04e56` (#4) and WO-021 challenge-response `fcb8761` (#5) merged; WO-022 matcher + ask rung (runner v1) in progress.
-- **Phase 3**: WO-030 posterior in progress; WO-031 → 032 → 033 queued behind it and WO-022.
-- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) and WO-041 guards + signed standing orders `1848d92` (#9) merged; WO-042/043 queued.
-- **Phase 5**: WO-050 baselines in progress; WO-051 queued. **Phase 6**: WO-060/061/062 queued.
-- All work orders WO-010..WO-062 are on `main` with coordinator addenda; rulings in `docs/log/DECISIONS.md`. Zero paid runs.
+- **Phase 0 complete** (scaffold `25e7dbb`). **Phase 1 complete**: WO-010 `6d7fd6c` (#1), WO-011 `32db5a7` (#3), WO-012 `26cea7d` (#7).
+- **Phase 2 complete**: WO-020 registry `ff04e56` (#4), WO-021 challenge-response `fcb8761` (#5), WO-022 matcher + drift search box + re-acquisition + runner v1 `c2074f2` (#14). S01/S03 clear at ask with zero interruptions; S02 ends LOST_VEHICLE with a search box containing the true position.
+- **Phase 3**: WO-030 posterior `69bd327` (#11) merged; WO-031 probes + planner starting; WO-032 → WO-033 queued.
+- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) and WO-041 guards + signed standing orders `1848d92` (#9) merged; WO-042 SITREP + audit and WO-043 driver + runner v3 queued.
+- **Phase 5**: WO-050 baselines `f2e8bc3` (#13) merged; WO-051 eval harness queued. **Phase 6**: WO-060/061/062 queued.
+- `main` CI green; full suite ≈ 1,050 tests, `make check` clean. Zero paid runs.
 - Lens declared at submission: Crisis Mitigation (Track 01 Marine, NULL Labs).
 
 ## Owner directives in force (2026-10-16 ~22:00 PT)
@@ -25,8 +25,8 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | 012 | evidence table + features | merged | wo/012-evidence-table-and-features | #7 | 26cea7d | 809 passed |
 | 020 | registry | merged | wo/020-registry | #4 | ff04e56 | 330 passed (57 registry) |
 | 021 | challenge-response | merged | wo/021-challenge-response | #5 | fcb8761 | 395 passed (65 hail) |
-| 022 | matcher + ask rung | PR open, auto-merge on green CI | wo/022-matcher-ask-rung | [#14](https://github.com/kudratsingh/soundings/pull/14) | squash commit on main (see PR) | 1080 passed (91 WO-022: matcher 31, box 6, reacquire 9, ask rung 10, runner 27, rules 18) |
-| 030 | posterior | PR open, auto-merge on green CI | wo/030-posterior | (see PR) | squash commit on main (see PR) | 1043 passed after rebase on WO-050 (posterior 43, likelihood tables 8, catalog 13) |
+| 022 | matcher + ask rung | merged | wo/022-matcher-ask-rung | #14 | c2074f2 | see PR #14 |
+| 030 | posterior | merged | wo/030-posterior | #11 | 69bd327 | 1043 passed (test_posterior) |
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
@@ -34,7 +34,7 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
-| 050 | baselines | PR open, auto-merge on green CI | wo/050-baselines | (see PR) | squash commit on main (see PR) | 979 passed after rebase (29 WO-050: unit 24 incl. 10 interruption-table cases, integration 5) |
+| 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
 | 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
@@ -49,9 +49,9 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | domain / eval / deck | (unassigned; coordinator Kudrat) | | Phase 5, 7, 8, mentor liaison, Devpost |
 
 ## Next
-1. Phase 2 → WO-022 (critical path), then Phase 3 WO-031 → 032 → 033.
-2. Phase 4 WO-042 → 043 (runner v3), then Phase 6 WO-060/061 and Phase 5 WO-051, then WO-062 demo.
-3. Twist 1 (Fri 11:30 PM) has landed by the clock: when the owner pastes the notice, switch to `docs/TWIST-PLAYBOOK.md` on `twist/1-<slug>`.
+1. Phase 3: WO-031 → WO-032 → WO-033 (critical path to the CLI demo).
+2. Phase 4: WO-042 (after WO-032) → WO-043 runner v3 (after WO-033). Then Phase 6 WO-060/061, Phase 5 WO-051, WO-062 demo.
+3. Twist 1 landed by the clock at Fri 11:30 PM: when the owner pastes the notice, switch to `docs/TWIST-PLAYBOOK.md` on `twist/1-<slug>`.
 
 ## Blocked
 - Nothing. (Twist notices and Devpost steps need the owner.)
