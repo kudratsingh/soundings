@@ -233,24 +233,9 @@ def _expected(sid: str) -> Expected:
     return ScenarioRunner(sid).scenario.expected
 
 
-CATALOG_PARAMS = [
-    pytest.param(
-        sid,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "S04's re-acquired track (c-0009 from tick 366) carries registry rows at "
-                "confidence 0.57 (0.91 on the first track), so P(UNFILED_KNOWN_OPERATOR) "
-                "stays at 0.605 < benign_mass_resolve and the case ends in an uncertain "
-                "C_BUDGET handoff; the primary track resolves (test_s04_*). Open question "
-                "for the coordinator; no table or threshold was changed."
-            ),
-        ),
-    )
-    if sid == "S04"
-    else sid
-    for sid in CATALOG
-]
+# WO-094: S04's re-acquired track (c-0009) re-decides its prior C_KNOWN_OPERATOR outcome from
+# the carried rows (modem-confirmed identity), so the two former strict xfails pass.
+CATALOG_PARAMS = list(CATALOG)
 
 
 @pytest.mark.parametrize("sid", CATALOG_PARAMS)

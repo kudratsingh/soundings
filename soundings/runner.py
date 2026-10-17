@@ -1237,6 +1237,9 @@ class RunResultV2(RunResult):
     planner_choices: tuple[CasePlannerChoice, ...] = ()
     nested_log: tuple[str, ...] = ()
     nested_log_hash: str = ""
+    # --- WO-094 begin ---
+    carryovers: tuple[CarryOver, ...] = ()
+    # --- WO-094 end ---
 
 
 def nested_log_text(lines: Iterable[str]) -> str:
@@ -1287,6 +1290,10 @@ class _V2Run(_V1Run):
         self.case_interruptions: dict[str, int] = {}
         self.nested: list[str] = []
         self.logged = 0
+        # --- WO-094 begin ---
+        self.carry: dict[str, CarryOver] = {}
+        self.carry_stopping = load_stopping_config()
+        # --- WO-094 end ---
 
     # --- entering the investigation -----------------------------------------------------
 
@@ -1295,6 +1302,9 @@ class _V2Run(_V1Run):
         super().ask_reply(case, c, tick, hail)
         if len(self.notices) > sent and case.state is S.LOST_VEHICLE:  # WO-088
             self.responder_search_beat(case, c, self.notices[-1], tick)
+        # --- WO-094 begin ---
+        self.carry_confirm(case, c, tick)
+        # --- WO-094 end ---
         if case.state is S.INVESTIGATING and case.case_id not in self.handles:
             # Budget scope (DECISIONS 23:05): the ask-rung hails count as paid probes.
             ledger = InvestigationLedger(paid_used=len(set(case.hail_keys)))
@@ -1362,6 +1372,178 @@ class _V2Run(_V1Run):
         )
 
     # --- WO-088 end ---
+
+    # --- WO-094 begin ---
+    def open_handle(self, case: _Case, c: _Contact) -> None:
+        """One investigation handle per escalated case (as ``ask_reply`` opens it)."""
+        # Budget scope (DECISIONS 23:05): the ask-rung hails count as paid probes.
+        ledger = InvestigationLedger(paid_used=len(set(case.hail_keys)))
+        self.handles[case.case_id] = self.kit.handle(
+            c.cid, self.table, max_tick=self.sim.n_ticks - 1, ledger=ledger
+        )
+
+    def carry_prior(self, case: _Case) -> tuple[_Case, Recommendation] | None:
+        """The re-acquired lineage's last case and its recommendation, when that case ended
+        in a ``CARRYOVER_OUTCOMES`` state through the investigation's stop rule."""
+        old = case.reacquired_from
+        if old is None:
+            return None
+        ids = sorted((k for k, v in self.cases.items() if v.contact_id == old), key=_case_sort_key)
+        if not ids:
+            return None
+        prior = self.cases[ids[-1]]
+        rec = self.recs.get(prior.case_id)
+        if rec is None or rec.outcome not in CARRYOVER_OUTCOMES:
+            return None
+        if prior.state is not outcome_to_ladder_state(rec.outcome):
+            return None
+        return prior, rec
+
+    def ask_send(self, case: _Case, c: _Contact, tick: int) -> None:
+        """The WATCHING -> ASKING edge of a re-acquired case decides the carry-over."""
+        found = None
+        if not case.hail_keys and case.case_id not in self.carry and case.state is S.ASKING:
+            found = self.carry_prior(case)
+        if found is None:
+            super().ask_send(case, c, tick)
+            return
+        prior, rec = found
+        old = prior.contact_id
+        self.extract(c)
+        why_not = carryover_consistency(
+            self.table,
+            old,
+            c.cid,
+            old_first_tick=self.contacts[old].first_tick,
+            first_tick=c.first_tick,
+            stopping=self.carry_stopping,
+            speed_tol_mps=self.cfg.reacquire.speed_tol_mps,
+        )
+        age = carried_hail_age_s(self.table, old, tick, self.tick_s)
+        stale = carried_hail_stale(age, self.cfg.plan_watch.rehail_interval_s)
+        eligible = why_not is None
+        if why_not is not None:
+            reason = f"not carried: {why_not}"
+        elif stale:
+            reason = "carried hail is stale: re-hail first, then the stop rule decides"
+        else:
+            reason = "carried hail is fresh: the stop rule decides on the carried rows"
+        record = CarryOver(
+            case_id=case.case_id,
+            contact_id=c.cid,
+            old_contact_id=old,
+            old_case_id=prior.case_id,
+            prior_outcome=rec.outcome,
+            prior_rule=rec.rule_id,
+            tick=tick,
+            eligible=eligible,
+            reason=reason,
+            hail_age_s=age,
+            rehailed=eligible and stale,
+        )
+        self.carry[case.case_id] = record
+        self.nested.append(canonical_json({"carryover": record.canonical()}))
+        if not eligible or stale:
+            super().ask_send(case, c, tick)
+            return
+        cited = [
+            r.row_id
+            for f in (_F.REACQUIRED_FROM, _F.HAIL_REPLY, _F.REGISTRY_MATCH)
+            if (r := self.table.latest(c.cid, f)) is not None
+        ]
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.PROBE_RESULT,
+            S.INVESTIGATING,
+            reason_code=CARRYOVER_REASON,
+            row_ids=cited,
+            key=self.transition_key(case, CARRYOVER_REASON, tick),
+        )
+        case.investigation_pending = True
+        self.open_handle(case, c)
+
+    def carry_confirm(self, case: _Case, c: _Contact, tick: int) -> None:
+        """After the re-hail: the same modem confirms identity; the prior decision's
+        registry facts are re-derived for the new id when the fresh lookup agrees."""
+        record = self.carry.get(case.case_id)
+        if (
+            record is None
+            or not (record.eligible and record.rehailed)
+            or record.identity_confirmed
+            or case.state is not S.INVESTIGATING
+            or case.case_id in self.handles
+        ):
+            return
+        old = record.old_contact_id
+        fresh = _own_latest(self.table, c.cid, _F.MODEM_ID, c.first_tick)
+        prior_modem = self.table.latest(old, _F.MODEM_ID)
+        if (
+            fresh is None
+            or prior_modem is None
+            or fresh.source != HAIL_SOURCE
+            or fresh.value == UNKNOWN
+            or fresh.value != prior_modem.value
+            or not isinstance(fresh.confidence, float)
+            or not isinstance(prior_modem.confidence, float)
+        ):
+            self.carry[case.case_id] = dataclasses.replace(
+                record, reason=f"{record.reason}; identity not confirmed by modem"
+            )
+            return
+        anchor = self.table.latest(c.cid, _F.REACQUIRED_FROM)
+        assert anchor is not None  # carry_over_reacquired wrote it when the track opened
+        source = f"{CARRYOVER_SOURCE_PREFIX}{old}"
+        ident = EvidenceRow(
+            contact_id=c.cid,
+            t=tick,
+            feature=_F.REACQUIRED_FROM,
+            value=old,
+            unit=anchor.unit,
+            source=source,
+            confidence=min(fresh.confidence, prior_modem.confidence),
+            kind=_Kind.DERIVED,
+            probe_id=None,
+            derived_from=(fresh.row_id, prior_modem.row_id),
+        )
+        rows = [ident]
+        prior_rec = self.recs[record.old_case_id]
+        prior_rows = [self.table.get(i) for i in prior_rec.evidence_row_ids if i in self.table]
+        for feature in CARRIED_REGISTRY_FEATURES:
+            cands = [r for r in prior_rows if r.feature is feature and r.contact_id == old]
+            if not cands:
+                continue
+            src = max(cands, key=lambda r: r.t)
+            now = _own_latest(self.table, c.cid, feature, c.first_tick)
+            if now is not None and now.value != src.value:
+                continue  # the registry answer changed: nothing to carry
+            if not isinstance(src.confidence, float):
+                continue
+            rows.append(
+                EvidenceRow(
+                    contact_id=c.cid,
+                    t=tick,
+                    feature=feature,
+                    value=src.value,
+                    unit=src.unit,
+                    source=source,
+                    confidence=min(src.confidence, ident.confidence),
+                    kind=_Kind.DERIVED,
+                    probe_id=None,
+                    derived_from=(src.row_id, ident.row_id),
+                )
+            )
+        ids = tuple(self.append(rows))
+        record = dataclasses.replace(
+            record,
+            identity_confirmed=True,
+            row_ids=ids,
+            reason=f"{record.reason}; identity confirmed by modem {fresh.value}",
+        )
+        self.carry[case.case_id] = record
+        self.nested.append(canonical_json({"carryover": record.canonical()}))
+
+    # --- WO-094 end ---
 
     # --- log --------------------------------------------------------------------------------
 
@@ -1540,6 +1722,9 @@ class _V2Run(_V1Run):
             planner_choices=tuple(self.choices),
             nested_log=nested,
             nested_log_hash=hashlib.sha256(nested_log_text(nested).encode("utf-8")).hexdigest(),
+            # --- WO-094 begin ---
+            carryovers=tuple(self.carry[k] for k in sorted(self.carry, key=_case_sort_key)),
+            # --- WO-094 end ---
         )
 
 
@@ -1692,6 +1877,217 @@ def _next_wake_tick(run: _V1Run, tick: int) -> int:
 
 # --- end tick skipping (WO-080) ---
 
+
+# --- WO-094 begin: re-acquisition carry-over ---
+# SPEC-INVESTIGATION 9.9 says a re-acquired track carries the prior contact's evidence
+# over; runner v1 already appends those rows (WO-012 ``carry_over_reacquired``). WO-094
+# adds what the prior *case* established. When the matcher links a new observed id to a
+# lineage whose last case ended in a benign handling-terminal outcome decided by the
+# investigation's stop rule (``CARRYOVER_OUTCOMES``), the new case is checked at its
+# WATCHING -> ASKING edge:
+# * consistency (``carryover_consistency``): speed and depth buckets unchanged, not inside
+#   the stop rule's benign time guard of a critical asset, zone criticality not higher.
+#   Threat evidence needs no extra test: ``C_THREAT`` precedes every benign clause.
+# * staleness (``carried_hail_age_s``): a carried hail older than the plan-watch re-hail
+#   interval (``plan_watch.rehail_interval_s``, config/matcher.yaml) is re-sent first (the
+#   ordinary ask hail). A reply naming the prior lineage's modem confirms identity, and the
+#   prior decision's registry facts are re-derived for the new id (kind derived, source
+#   ``reacquired_from:<old id>``, confidence capped by the sources) when the fresh lookup
+#   returns the same value. A fresh carried hail skips the hail: the case enters the
+#   investigation on the carried rows.
+# Either way the investigation machine starts as usual and its first decision is the
+# deterministic stop rule over the table. If the rule fires the prior's clause the case
+# closes with no probe and no interruption; otherwise the investigation simply continues
+# (nothing is short-circuited). Nothing here reads ground truth.
+
+from soundings.challenge.hail import HAIL_SOURCE  # noqa: E402
+from soundings.investigation.features import bucketize  # noqa: E402
+from soundings.investigation.machine import StoppingConfig, StopRuleId  # noqa: E402
+from soundings.schemas.enums import EvidenceKind as _Kind  # noqa: E402
+from soundings.schemas.enums import FeatureName as _F  # noqa: E402
+from soundings.schemas.evidence import UNKNOWN  # noqa: E402
+
+CARRYOVER_OUTCOMES: frozenset[StopOutcome] = frozenset(
+    {StopOutcome.RESOLVED_BENIGN, StopOutcome.HAZARD_NOTICE, StopOutcome.CLEARED_AT_ASK}
+)
+"""Prior outcomes a re-acquired case may re-decide from the carried rows (benign, terminal
+for handling)."""
+CARRYOVER_SOURCE_PREFIX = "reacquired_from:"
+CARRYOVER_REASON = "reacquired_carryover"
+CONSISTENCY_FEATURES: tuple[_F, ...] = (_F.SPEED_OVER_GROUND, _F.DEPTH)
+CARRIED_REGISTRY_FEATURES: tuple[_F, ...] = (_F.REGISTRY_MATCH,)
+
+
+@dataclass(frozen=True)
+class CarryOver:
+    """One re-acquired case's carry-over decision (``RunResultV2.carryovers``)."""
+
+    case_id: str
+    contact_id: str
+    old_contact_id: str
+    old_case_id: str
+    prior_outcome: StopOutcome
+    prior_rule: StopRuleId
+    tick: int
+    eligible: bool
+    reason: str
+    hail_age_s: float | None
+    rehailed: bool
+    identity_confirmed: bool = False
+    row_ids: tuple[str, ...] = ()
+
+    def canonical(self) -> dict[str, Any]:
+        return {
+            "case_id": self.case_id,
+            "contact_id": self.contact_id,
+            "old_contact_id": self.old_contact_id,
+            "old_case_id": self.old_case_id,
+            "prior_outcome": self.prior_outcome.value,
+            "prior_rule": self.prior_rule.value,
+            "tick": self.tick,
+            "eligible": self.eligible,
+            "reason": self.reason,
+            "hail_age_s": self.hail_age_s,
+            "rehailed": self.rehailed,
+            "identity_confirmed": self.identity_confirmed,
+            "row_ids": list(self.row_ids),
+        }
+
+
+def _own_latest(table: EvidenceTable, cid: str, feature: _F, since_tick: int) -> EvidenceRow | None:
+    """The new id's own latest row (carried rows keep the old track's earlier ticks)."""
+    row = table.latest(cid, feature)
+    if (
+        row is None
+        or row.t < since_tick
+        or row.kind is _Kind.DERIVED
+        and row.source.startswith(CARRYOVER_SOURCE_PREFIX)
+    ):
+        return None
+    return row
+
+
+def _number_or_none(row: EvidenceRow | None) -> float | None:
+    if row is None or isinstance(row.value, bool) or not isinstance(row.value, int | float):
+        return None
+    return float(row.value)
+
+
+def _own_median(table: EvidenceTable, cid: str, feature: _F, since_tick: int) -> float | None:
+    """Median of one id's own numeric readings of ``feature`` (ticks at or after its first
+    reading, so rows carried from an earlier id are left out). A short track's single
+    estimate is noisy; the median of the track's readings is the vehicle's typical value."""
+    values = sorted(
+        float(r.value)
+        for r in table.feature_rows(cid, feature)
+        if r.t >= since_tick
+        and not isinstance(r.value, bool)
+        and isinstance(r.value, int | float)
+        and not r.source.startswith(CARRYOVER_SOURCE_PREFIX)
+    )
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else round6((values[mid - 1] + values[mid]) / 2.0)
+
+
+def carryover_consistency(
+    table: EvidenceTable,
+    old_id: str,
+    new_id: str,
+    *,
+    old_first_tick: int,
+    first_tick: int,
+    stopping: StoppingConfig,
+    speed_tol_mps: float,
+) -> str | None:
+    """``None`` when the new track is consistent with the prior outcome, else why not.
+
+    Speed and depth: the bucket (config/likelihoods.yaml) of the median of each id's own
+    readings must match; a speed in another bucket still passes when the two medians are
+    within the matcher's re-acquisition speed tolerance (``reacquire.speed_tol_mps``, the
+    SPEC 9.9 speed test the first-reading match could not apply). The new id must not be
+    inside the stop rule's benign time guard of a critical asset, and its zone criticality
+    must not exceed the old id's. No new threshold.
+    """
+    for feature in CONSISTENCY_FEATURES:
+        v_new = _own_median(table, new_id, feature, first_tick)
+        v_old = _own_median(table, old_id, feature, old_first_tick)
+        if v_new is None or v_old is None:
+            return f"{feature.value} not measured on both tracks"
+        b_new, b_old = bucketize(feature.value, v_new), bucketize(feature.value, v_old)
+        if b_new == b_old:
+            continue
+        if feature is _F.SPEED_OVER_GROUND and abs(v_new - v_old) <= speed_tol_mps:
+            continue
+        return f"{feature.value} changed {b_old} ({v_old:g}) -> {b_new} ({v_new:g})"
+    ttc = _number_or_none(_own_latest(table, new_id, _F.TIME_TO_NEAREST_CRITICAL_ASSET, first_tick))
+    if ttc is not None and 0.0 <= ttc < stopping.benign_time_guard_s:
+        return (
+            f"closing on a critical asset: time to it {ttc:.0f} s < "
+            f"{stopping.benign_time_guard_s:.0f} s"
+        )
+    z_new = _number_or_none(_own_latest(table, new_id, _F.ZONE_CRITICALITY, first_tick))
+    z_old = _number_or_none(table.latest(old_id, _F.ZONE_CRITICALITY))
+    if z_new is not None and (z_old is None or z_new > z_old):
+        return f"entering a more critical zone ({z_old} -> {z_new})"
+    return None
+
+
+def carried_hail_age_s(table: EvidenceTable, old_id: str, tick: int, tick_s: float) -> float | None:
+    """Seconds since the prior lineage's latest hail reply row (None: never hailed)."""
+    row = table.latest(old_id, _F.HAIL_REPLY)
+    return None if row is None else round6(max(0, tick - row.t) * float(tick_s))
+
+
+def carried_hail_stale(age_s: float | None, rehail_interval_s: float) -> bool:
+    """A missing hail or one older than the re-hail interval is stale (re-hail first)."""
+    return age_s is None or age_s > float(rehail_interval_s)
+
+
+def lineage_of(result: RunResult, contact_id: str) -> tuple[str, ...]:
+    """The observed ids of ``contact_id``'s lineage, oldest first (matcher links only)."""
+    back = {c.contact_id: c.reacquired_from for c in result.cases if c.reacquired_from}
+    fwd = {old: new for new, old in back.items()}
+    head = contact_id
+    while head in back:
+        head = back[head]
+    chain = [head]
+    while chain[-1] in fwd:
+        chain.append(fwd[chain[-1]])
+    return tuple(chain)
+
+
+def lineage_interruption_view(
+    result: RunResult,
+    per_contact: Mapping[str, int],
+    handoff_counted: Mapping[str, bool],
+    handled_off: Mapping[str, bool],
+) -> tuple[dict[str, int], tuple[str, ...]]:
+    """Interruptions rolled up per matcher lineage (keyed by the lineage's first id).
+
+    The per-id counts are WO-043's (one definition). A vehicle is handed to the officer
+    once: when an id's predecessor in the lineage already ended HANDED_OFF, that id's own
+    handoff SITREP reaches the officer who already owns the vehicle, i.e. a
+    watch-after-handoff update, which is not an interruption (SPEC-INV amendments). Such
+    ids are returned as ``repeat_handoffs``; the lineage sum leaves their handoff out, so
+    ``sum(lineage) == sum(per_contact) - len(repeat_handoffs)``. Approval requests and
+    backup pages still count wherever they happen.
+    """
+    totals: dict[str, int] = {}
+    repeats: list[str] = []
+    for cid in sorted(per_contact):
+        chain = lineage_of(result, cid)
+        n = int(per_contact[cid])
+        i = chain.index(cid)
+        if i > 0 and handled_off.get(chain[i - 1], False) and handoff_counted.get(cid, False):
+            repeats.append(cid)
+            n -= 1
+        totals[chain[0]] = totals.get(chain[0], 0) + n
+    return dict(sorted(totals.items())), tuple(repeats)
+
+
+# --- WO-094 end ---
 
 # --- v3 (WO-043) ---
 # --- WO-043 begin: runner v3 ---
@@ -1863,6 +2259,10 @@ class RunResultV3(RunResultV2):
     sim_extended: SimRun | None = None
     tail_ticks: int = 0
     audit: AuditLog | None = None
+    # --- WO-094 begin ---
+    lineage_interruptions: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    repeat_handoffs: tuple[str, ...] = ()
+    # --- WO-094 end ---
 
 
 def ladder_log_text(transitions: Iterable[LadderTransition]) -> str:
@@ -2245,6 +2645,9 @@ class RunSession:
             if case_id in v2.recommendations
         }
         per_contact: dict[str, int] = {}
+        # --- WO-094 begin ---
+        handoff_counted: dict[str, bool] = {}
+        # --- WO-094 end ---
         for cid in sorted(runs):
             run = runs[cid]
             rec = recs_by_contact.get(cid)
@@ -2252,6 +2655,9 @@ class RunSession:
             asked = any(a.kind is ActionKind.REQUEST_APPROVAL for a in run.actions)
             handoff = 1 if run.handling_outcome is S.HANDED_OFF and not asked else 0
             per_contact[cid] = eyes + run.interruptions + handoff
+            # --- WO-094 begin ---
+            handoff_counted[cid] = bool(handoff)
+            # --- WO-094 end ---
         for case_id, rec in v2.recommendations.items():  # contacts without a ladder run
             cid = case_id.partition("#")[0]
             if cid not in runs:
@@ -2283,6 +2689,14 @@ class RunSession:
             if r.handling_outcome is not None
         }
         log_text = ladder_log_text(trans)
+        # --- WO-094 begin ---
+        lineage_view, repeat_handoffs = lineage_interruption_view(
+            v2,
+            per_contact,
+            handoff_counted,
+            {cid: r.handling_outcome is S.HANDED_OFF for cid, r in runs.items()},
+        )
+        # --- WO-094 end ---
         return dataclasses.replace(
             _as_v3(v2),
             interruptions=sum(per_contact.values()),
@@ -2307,6 +2721,10 @@ class RunSession:
             sim_extended=self.sim_ext,
             tail_ticks=self.tail_ticks,
             audit=self.audit,
+            # --- WO-094 begin ---
+            lineage_interruptions=MappingProxyType(lineage_view),
+            repeat_handoffs=repeat_handoffs,
+            # --- WO-094 end ---
         )
 
 

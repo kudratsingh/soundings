@@ -76,18 +76,9 @@ def test_check_expected_units() -> None:
     assert _keys(CLEAN_S05, top) == {"top_hypothesis"}
 
 
-S04_REASON = (
-    "S04's re-acquired track (c-0009 from tick 366) ends in WO-033's uncertain C_BUDGET "
-    "handoff (P(UNFILED_KNOWN_OPERATOR) 0.605, registry confidence 0.57), so the lineage end is "
-    "HANDED_OFF with 1 interruption; the primary track resolves benign with 0 "
-    "(test_runner_v3::test_s04_*). Same open question as WO-033's strict xfail; the expected "
-    "block is not changed."
-)
+# WO-094: S04 passes (its re-acquired track re-decides the prior C_KNOWN_OPERATOR outcome).
 PATHS = [
-    pytest.param(p, marks=pytest.mark.xfail(strict=True, reason=S04_REASON), id=p.stem[:3])
-    if p.name.startswith("S04")
-    else pytest.param(p, id=p.stem[:5] if p.stem.startswith("BT") else p.stem[:3])
-    for p in suite_paths()
+    pytest.param(p, id=p.stem[:5] if p.stem.startswith("BT") else p.stem[:3]) for p in suite_paths()
 ]
 
 
