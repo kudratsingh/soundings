@@ -1,0 +1,8 @@
+# Registry of planned underwater work (WO-020). Read by soundings.registry.models.
+# Fixed UTC offsets avoid needing a tz database; the sim day is the demo Saturday.
+registry:
+  modem_id_pattern: "^MOD-[0-9]{4,6}$"   # S02 files MOD-4471; WO-021's hail config must agree
+  sim_epoch_date: "2026-10-17"            # tick 0 is this date at the scenario's hour_of_day
+  sim_epoch_utc_offset: "-07:00"          # Pacific daylight time on the demo weekend
+  retention_days: 30                      # CLAUDE.md section 6: no retention beyond 30 days
+  plan_id_prefix: "P"                     # auto-assigned ids look like P-20261017-001
