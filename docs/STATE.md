@@ -34,7 +34,7 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
-| 050 | baselines | pending | wo/050-baselines | | | |
+| 050 | baselines | PR open, auto-merge on green CI | wo/050-baselines | (see PR) | squash commit on main (see PR) | 838 passed (29 WO-050: unit 24, integration 5) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
 | 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |

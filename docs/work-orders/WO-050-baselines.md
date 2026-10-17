@@ -106,7 +106,15 @@ None changed. The code reads all five rungs to build histograms. `bang` models a
 §2.1, §2.2, §2.4, §2.5: see Rule proofs above.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see docs/STATE.md row 050 · Merged commit: squash commit on main (see PR) · Test summary: 838 passed (29 WO-050: 24 unit incl. 10 interruption-table cases, 5 integration) · STATE.md updated: yes
+
+As built (differences from the text above, all recorded in DECISIONS 2026-10-16 23:38):
+- Interruptions follow the one binding definition (DECISIONS 23:05, WO-022 addenda): `interruption_kind` returns approval_request (entering `AWAITING_APPROVAL`, or a `berth_reopened` step), handoff (entering `HANDED_OFF`), backup_page (`backup_paged` event) or eyes_on (`request_watch_officer_look` probe or a `person_recheck`). Platform `sitrep_update` steps in `WATCH_AFTER_HANDOFF` do NOT count (the WO text said they did). human_queue's re-checks are the person looking (no platform watches for it), logged as `person_recheck`, and count as eyes_on.
+- `bang`: a contact whose berth already has a pending or active closure is logged `DETECTED -> HOLDING` (event `covered_by_closure`, no new request, no interruption) and its `ShutdownInterval.approval_seq` points at the approving `AWAITING_APPROVAL -> HANDED_OFF` step. Each closure episode reopens once (`berth_reopened`, an interruption) at the end of its interval union; contacts then go `RESOLVED_DEPARTED` at their own closure end. Nearest berth = `Harbor.nearest_asset` over `asset_kind == "berth"` assets only.
+- Logs stop at the end of the run: a queue that has not reached a contact by then leaves it in `DETECTED`/`AWAITING_APPROVAL` (never imputed). With ~1 contact/min and 120 s reviews, human_queue saturates; the catalog test therefore checks >= 1 interruption per detected ground-truth contact (rolled up), not per observed id.
+- `Transition` is defined in `soundings.eval.policies` (WO-022's runner `Transition` is not merged and policies may not import the runner). Extra `PolicyRun` fields: `shutdowns: tuple[ShutdownInterval, ...]`, `gt_contacts: tuple[GtContact, ...]`. `PolicyRun.terminal_state` and `GtOutcome.terminal_state` are `LadderState | None` (None when the first ground-truth contact is undetected).
+- `run_scenario(..., likelihoods=)` already shipped with WO-011; this WO only tests it.
+- Cut line: nothing cut.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Approved: baselines are counterfactual logs outside LadderMachine with an assumed person approval; config/eval.yaml holds `human_review_s: 120`, `berth_reopen_after_s: 600`, labeled assumptions; human_queue shutdown-minutes reported as 0 and labeled.
