@@ -5,23 +5,45 @@ working (S01's plan is in the water at tick 0 and is pinned; only the new plan m
 and S01 still clears at ask with no interruptions afterwards.
 
 ``test_bt01_components_solve_in_time``: every conflicted component of BT-01 at tick 0 is
-solved within the 2 s budget with a proven status. With ``scenarios/BT-01.yaml`` on main
-every component must be OPTIMAL; until then the seeded 40-plan stand-in from
-``tests/support/busy_plans`` is used, whose default-capacity components are mostly
-proven INFEASIBLE (40 plans of 1-3 h cannot share 2 slots in one afternoon), so it
-asserts a proven status (OPTIMAL or INFEASIBLE, never a time-out) instead.
+solved within the 2 s budget with a proven status (OPTIMAL or INFEASIBLE, never a
+time-out), and every INFEASIBLE names its binding constraint.
+
+WO-095 gave BT-01's plans real filing-window flexibility (``WINDOW_FLEX_MIN``). With the
+configured zone capacity 2 every component is still INFEASIBLE, and now ``capacity`` is
+what binds, not ``latest_start``: ``test_bt01_capacity_binds_by_arithmetic`` proves it
+without the solver (each component's filed work exceeds capacity x the hours from tick 0
+to 24:00, so no window could fit it). ``test_bt01_slots_with_capacity_what_if`` restores
+the strong assertion (``"OPTIMAL" in statuses``) on the real BT-01 under a test-only
+capacity of 16; ``config/registry.yaml`` stays 2 (owner decision, DECISIONS WO-095).
 """
 
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from pathlib import Path
 
-from soundings.registry.models import PlanStatus, scenario_epoch, tick_to_datetime
-from soundings.registry.slots import PinReason, load_slot_config, propose_slots
+import pytest
+
+from soundings.registry.models import (
+    PlanStatus,
+    load_conflict_config,
+    scenario_epoch,
+    tick_to_datetime,
+)
+from soundings.registry.slots import (
+    BindingConstraint,
+    PinReason,
+    SlotConfig,
+    SlotProposal,
+    load_slot_config,
+    model_set,
+    propose_slots,
+)
 from soundings.registry.store import RegistryStore, plan_views_from_scenario
 from soundings.runner import ScenarioRunner
 from soundings.schemas import LadderState, load_harbor
+from soundings.sim.scenario import resolve_scenario
 from tests.support.busy_plans import bt01_available, bt01_or_standin
 
 HARBOR = load_harbor()
@@ -83,35 +105,91 @@ def test_s01_in_water_plan_kept(tmp_path: Path) -> None:
     assert result.interruptions == 0
 
 
-def test_bt01_components_solve_in_time() -> None:
+def _bt01_components(cfg: SlotConfig | None = None) -> list[SlotProposal]:
+    """One proposal per distinct conflicted component of BT-01 at tick 0, timed."""
     scenario = bt01_or_standin()
-    real = bt01_available()
     views = plan_views_from_scenario(scenario)
     now = scenario_epoch(scenario)
     seen: set[tuple[str, ...]] = set()
-    statuses: list[str] = []
+    out: list[SlotProposal] = []
     for target in views:
         if target.status is not PlanStatus.CONFLICTED:
             continue
         started = time.process_time()
-        proposal = propose_slots(target.plan_id, views, harbor=HARBOR, now=now)
+        proposal = propose_slots(target.plan_id, views, harbor=HARBOR, now=now, cfg=cfg)
         spent = time.process_time() - started
         if proposal.plan_ids in seen:
             continue
         seen.add(proposal.plan_ids)
-        statuses.append(proposal.solver_status)
         assert spent < 2.0, (target.plan_id, spent)
-        assert proposal.solver_status in ("OPTIMAL", "INFEASIBLE"), proposal.detail
-        if proposal.solver_status == "INFEASIBLE":
-            # An honest "no slot" names what binds. On the real BT-01 the 18 pile
-            # inspections filed on vincent_thomas_bridge (capacity 2, windows padded
-            # 5 min) cannot all fit before 24:00; the proposal says so instead of
-            # inventing a slot, and WO-085 triage surfaces the component.
-            assert proposal.binding_constraint is not None, proposal.detail
-            assert proposal.binding_constraint.value in ("capacity", "latest_start", "in_water")
+        out.append(proposal)
+    return out
+
+
+def _assert_honest(proposals: list[SlotProposal]) -> list[str]:
+    statuses = [p.solver_status for p in proposals]
     assert statuses, "BT-01 must have at least one conflicted component"
+    for p in proposals:
+        assert p.solver_status in ("OPTIMAL", "INFEASIBLE"), p.detail
+        if p.solver_status == "INFEASIBLE":
+            # an honest "no slot" names what binds (WO-085 triage surfaces it)
+            assert p.binding_constraint is not None, p.detail
+            assert p.binding_constraint.value in ("capacity", "latest_start", "in_water")
+    return statuses
+
+
+def test_bt01_components_solve_in_time() -> None:
+    real = bt01_available()
+    proposals = _bt01_components()
+    _assert_honest(proposals)
     if real:
-        # Every component of the generated BT-01 is INFEASIBLE today: its filing windows
-        # are padded 5 min, so no plan can move. WO-095 widens the windows so the busy
-        # day has slots to propose; until it lands the proposals stay honest refusals.
-        assert all(status in ("OPTIMAL", "INFEASIBLE") for status in statuses), statuses
+        # WO-095: the windows are wide now, so what binds at capacity 2 is the capacity.
+        assert {p.zone_id for p in proposals} == {
+            "inner_basin_research",
+            "main_channel",
+            "pier_400_approach",
+            "vincent_thomas_bridge",
+        }
+        for p in proposals:
+            assert p.solver_status == "INFEASIBLE" and p.capacity == 2, p.detail
+            assert p.binding_constraint is BindingConstraint.CAPACITY, p.detail
+
+
+def test_bt01_capacity_binds_by_arithmetic() -> None:
+    """Each component's filed work exceeds capacity x (24:00 - tick 0): no window fits it."""
+    if not bt01_available():
+        pytest.skip("needs scenarios/BT-01.yaml")
+    scenario = resolve_scenario("BT-01")
+    views = plan_views_from_scenario(scenario)
+    now = scenario_epoch(scenario)
+    cfg = load_slot_config()
+    ccfg = load_conflict_config()
+    horizon = now.replace(hour=0, minute=0) + timedelta(minutes=cfg.horizon_minutes)
+    available_h = (horizon - now).total_seconds() / 3600.0
+    for zone in sorted({v.area for v in views}):
+        target = next(v for v in views if v.area == zone)
+        members = model_set(target, views, HARBOR, ccfg)
+        work_h = sum((v.end_at - v.start_at).total_seconds() for v in members) / 3600.0
+        cap = cfg.capacity_for(zone)
+        assert work_h > cap * available_h, (zone, work_h, cap, available_h)
+
+
+def test_bt01_slots_with_capacity_what_if() -> None:
+    """Strong assertion on the real BT-01 under a test-only capacity (config stays 2)."""
+    if not bt01_available():
+        pytest.skip("needs scenarios/BT-01.yaml")
+    what_if = load_slot_config().model_copy(update={"zone_capacity_default": 16})
+    proposals = _bt01_components(what_if)
+    statuses = _assert_honest(proposals)
+    assert "OPTIMAL" in statuses, statuses
+    by_zone = {p.zone_id: p for p in proposals}
+    bridge = by_zone["vincent_thomas_bridge"]
+    assert bridge.solver_status == "OPTIMAL" and bridge.total_delay_min > 0, bridge.detail
+    # the WO-095 bounds are what the proposal respects: no shift leaves a plan's bounds
+    views = {v.plan_id: v for v in plan_views_from_scenario(resolve_scenario("BT-01"))}
+    for p in proposals:
+        for s in p.shifts:
+            v = views[s.plan_id]
+            assert v.earliest_start_at is not None and v.latest_start_at is not None
+            if s.shift_min:
+                assert v.earliest_start_at <= s.new_start_at <= v.latest_start_at, s

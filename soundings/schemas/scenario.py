@@ -49,11 +49,19 @@ TruthContactId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]*$")
 class PlanWindow(StrictModel):
     start_tick: NonNegInt
     end_tick: NonNegInt
+    # --- WO-095: filing-window flexibility --- (optional; the registry's start bounds)
+    earliest_start_tick: NonNegInt | None = None
+    latest_start_tick: NonNegInt | None = None
+    # --- WO-095 end ---
 
     @model_validator(mode="after")
     def _ordered(self) -> PlanWindow:
         if self.start_tick > self.end_tick:
             raise ValueError("plan window start_tick must be <= end_tick")
+        if self.earliest_start_tick is not None and self.earliest_start_tick > self.start_tick:
+            raise ValueError("plan window earliest_start_tick must be <= start_tick")
+        if self.latest_start_tick is not None and self.latest_start_tick < self.start_tick:
+            raise ValueError("plan window latest_start_tick must be >= start_tick")
         return self
 
 
@@ -251,6 +259,11 @@ class Scenario(StrictModel):
         for plan in self.registry_plans:
             if plan.window.end_tick > self.duration_ticks:
                 raise ValueError(f"plan {plan.plan_id} window ends after duration_ticks")
+            w = plan.window  # WO-095: a plan moved to its latest start still ends in the run
+            if w.latest_start_tick is not None and (
+                w.latest_start_tick + w.end_tick - w.start_tick > self.duration_ticks
+            ):
+                raise ValueError(f"plan {plan.plan_id} latest start ends after duration_ticks")
         for c in self.contacts:
             reg = c.registry
             if reg.plan_id is not None and reg.plan_id not in plan_ids:
