@@ -9,13 +9,17 @@ determinism subprocesses.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from soundings.ladder.audit import AuditLog
 from soundings.ladder.driver import LadderDriver, LadderRun
+from soundings.ladder.guards import BoundaryGuards
 from soundings.ladder.handoff import HandoffService, WriterMode
 from soundings.ladder.synthetic import S05_CONTACT, S05_HOUR, S05_TICK_S, s05_feed
 from soundings.ladder.watch import DepartureDetector
@@ -44,6 +48,7 @@ def run_s05(
     toggles: tuple[ToggleName, ...] = (),
     audit_db: Path | str | None = None,
     run_id: str = "s05-seed11",
+    probe_calls: tuple[Mapping[str, Any], ...] = (),  # WO-042 audit semantics
 ) -> S05Handoff:
     workdir.mkdir(parents=True, exist_ok=True)
     orders = signed_orders_copy(workdir)
@@ -69,7 +74,14 @@ def run_s05(
     )
     if service.sink is not None:
         service.sink.clock = driver.clock
-    runs = driver.run([s05_feed(cid=cid)])
+    # --- WO-042 audit semantics ---
+    if isinstance(driver.guards, BoundaryGuards):
+        driver.guards.observer = service.guard_log.record
+    # --- WO-042 audit semantics end ---
+    feed = s05_feed(cid=cid)
+    if probe_calls:  # WO-042 audit semantics: the investigation's probes ride on the feed
+        feed = dataclasses.replace(feed, probe_calls=probe_calls)
+    runs = driver.run([feed])
     return S05Handoff(runs[cid], service, audit, violations)
 
 
