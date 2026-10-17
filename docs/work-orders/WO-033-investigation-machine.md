@@ -161,7 +161,7 @@ ask (INVESTIGATING) and hand to a person (the `HANDOFF` recommendation and `HAND
 - §3: `thresholds_from_config`.
 
 ## Done
-PR: #PRNUM (part B; part A #23) · Merged commit: squash of #PRNUM (see STATE) · Test summary: TESTSUMMARY · STATE.md updated: WO-033 row.
+PR: #36 (part B; part A #23) · Merged commit: squash of #36 (see STATE) · Test summary: make check 1657 passed, 1 skipped, 2 xfailed; tests/test_investigation.py 51 passed, 2 xfailed · STATE.md updated: WO-033 row.
 
 Part B (recorded 2026-10-17 07:30 PDT, branch `wo/033b-investigation-wiring`):
 - `soundings/investigation_wiring.py` adapts the real collaborators to the part A Protocols: `PlannerAdapter` (WO-031 `DeterministicPlanner` or WO-032 `LlmPlanner`; cost/latency/rung from `ALLOWLIST`, args from `resolve_args` so the machine's probe key equals `run_probe`'s; `ran_probes` = probes with rows for the contact, so the ask hail and v1 registry lookups are not re-run), `RunProbeRunner` (`run_probe` + one shared `ProbeCache`; executor failures become `ProbeError`), `WriterAdapter` (`HypothesisWriter` with roles on, `template_question` off; only a HANDOFF gets a question), `make_kit(world, ..., llm_roles=False, fixture_store=None, violations_path=...)`.
