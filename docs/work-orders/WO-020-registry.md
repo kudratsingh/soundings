@@ -119,4 +119,10 @@ watch (the `registry_lookup` probe reads this store at the watch rung) and ask (
 - §6 scope line: `-k reject` (security zones only) and `-k retention`.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see the WO-020 row in docs/STATE.md (branch `wo/020-registry`) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0; full suite 330 passed; registry 57 passed (unit 33, router 18, integration 6; catalog covers S01, S02, S03) · STATE.md updated: yes (WO-020 row)
+
+- Every exit test above passes with `MODEL_MODE=replay`; both greps print nothing.
+- Determinism: S02 seeded under `PYTHONHASHSEED=0` and `=1` gives byte-identical canonical JSON (sha256 `e02b4b35...1c8f`, empty diff); `-k deterministic_seed` checks the same over S01/S02/S03.
+- Manual: Playwright screenshot taken (filed S02 plan in the active table, inline `area_not_security_zone` rejection). Playwright 1.64 pins chromium build 1248 while this machine caches 1234, so the shot used `--executable-path` with the cached headless shell (no download).
+- Beyond the WO text (also in DECISIONS.md): `PlanView` adds defaulted `source`, `created_at`, `expired_at`; storage keeps UTC instants plus per-end offsets; `GET /api/plans` defaults to `status=active` (`expired`, `all`); `POST /api/plans?epoch=&tick_s=` bridges tick-only plans; `RegistryStore.count()`, `close()`, `seed_from_scenario(skip_existing=)`, `plan_views_from_scenario()` (database-free list for WO-022's default path); `":memory:"` db path supported.
+- Cut line: nothing dropped.
