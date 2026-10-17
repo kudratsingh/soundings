@@ -368,10 +368,15 @@ class BatchReplaySource:
             raise UnsupportedOption("use_llm needs runner v3 (WO-060 part B); v1 has no roles")
         self.req = req
         self._events: list[StreamEvent] | None = None
+        self.triage_log_hash = ""  # WO-085: non-empty for a surge run
 
     def events(self) -> list[StreamEvent]:
         if self._events is None:
-            result = ScenarioRunner(self.req.scenario, seed=self.req.seed).run()
+            # --- WO-085: surge triage --- (a scenario carrying contact_surge runs through
+            # runner v2 with the triage queue; every other run stays runner v1, unchanged)
+            result = surge_runner(self.req.scenario, self.req.seed).run()
+            self.triage_log_hash = result.triage_log_hash
+            # --- WO-085 end ---
             self._events = batch_events(
                 result,
                 self.req.scenario,
@@ -392,6 +397,28 @@ class BatchReplaySource:
     def approve(self, request_id: str, approver: str) -> ApprovalResultEvent:
         raise NoPendingApproval(f"the batch source has no pending request {request_id!r}")
 
+
+# --- WO-085: surge triage ---
+def has_surge(scenario: Scenario, toggles: Sequence[ToggleName | str] = ()) -> bool:
+    """True when the scenario carries a ``contact_surge`` toggle or the request names it."""
+    names = {ToggleName(t.name) for t in scenario.toggles} | {ToggleName(t) for t in toggles}
+    return ToggleName.CONTACT_SURGE in names
+
+
+def surge_runner(
+    scenario: Scenario, seed: int, toggles: Sequence[ToggleName | str] = ()
+) -> ScenarioRunner:
+    """``ScenarioRunnerV2(..., triage=load_triage_config())`` for a surge run (WO-085),
+    else the unchanged runner v1."""
+    if has_surge(scenario, toggles):
+        from soundings.runner import ScenarioRunnerV2
+        from soundings.triage import load_triage_config
+
+        return ScenarioRunnerV2(scenario, seed=seed, triage=load_triage_config())
+    return ScenarioRunner(scenario, seed=seed)
+
+
+# --- WO-085 end ---
 
 _SOURCES: dict[str, SourceFactory] = {"batch": BatchReplaySource}
 

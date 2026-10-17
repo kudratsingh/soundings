@@ -1,0 +1,152 @@
+# Synthetic stand-in for BT-01 (WO-085) until WO-080 part A merges: eleven filed jobs
+# that clear at ask and one unfiled rogue closing on fuel_berth_2 (S05's track).
+# Not a catalog scenario; used only by tests/support/bt01.py.
+id: TR-85  # TR- pattern: the schema id vocabulary; not a trap scenario
+name: Busy Tuesday (synthetic triage stand-in)
+seed: 7
+duration_ticks: 900
+tick_s: 2
+ground_truth: FILED_ON_PLAN
+hour_of_day: 10
+registry_plans:
+  - plan_id: P-SYN-001
+    operator: "Synthetic Survey 01 (demo)"
+    vehicle: "AUV-Synth-01"
+    modem_id: "MOD-8001"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-01"
+  - plan_id: P-SYN-002
+    operator: "Synthetic Survey 02 (demo)"
+    vehicle: "AUV-Synth-02"
+    modem_id: "MOD-8002"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-02"
+  - plan_id: P-SYN-003
+    operator: "Synthetic Survey 03 (demo)"
+    vehicle: "AUV-Synth-03"
+    modem_id: "MOD-8003"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-03"
+  - plan_id: P-SYN-004
+    operator: "Synthetic Survey 04 (demo)"
+    vehicle: "AUV-Synth-04"
+    modem_id: "MOD-8004"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-04"
+  - plan_id: P-SYN-005
+    operator: "Synthetic Survey 05 (demo)"
+    vehicle: "AUV-Synth-05"
+    modem_id: "MOD-8005"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-05"
+  - plan_id: P-SYN-006
+    operator: "Synthetic Survey 06 (demo)"
+    vehicle: "AUV-Synth-06"
+    modem_id: "MOD-8006"
+    area: vincent_thomas_bridge
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-06"
+  - plan_id: P-SYN-007
+    operator: "Synthetic Survey 07 (demo)"
+    vehicle: "AUV-Synth-07"
+    modem_id: "MOD-8007"
+    area: pier_400_approach
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-07"
+  - plan_id: P-SYN-008
+    operator: "Synthetic Survey 08 (demo)"
+    vehicle: "AUV-Synth-08"
+    modem_id: "MOD-8008"
+    area: pier_400_approach
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-08"
+  - plan_id: P-SYN-009
+    operator: "Synthetic Survey 09 (demo)"
+    vehicle: "AUV-Synth-09"
+    modem_id: "MOD-8009"
+    area: pier_400_approach
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-09"
+  - plan_id: P-SYN-010
+    operator: "Synthetic Survey 10 (demo)"
+    vehicle: "AUV-Synth-10"
+    modem_id: "MOD-8010"
+    area: pier_400_approach
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-10"
+  - plan_id: P-SYN-011
+    operator: "Synthetic Survey 11 (demo)"
+    vehicle: "AUV-Synth-11"
+    modem_id: "MOD-8011"
+    area: pier_400_approach
+    window: {start_tick: 0, end_tick: 900}
+    contact: "sim-phone-synth-11"
+contacts:
+  - id: filed-01
+    start: {lat: 33.7490, lon: -118.2700, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-001, modem_id: "MOD-8001", replies_to_hail: true}
+  - id: filed-02
+    start: {lat: 33.7496, lon: -118.2692, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-002, modem_id: "MOD-8002", replies_to_hail: true}
+  - id: filed-03
+    start: {lat: 33.7484, lon: -118.2708, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-003, modem_id: "MOD-8003", replies_to_hail: true}
+  - id: filed-04
+    start: {lat: 33.7496, lon: -118.2708, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-004, modem_id: "MOD-8004", replies_to_hail: true}
+  - id: filed-05
+    start: {lat: 33.7484, lon: -118.2692, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-005, modem_id: "MOD-8005", replies_to_hail: true}
+  - id: filed-06
+    start: {lat: 33.7490, lon: -118.2688, depth_m: 8}
+    behavior: {type: lawnmower, area: vincent_thomas_bridge, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-006, modem_id: "MOD-8006", replies_to_hail: true}
+  - id: filed-07
+    start: {lat: 33.7215, lon: -118.2520, depth_m: 8}
+    behavior: {type: lawnmower, area: pier_400_approach, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-007, modem_id: "MOD-8007", replies_to_hail: true}
+  - id: filed-08
+    start: {lat: 33.7221, lon: -118.2512, depth_m: 8}
+    behavior: {type: lawnmower, area: pier_400_approach, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-008, modem_id: "MOD-8008", replies_to_hail: true}
+  - id: filed-09
+    start: {lat: 33.7209, lon: -118.2528, depth_m: 8}
+    behavior: {type: lawnmower, area: pier_400_approach, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-009, modem_id: "MOD-8009", replies_to_hail: true}
+  - id: filed-10
+    start: {lat: 33.7221, lon: -118.2528, depth_m: 8}
+    behavior: {type: lawnmower, area: pier_400_approach, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-010, modem_id: "MOD-8010", replies_to_hail: true}
+  - id: filed-11
+    start: {lat: 33.7209, lon: -118.2512, depth_m: 8}
+    behavior: {type: lawnmower, area: pier_400_approach, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SYN-011, modem_id: "MOD-8011", replies_to_hail: true}
+  - id: rogue-1
+    start: {lat: 33.7410, lon: -118.2582, depth_m: 6}
+    behavior: {type: transit, target_asset: fuel_berth_2, speed_mps: 1.0}
+    acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
+    registry: {filed: false, replies_to_hail: false}
+toggles: []
+expected:
+  terminal_state: HANDED_OFF

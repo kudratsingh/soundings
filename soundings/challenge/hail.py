@@ -45,7 +45,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -69,6 +69,7 @@ from soundings.schemas._base import (
 from soundings.schemas.denylist import FreeText
 from soundings.schemas.enums import EvidenceKind, FeatureName, HailReply, ProbeId, Unit
 from soundings.schemas.evidence import UNKNOWN, ContactId, EvidenceRow, EvidenceValue
+from soundings.schemas.geo import distance_m  # WO-089
 from soundings.schemas.scenario import Scenario, ScenarioContact
 
 HONESTY_NOTE = (
@@ -127,6 +128,60 @@ def hail_latency_ticks(latency_s: float, tick_s: float) -> int:
     if latency_s <= 0 or tick_s <= 0:
         raise ValueError("latency_s and tick_s must be > 0")
     return int(math.ceil(round(latency_s / tick_s, 9)))
+
+
+# --- WO-089 begin: hail latency from soundings.physics -----------------------------------
+
+
+class HailPhysics:
+    """The WO-089 hail law: reply after ``modem_turnaround_s + 2r / sound_speed`` seconds.
+
+    ``modem_turnaround_s`` is the simulated modem's turnaround (config/physics.yaml); the
+    turnaround plus the two-way travel to the detection cut-off stays within the
+    ``latency_s`` of ``config/challenge.yaml`` (the SPEC section 5 allowlist latency), so a
+    reply never lands after the allowlist says it does.
+    """
+
+    def __init__(
+        self,
+        turnaround_s: float,
+        cutoff_m: float,
+        cfg: Any,
+        nodes: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
+        self.turnaround_s = float(turnaround_s)
+        self.cutoff_m = float(cutoff_m)
+        self._cfg = cfg
+        self.nodes = dict(nodes or {})  # sensor node id -> (lat, lon)
+
+    def latency_s(self, range_m: float) -> float:
+        from soundings.physics import hail_latency_s
+
+        return round6(self.turnaround_s + hail_latency_s(max(range_m, 0.0), self._cfg))
+
+    def latency_ticks(self, range_m: float, tick_s: float) -> int:
+        return hail_latency_ticks(self.latency_s(range_m), tick_s)
+
+
+@cache
+def hail_physics() -> HailPhysics | None:
+    """The physics hail law when ``config/physics.yaml`` is present, else None (20 s flat)."""
+    from soundings.physics import PHYSICS_CONFIG_PATH, load_physics_config
+
+    if not PHYSICS_CONFIG_PATH.is_file():
+        return None
+    cfg = load_physics_config()
+    sl = max(
+        cfg.sonar.source_level_db.for_class(c)
+        for c in ("biologic", "propeller_tonal_absent", "propeller_tonal_present")
+    )
+    from soundings.schemas.harbor import load_harbor
+
+    nodes = {n.node_id: (n.lat, n.lon) for n in load_harbor().sensor_nodes}
+    return HailPhysics(cfg.hail.modem_turnaround_s.value, cfg.cutoff_range_m(sl), cfg, nodes)
+
+
+# --- WO-089 end ---
 
 
 # --- known operators ---------------------------------------------------------------------
@@ -264,6 +319,13 @@ class HailSimulator:
         self._cache: dict[str, HailResult] = {}
         self.tick_s: float = float(run.tick_s)
         self.latency_ticks: int = hail_latency_ticks(self._cfg.latency_s, self.tick_s)
+        # --- WO-089 begin: reply = modem turnaround + two-way travel 2r/c ---
+        self._physics = hail_physics()
+        if self._physics is not None:
+            self.latency_ticks = self._physics.latency_ticks(
+                self._physics.cutoff_m, self.tick_s
+            )  # the latest a reply can land: a contact at the detection cut-off
+        # --- WO-089 end ---
 
     @property
     def cfg(self) -> HailConfig:
@@ -288,6 +350,23 @@ class HailSimulator:
             return self._scenario.plan(reg.plan_id).modem_id
         return None
 
+    # --- WO-089 begin ---
+    def _reply_ticks(self, contact_id: str, tick: int) -> int:
+        """Ticks until the reply lands: turnaround + 2r/c, with r the distance from the
+        reporting node to the contact's latest observed point at or before ``tick`` (the
+        cut-off range when there is none)."""
+        if self._physics is None:
+            return self.latency_ticks
+        r = self._physics.cutoff_m
+        track = self._run.tracks.get(contact_id)
+        seen = [p for p in track.points if p.tick <= tick] if track is not None else []
+        if seen and seen[-1].sensor_id in self._physics.nodes:
+            nlat, nlon = self._physics.nodes[seen[-1].sensor_id]
+            r = min(distance_m(nlat, nlon, seen[-1].lat, seen[-1].lon), r)
+        return self._physics.latency_ticks(r, self.tick_s)
+
+    # --- WO-089 end ---
+
     def send(self, contact_id: str, tick: int, *, previously_replied: bool = False) -> HailResult:
         """Hail ``contact_id`` at ``tick``. A repeat in the same tick bucket returns the cache."""
         if tick < 0:
@@ -311,7 +390,7 @@ class HailSimulator:
         result = HailResult(
             contact_id=contact_id,
             sent_tick=tick,
-            reply_tick=tick + self.latency_ticks,
+            reply_tick=tick + self._reply_ticks(contact_id, tick),  # WO-089
             replied=replied,
             hail_reply=bucket,
             modem_id=modem_id,

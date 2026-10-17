@@ -1004,6 +1004,24 @@ def visibility_default(hour: int) -> float:
     )
 
 
+# --- WO-089 begin: camera attenuation (soundings.physics.camera_visibility) ---
+def camera_visibility_at(hour: int, depth_m: float) -> float:
+    """Visibility for a camera: ``visibility_default(hour) * exp(-k depth) * exp(-turbidity)``
+    with k and the default turbidity from ``config/physics.yaml`` (an assumption, never a
+    reading); the hour-of-day default alone when that file is absent. 6 dp."""
+    from soundings.physics import PHYSICS_CONFIG_PATH, load_physics_config
+    from soundings.physics import camera_visibility as attenuation
+
+    base = visibility_default(hour)
+    if not PHYSICS_CONFIG_PATH.is_file():
+        return base
+    cfg = load_physics_config()
+    return round(base * attenuation(depth_m, cfg.camera.turbidity_default.value, cfg), 6)
+
+
+# --- WO-089 end ---
+
+
 def current_at_from_field(
     vector_at: Callable[[float, float, Any], tuple[float, float]],
     tide_phase_for_hour: Callable[[int], Any],
@@ -1459,7 +1477,7 @@ def extract_context(
         _assumption(
             track,
             FeatureName.VISIBILITY_FOR_CAMERA,
-            visibility_default(hour),
+            camera_visibility_at(hour, last.depth_m),  # WO-089
             unit=FEATURE_CATALOG[FeatureName.VISIBILITY_FOR_CAMERA].unit,
             source=SOURCE_DEFAULT_VISIBILITY,
             assumes=VISIBILITY_ASSUMES,
@@ -1720,5 +1738,6 @@ __all__ = [
     "transit_stats",
     "turn_rate",
     "visibility_default",
+    "camera_visibility_at",  # WO-089
     "weekday_row",
 ]

@@ -27,13 +27,15 @@ continuous enough to be useful; the gaps and re-issued ids still happen at the c
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
 import numpy as np
 
 from soundings.canonical import round6
+from soundings.physics import ambient_noise_db  # WO-089
+from soundings.physics_view import AisFix, vessel_fixes_at  # WO-089
 from soundings.schemas._base import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
 from soundings.schemas.config import LikelihoodSpec, Priors, load_likelihood_spec, load_priors
 from soundings.schemas.enums import BehaviorType, Hypothesis, ToggleName, TonalBand
@@ -71,15 +73,22 @@ from soundings.sim.current import CurrentField, load_current_field
 from soundings.sim.detection import (
     DetectionParams,
     GapState,
+    SonarSetup,  # WO-089
+    acoustic_class,  # WO-089
     false_alarm_rate_per_tick,
     fuse_nearest,
     gap_step,
     load_detection_params,
+    node_gain_db,  # WO-089
     position_sigma_m,
     reading_confidence,
     sample_detected,
+    sample_detected_sonar,  # WO-089
     sample_false_alarm,
     sample_position_noise,
+    sonar_reading_confidence,  # WO-089
+    sonar_setup,  # WO-089
+    sonar_term,  # WO-089
     split_on_timeout,
 )
 from soundings.sim.toggles import (
@@ -121,6 +130,15 @@ def default_config() -> SimConfig:
         band_weights=load_tonal_band_weights(),
         ais=load_ais_config(),
     )
+
+
+# --- WO-089 begin ---
+@lru_cache(maxsize=1)
+def _default_sonar() -> SonarSetup:
+    return sonar_setup()
+
+
+# --- WO-089 end ---
 
 
 @lru_cache(maxsize=1)
@@ -265,6 +283,9 @@ class _Reading:
     lon: float
     depth_m: float
     acoustic: AcousticTruth
+    # --- WO-089 begin: the sonar logistic term at this reading (None under gaussian) ---
+    term: float | None = None
+    # --- WO-089 end ---
 
 
 def _in_box(lat: float, lon: float) -> bool:
@@ -280,11 +301,65 @@ def _reading(
     depth: float,
     range_m: float,
     acoustic: AcousticTruth,
+    term: float | None = None,  # WO-089
 ) -> _Reading | None:
     lat, lon = from_local_m(x, y)
     if not _in_box(lat, lon):
         return None  # off the map: the harbor's sensors do not report it
-    return _Reading(tick, node.node_id, range_m, health, node.range_m, lat, lon, depth, acoustic)
+    return _Reading(
+        tick, node.node_id, range_m, health, node.range_m, lat, lon, depth, acoustic, term
+    )
+
+
+# --- WO-089 begin: per-node, per-tick ambient noise for the sonar model ---
+
+
+class NodeNoise:
+    """NL at each node and tick: calm NL (base + sea state) plus the vessel transits in
+    ``ais_tracks`` (WO-080 part A's ``SimRun.ais_tracks``; empty until it is on main),
+    weighted by distance and summed in the power domain. Pure; cached per tick."""
+
+    def __init__(
+        self,
+        nodes: Sequence[SensorNode],
+        setup: SonarSetup,
+        tick_s: float,
+        ais_tracks: Mapping[str, Sequence[AisFix]] | None = None,
+        r0_m: float = 400.0,
+    ) -> None:
+        self.nodes = list(nodes)
+        self.setup = setup
+        self.gains = tuple(node_gain_db(n.range_m, r0_m, setup) for n in self.nodes)
+        self.tick_s = float(tick_s)
+        self._tracks = {
+            k: sorted(v, key=lambda r: r.tick) for k, v in sorted((ais_tracks or {}).items())
+        }
+        self._cache: dict[int, tuple[float, ...]] = {}
+
+    def levels(self, tick: int) -> tuple[float, ...]:
+        """NL (dB) at every node, in node order, at ``tick``."""
+        hit = self._cache.get(tick)
+        if hit is not None:
+            return hit
+        fixes = vessel_fixes_at(self._tracks, tick, self.tick_s) if self._tracks else []
+        if not fixes:
+            out = tuple(self.setup.base_nl_db for _ in self.nodes)
+        else:
+            cfg = self.setup.cfg
+            base = cfg.sonar.ambient_noise_base_db.value
+            out = tuple(
+                ambient_noise_db(base, cfg.sonar.sea_state, fixes, n.lat, n.lon, cfg)
+                for n in self.nodes
+            )
+        self._cache[tick] = out
+        return out
+
+
+def _class_of(acoustic: AcousticTruth) -> str:
+    return acoustic_class(acoustic.propeller_tonal, acoustic.biologic_signature)
+
+
+# --- WO-089 end ---
 
 
 def _detect_contact(
@@ -295,19 +370,40 @@ def _detect_contact(
     dropouts: dict[str, int],
     params: DetectionParams,
     rng: np.random.Generator,
+    noise: NodeNoise | None = None,  # WO-089: set when detection.model is sonar_equation
 ) -> list[_Reading]:
     """Per tick: one detection draw per node (sorted), fuse nearest, gap process, noise."""
     out: list[_Reading] = []
     gap = GapState()
+    # --- WO-089 begin ---
+    cls = _class_of(truth.acoustic)
+    nl_at: tuple[float, ...] = ()
+    # --- WO-089 end ---
     for k in range(path.shape[0]):
         tick = truth.first_tick + k
         x, y, depth = float(path[k, 0]), float(path[k, 1]), float(path[k, 2])
         candidates: list[tuple[str, float]] = []
         by_id: dict[str, tuple[SensorNode, float]] = {}
-        for node, (nx, ny) in zip(nodes, node_xy, strict=True):
+        # --- WO-089 begin ---
+        nl_by_id: dict[str, float] = {}
+        gain_by_id: dict[str, float] = {}
+        if noise is not None:
+            nl_at = noise.levels(tick)
+        # --- WO-089 end ---
+        for i, (node, (nx, ny)) in enumerate(zip(nodes, node_xy, strict=True)):
             rng_m = math.hypot(x - nx, y - ny)
             health = node_health(node.health, node.node_id, tick, dropouts)
-            if sample_detected(rng, rng_m, node.range_m, health, params):
+            # --- WO-089 begin: one draw per node either way, so the rng streams align ---
+            if noise is not None:
+                hit = sample_detected_sonar(
+                    rng, rng_m, cls, nl_at[i], health, params, noise.setup, noise.gains[i]
+                )
+                nl_by_id[node.node_id] = nl_at[i]
+                gain_by_id[node.node_id] = noise.gains[i]
+            else:
+                hit = sample_detected(rng, rng_m, node.range_m, health, params)
+            # --- WO-089 end ---
+            if hit:
                 candidates.append((node.node_id, rng_m))
                 by_id[node.node_id] = (node, health)
         fused = fuse_nearest(candidates)
@@ -319,7 +415,12 @@ def _detect_contact(
         acoustic, _ = apply_silence(
             tick, truth.silent_after_tick, truth.acoustic, truth.replies_to_hail
         )
-        r = _reading(tick, node, health, x + dx, y + dy, depth, fused[1], acoustic)
+        # --- WO-089 begin ---
+        term = None
+        if noise is not None:
+            term = sonar_term(fused[1], cls, nl_by_id[fused[0]], noise.setup, gain_by_id[fused[0]])
+        r = _reading(tick, node, health, x + dx, y + dy, depth, fused[1], acoustic, term)
+        # --- WO-089 end ---
         if r is not None:
             out.append(r)
     return out
@@ -332,6 +433,8 @@ def _emit_false_alarm(
     dropouts: dict[str, int],
     params: DetectionParams,
     rng: np.random.Generator,
+    noise: NodeNoise | None = None,  # WO-089
+    node_index: int = 0,  # WO-089
 ) -> list[_Reading]:
     """A false alarm is reported by its node every tick of its life while the node works."""
     nx, ny = to_local_m(node.lat, node.lon)
@@ -344,7 +447,14 @@ def _emit_false_alarm(
         health = node_health(node.health, node.node_id, tick, dropouts)
         if health <= 0.0:
             continue
-        r = _reading(tick, node, health, x + dx, y + dy, depth, rng_m, truth.acoustic)
+        # --- WO-089 begin ---
+        term = None
+        if noise is not None:
+            nl = noise.levels(tick)[node_index]
+            gain = noise.gains[node_index]
+            term = sonar_term(rng_m, _class_of(truth.acoustic), nl, noise.setup, gain)
+        r = _reading(tick, node, health, x + dx, y + dy, depth, rng_m, truth.acoustic, term)
+        # --- WO-089 end ---
         if r is not None:
             out.append(r)
     return out
@@ -393,7 +503,13 @@ def _track(cid: str, tick_s: float, readings: Sequence[_Reading], cfg: SimConfig
                     )
                 ),
                 sensor_id=r.node_id,
-                confidence=reading_confidence(r.range_m, r.r0_m, r.health),
+                # --- WO-089 begin ---
+                confidence=(
+                    reading_confidence(r.range_m, r.r0_m, r.health)
+                    if r.term is None
+                    else sonar_reading_confidence(r.term, r.health)
+                ),
+                # --- WO-089 end ---
                 acoustic=readings_cache[r.acoustic],
             )
         )
@@ -436,11 +552,15 @@ def run_scenario(
     harbor: Harbor | None = None,
     params: DetectionParams | None = None,
     likelihoods: LikelihoodSpec | None = None,
+    ais_feed: Mapping[str, Sequence[AisFix]] | None = None,  # WO-089
 ) -> SimRun:
     """Run one scenario. ``seed=None`` uses ``scenario.seed``; ``ticks=None`` uses
     ``scenario.duration_ticks``; ``harbor=None`` loads ``config/harbor.geojson``;
     ``params=None`` loads ``config/sim.yaml``; ``likelihoods=None`` samples unset acoustic
     fields from ``config/likelihoods.yaml`` (WO-051 passes a perturbed table instead).
+    ``ais_feed`` (WO-089) are vessel AIS reports whose noise raises each node's NL under
+    ``detection.model: sonar_equation``; None means none (the run's own ``ais_tracks`` are
+    built after detection, so they do not feed NL yet).
     Pure: same arguments, same ``SimRun``.
 
     Prefix-stable: with ``ticks=N`` greater than ``duration_ticks`` the first
@@ -466,6 +586,13 @@ def run_scenario(
     node_ids = [n.node_id for n in nodes]
     dropouts = dropout_ticks(scenario.toggles, node_ids)
     quiet = quiet_ticks(scenario.toggles)
+    # --- WO-089 begin ---
+    noise = (
+        NodeNoise(nodes, _default_sonar(), tick_s, ais_feed, p.r0_m)
+        if p.model == "sonar_equation"
+        else None
+    )
+    # --- WO-089 end ---
 
     ss_contacts, ss_nodes, ss_fa, ss_acoustics, ss_toggles = np.random.SeedSequence(run_seed).spawn(
         5
@@ -530,7 +657,7 @@ def run_scenario(
             vessel_ids.append(truth.gt_id)  # surface: never detected, AIS feed only
             continue
         readings[truth.gt_id] = _detect_contact(
-            truth, path, nodes, node_xy, dropouts, p, np.random.default_rng(det_ss)
+            truth, path, nodes, node_xy, dropouts, p, np.random.default_rng(det_ss), noise
         )
 
     # Biologic false alarms: Poisson arrivals per node per tick, nodes sorted by id.
@@ -549,6 +676,7 @@ def run_scenario(
                     spawns.append((tick, node.node_id, fa))
     spawns.sort(key=lambda s: (s[0], s[1]))  # stable: arrival order within a node and tick
     node_by_id = {n.node_id: n for n in nodes}
+    node_index = {n.node_id: i for i, n in enumerate(nodes)}  # WO-089
     for i, ((tick, node_id, fa), fss) in enumerate(
         zip(spawns, ss_fa.spawn(len(spawns)), strict=True), start=1
     ):
@@ -588,7 +716,14 @@ def run_scenario(
         truths.append(truth)
         paths[truth.gt_id] = path
         readings[truth.gt_id] = _emit_false_alarm(
-            truth, path, node, dropouts, p, np.random.default_rng(fa_noise_ss)
+            truth,
+            path,
+            node,
+            dropouts,
+            p,
+            np.random.default_rng(fa_noise_ss),
+            noise,  # WO-089
+            node_index[node_id],
         )
 
     # Observed ids: split each contact's readings on the timeout, then number segments
