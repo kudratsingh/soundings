@@ -29,9 +29,7 @@ the output boundary (``to_dict``).
 
 from __future__ import annotations
 
-import argparse
 import math
-import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -40,7 +38,7 @@ from typing import Any, Final
 import yaml
 from pydantic import ConfigDict, Field, field_validator
 
-from soundings.canonical import canonical_json, round6
+from soundings.canonical import round6
 from soundings.investigation.evidence import EvidenceTable
 from soundings.investigation.features import bucketize
 from soundings.schemas._base import StrictModel
@@ -487,51 +485,14 @@ def score_run_table(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``python -m soundings.investigation.posterior --scenario S05 --seed 11``."""
-    from soundings.investigation.features import build_evidence
-    from soundings.investigation.pol import DEFAULT_POL_PATH, load_pol_table
-    from soundings.schemas.harbor import load_harbor
-    from soundings.sim.current import load_current_field, tide_phase_for_hour
-    from soundings.sim.run import run_scenario
-    from soundings.sim.scenario import UnknownScenarioError, resolve_scenario
+    """``python -m soundings.investigation.posterior --scenario S05 --seed 11``.
 
-    parser = argparse.ArgumentParser(
-        prog="python -m soundings.investigation.posterior",
-        description="Print every contact's posterior report for a simulated scenario.",
-    )
-    parser.add_argument("--scenario", required=True, help="catalog id (S05), 'smoke', or a path")
-    parser.add_argument("--seed", type=int, default=None, help="default: the scenario's seed")
-    parser.add_argument("--ticks", type=int, default=None, help="default: the scenario length")
-    parser.add_argument("--pol", type=Path, default=DEFAULT_POL_PATH, help="pattern-of-life table")
-    parser.add_argument("--no-pol", action="store_true", help="pattern of life unknown")
-    args = parser.parse_args(argv)
+    The simulator wiring lives in the ``soundings.dumps`` composition root, imported only
+    when the command runs; this module imports nothing from ``soundings.sim``.
+    """
+    from soundings.dumps import posterior_dump
 
-    harbor = load_harbor()
-    try:
-        scenario = resolve_scenario(args.scenario, harbor)
-    except UnknownScenarioError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    run = run_scenario(scenario, seed=args.seed, ticks=args.ticks, harbor=harbor)
-    pol = None if args.no_pol else load_pol_table(args.pol)
-    field = load_current_field()
-    table = build_evidence(
-        run,
-        harbor,
-        field,
-        pol,
-        hour_of_day=scenario.hour_of_day,
-        tide_phase_for_hour=lambda hour: tide_phase_for_hour(hour, field),
-    )
-    reports = score_run_table(table, load_likelihood_tables(), load_prior_config())
-    doc = {
-        "label": STRESS_TEST_LABEL,
-        "scenario": run.scenario_id,
-        "seed": run.seed,
-        "contacts": [r.to_dict() for r in reports],
-    }
-    sys.stdout.write(canonical_json(doc) + "\n")
-    return 0
+    return posterior_dump(argv)
 
 
 __all__ = [

@@ -133,7 +133,18 @@ slow (standing orders, `advisory_one_basin`); ask is the ceiling when orders are
 - §3: thresholds come from config only (`test_thresholds`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: (see STATE row) · Merged commit: (squash, see STATE row) · Test summary: `make check` green locally; WO-083 suites 25 passed (test_cpa 8, test_separation 5, test_separation_guard 6, test_separation_bt01 6 with BT-01 present; the 3 BT-01 cases skip with a reason until WO-080 part A is on main) · STATE.md updated: yes
+
+Implemented as specified, with these differences (DECISIONS 2026-10-17 07:01):
+- `soundings/advisories/{__init__,cpa,separation}.py`, `config/advisories.yaml`; guards.py gains `_slow_scope_problem` (marked WO-083 block; `_slow_problem` calls it, `slow_permitted` unchanged: test_guards + test_guards_integration pass unmodified) and a `# --- WO-083 begin: separation ---` block with `SeparationFacts`, `separation_inputs_hash`, `separation_slow_permitted`, and `BoundaryGuards.separation_decision` (in-class block).
+- `SeparationFacts` also carries `vessel_id` and `plan_id` (patterned ids, no free text). Own = vessel, other = job.
+- Block reasons: `standing_orders_unsigned` (unsigned or expired), `slow_not_in_standing_scope`, `unknown_input:basin`, `basin_out_of_standing_scope`, `cpa_not_below_separation_m`, `tcpa_outside_advisory_window`, `scope_exceeded:*`; permit reason `separation_criteria_met`.
+- `inputs_hash = stable_hash({"guard_inputs": ..., "separation": facts})`: the same mapping the audit row stores as `inputs`, so each row re-hashes to its `inputs_hash`.
+- `AdvisoryDecision.label`: "slow advisory proposed for basin <basin>" or "advisory blocked: out of standing-orders scope" (basin/scope) / "advisory blocked: standing orders unsigned or expired"; blocked advisories never count as interruptions and `advise_run` is read-only over the `RunResult`.
+- `in_water_jobs` dead-reckons the fitted position from the last reading to `tick * tick_s`; two cleared cases of one lineage on one plan yield one job (latest reading). `separation_check` raises if a vessel and a job fix carry different ticks.
+- `vessel_fixes(sim, tick, *, interval_s=None)` reads `sim.ais_tracks` via `getattr` (empty when absent) and `report_interval_s()` imports `soundings.sim.ais` when present (else WO-080's 10 s default), so the module works before and after WO-080 merges. Stale: older than 2 x report interval.
+- BT-01 at seed 7 (checked against WO-080's branch): 101 encounter decisions, issued ones all in inner_harbor_west, main_channel ones blocked `basin_out_of_standing_scope`; no in-memory vessel needed. An S01 + one in-memory vessel case exercises the pipeline without BT-01. The subprocess determinism runs re-advise the parent's pickled BT-01 run (the runner's own determinism is WO-080's test).
+- Cut line: nothing dropped. No dependency added.
 
 ## Notes for downstream
 - WO-084: `JobFix.velocity_source` is `"window"` here. When WO-084's flag is on, `in_water_jobs` may take the Kalman state for the job contact. The CPA inputs then record `velocity_source="kalman"`, and the hashes change accordingly.

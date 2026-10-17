@@ -50,4 +50,12 @@ None.
 1. The persisted JSON counter (keep an in-process counter; note it). 2. `last_path` on the endpoint (keep `mode` + remaining).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see branch PR (wo/087-bounded-live-mode) · Merged commit: squash on merge · Test summary: 1907 passed, 1 skipped, 2 xfailed after rebase on WO-033 part B (new: tests/test_live_mode.py 44, tests/test_api_model_mode.py 5, tests/test_audit.py -k llm_path 3) · STATE.md updated: WO-087 row
+
+Notes for downstream:
+- `ModelClient(mode, store, model_name, *, live_budget=None, timeout_s=6.0, transport=None)`; `transport` is now keyword-only (every caller on main already passed it by name).
+- Every call leaves an `LlmCallRecord` (role, path live|replay|fallback, reason, fixture_key, tokens_in/out, latency_ms) on `client.call_log`; `client.last_call` / `client.last_path`; process-wide `soundings.llm.client.last_path()` feeds `GET /api/model_mode`.
+- Live fallback reasons: `budget_exhausted`, `timeout`, `error:<ExceptionType>`; replay miss stays `replay_miss`. `RoleOutcome.fallback_reason` and `PlannerChoice.fallback_reason` carry them.
+- `RoleOutcome.call` and `SitrepOutcome.call` hold the record; `soundings.llm.roles.llm_call_fields(role, outcome)` + `soundings.ladder.audit.llm_call_payload(**fields)` is the planner/hypothesis `llm_call` row (WO-033 part B: append one per `LlmPlanner.choose` from `planner.last_outcome`). The handoff already writes SITREP rows with the path.
+- Stage enable: `MODEL_MODE=live LIVE_CALL_BUDGET=40` and build the client with `live_client_from_env()` (refuses in CI, refuses without the budget, wires the vendor transport and the persisted cap). `make_planner` and `investigation_wiring.make_kit` still pin replay: the stage run needs that client passed into `InvestigationKit(planner=LlmPlanner(client), writer=HypothesisWriter(client))` (the tests do exactly this in tests/support/live_runs.py) and into `HandoffService`.
+- Judge panel (WO-061): `fetchModelMode()` and `modelBadge(info)` in web/src/api.ts (WO-087 block) give "model: live" / "model: fallback" / "model: replay".
