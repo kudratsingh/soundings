@@ -8,7 +8,7 @@ ground_truth: UNAUTHORIZED_UUV
 hour_of_day: 2
 contacts:
   - id: gt-1
-    start: {lat: 33.7350, lon: -118.2620, depth_m: 6}
+    start: {lat: 33.7410, lon: -118.2582, depth_m: 6}   # east of the berths; passes fuel_berth_1 on the way
     behavior: {type: transit, target_asset: fuel_berth_2, speed_mps: 1.0}
     acoustic: {propeller_tonal: true, tonal_band: mid, biologic_signature: false}
     registry: {filed: false, replies_to_hail: false}
