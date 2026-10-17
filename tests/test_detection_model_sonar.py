@@ -192,8 +192,8 @@ def test_run_with_synthetic_vessel_fixes_is_deterministic_and_quieter() -> None:
         nx, ny = to_local_m(n.lat, n.lon)
         lat, lon = from_local_m(nx + 40.0, ny)
         tracks[f"v{i}"] = [Fix(t, lat, lon, 1.0) for t in range(0, sc.duration_ticks, 5)]
-    noisy = run_scenario(sc, seed=11, ais_tracks=tracks, params=PARAMS)
-    again = run_scenario(sc, seed=11, ais_tracks=tracks, params=PARAMS)
+    noisy = run_scenario(sc, seed=11, ais_feed=tracks, params=PARAMS)
+    again = run_scenario(sc, seed=11, ais_feed=tracks, params=PARAMS)
     assert track_hash(noisy) == track_hash(again)
     real = [d for d in base.detections if not d.is_false_alarm]
     real_noisy = [d for d in noisy.detections if not d.is_false_alarm]

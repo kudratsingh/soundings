@@ -552,14 +552,15 @@ def run_scenario(
     harbor: Harbor | None = None,
     params: DetectionParams | None = None,
     likelihoods: LikelihoodSpec | None = None,
-    ais_tracks: Mapping[str, Sequence[AisFix]] | None = None,  # WO-089
+    ais_feed: Mapping[str, Sequence[AisFix]] | None = None,  # WO-089
 ) -> SimRun:
     """Run one scenario. ``seed=None`` uses ``scenario.seed``; ``ticks=None`` uses
     ``scenario.duration_ticks``; ``harbor=None`` loads ``config/harbor.geojson``;
     ``params=None`` loads ``config/sim.yaml``; ``likelihoods=None`` samples unset acoustic
     fields from ``config/likelihoods.yaml`` (WO-051 passes a perturbed table instead).
-    ``ais_tracks`` (WO-089) are the vessel transits whose noise raises each node's NL under
-    ``detection.model: sonar_equation``; None means none (WO-080 part A passes its own).
+    ``ais_feed`` (WO-089) are vessel AIS reports whose noise raises each node's NL under
+    ``detection.model: sonar_equation``; None means none (the run's own ``ais_tracks`` are
+    built after detection, so they do not feed NL yet).
     Pure: same arguments, same ``SimRun``.
 
     Prefix-stable: with ``ticks=N`` greater than ``duration_ticks`` the first
@@ -587,7 +588,7 @@ def run_scenario(
     quiet = quiet_ticks(scenario.toggles)
     # --- WO-089 begin ---
     noise = (
-        NodeNoise(nodes, _default_sonar(), tick_s, ais_tracks, p.r0_m)
+        NodeNoise(nodes, _default_sonar(), tick_s, ais_feed, p.r0_m)
         if p.model == "sonar_equation"
         else None
     )
