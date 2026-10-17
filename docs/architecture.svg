@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 520" width="1280" height="520" role="img" aria-labelledby="title desc">
+  <title id="title">Soundings architecture</title>
+  <desc id="desc">Contact feed to evidence table to investigation to ladder and guards to handoff. Model roles probe_planner, hypothesis_writer and sitrep_writer propose only; deterministic code decides. The registry and the acoustic hail feed the ask rung. The work stops at the handoff.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8fa9b6"/>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#22a3c4"/>
+    </marker>
+    <marker id="arrow-model" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d98a3d"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #e3eef3; }
+      .h { font-size: 16px; font-weight: 650; }
+      .b { font-size: 12.5px; fill: #8fa9b6; }
+      .s { font-size: 11.5px; fill: #8fa9b6; }
+      .stage { fill: #0d2230; stroke: #23404f; stroke-width: 1.5; }
+      .role { fill: #1c160d; stroke: #b35900; stroke-width: 1.2; stroke-dasharray: 5 4; }
+      .badge { fill: #b35900; }
+      .badge-t { font-size: 10.5px; font-weight: 700; fill: #fff4e6; letter-spacing: 0.04em; }
+      .chip { fill: #07161f; stroke: #23404f; stroke-width: 1.2; }
+      .chip-live { fill: #0e7490; stroke: #22a3c4; stroke-width: 1.2; }
+      .chip-so { fill: #07161f; stroke: #4b6575; stroke-width: 1.2; stroke-dasharray: 3 3; }
+      .chip-t { font-size: 12px; font-weight: 600; text-anchor: middle; }
+      .flow { stroke: #8fa9b6; stroke-width: 1.6; fill: none; }
+      .flow-accent { stroke: #22a3c4; stroke-width: 1.6; fill: none; }
+      .flow-model { stroke: #d98a3d; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; }
+      .fact { fill: #5b9bff; }
+      .assume { fill: #e08a2e; }
+      .stop { fill: #22a3c4; font-weight: 650; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="520" rx="14" fill="#07161f"/>
+
+  <!-- model roles: propose only -->
+  <g>
+    <rect class="role" x="320" y="26" width="226" height="62" rx="8"/>
+    <text x="334" y="50" class="h" style="font-size:14px">probe_planner</text>
+    <text x="334" y="72" class="s">next probe, from the allowlist</text>
+    <rect class="badge" x="460" y="36" width="78" height="18" rx="9"/>
+    <text x="499" y="49" class="badge-t" text-anchor="middle">propose only</text>
+
+    <rect class="role" x="560" y="26" width="248" height="62" rx="8"/>
+    <text x="574" y="50" class="h" style="font-size:14px">hypothesis_writer</text>
+    <text x="574" y="72" class="s">hypotheses + questions for a person</text>
+    <rect class="badge" x="720" y="36" width="78" height="18" rx="9"/>
+    <text x="759" y="49" class="badge-t" text-anchor="middle">propose only</text>
+
+    <rect class="role" x="1060" y="26" width="200" height="62" rx="8"/>
+    <text x="1074" y="50" class="h" style="font-size:14px">sitrep_writer</text>
+    <text x="1074" y="72" class="s">drafts the report text</text>
+    <rect class="badge" x="1172" y="36" width="78" height="18" rx="9"/>
+    <text x="1211" y="49" class="badge-t" text-anchor="middle">propose only</text>
+
+    <path class="flow-model" d="M480,88 L520,148" marker-end="url(#arrow-model)"/>
+    <path class="flow-model" d="M640,88 L580,148" marker-end="url(#arrow-model)"/>
+    <path class="flow-model" d="M1170,88 L1170,148" marker-end="url(#arrow-model)"/>
+    <text x="690" y="132" class="s" style="fill:#d98a3d">guard code accepts or rejects every proposal</text>
+  </g>
+
+  <!-- the five stages -->
+  <g>
+    <rect class="stage" x="20" y="150" width="170" height="180" rx="10"/>
+    <text x="36" y="180" class="h">contact feed</text>
+    <text x="36" y="206" class="b">simulated detections</text>
+    <text x="36" y="226" class="b">range · noise · gaps</text>
+    <text x="36" y="246" class="b">biologic false alarms</text>
+    <text x="36" y="312" class="s">WebSocket to the UI</text>
+
+    <rect class="stage" x="220" y="150" width="190" height="180" rx="10"/>
+    <text x="236" y="180" class="h">evidence table</text>
+    <text x="236" y="206" class="b">typed rows per contact</text>
+    <circle cx="241" cy="222" r="4" class="fact"/><text x="252" y="226" class="b">fact</text>
+    <circle cx="290" cy="222" r="4" class="assume"/><text x="301" y="226" class="b">assumption</text>
+    <text x="236" y="246" class="b">labeled separately</text>
+    <text x="236" y="312" class="s">every report line links here</text>
+
+    <rect class="stage" x="440" y="150" width="210" height="180" rx="10"/>
+    <text x="456" y="180" class="h">investigation</text>
+    <text x="456" y="206" class="b">posterior over 8 hypotheses</text>
+    <text x="456" y="226" class="b">cheapest useful probe next</text>
+    <text x="456" y="246" class="b">deterministic stopping rule</text>
+    <text x="456" y="312" class="s">rule-based fallback planner</text>
+
+    <rect class="stage" x="680" y="150" width="380" height="180" rx="10"/>
+    <text x="696" y="180" class="h">ladder / guards</text>
+    <text x="696" y="206" class="b">boundary table in config/ladder.yaml decides</text>
+    <text x="696" y="226" class="b">what runs alone, under signed standing orders,</text>
+    <text x="696" y="246" class="b">or only with a named person's approval</text>
+    <rect class="chip" x="696" y="276" width="56" height="26" rx="13"/><text x="724" y="293" class="chip-t">watch</text>
+    <rect class="chip-live" x="766" y="276" width="44" height="26" rx="13"/><text x="788" y="293" class="chip-t">ask</text>
+    <rect class="chip-so" x="824" y="276" width="48" height="26" rx="13"/><text x="848" y="293" class="chip-t">slow</text>
+    <rect class="chip-so" x="886" y="276" width="48" height="26" rx="13"/><text x="910" y="293" class="chip-t">hold</text>
+    <rect class="chip-live" x="948" y="276" width="100" height="26" rx="13"/><text x="998" y="293" class="chip-t" style="font-size:11px">hand to a person</text>
+
+    <rect class="stage" x="1090" y="150" width="170" height="180" rx="10" style="stroke:#22a3c4"/>
+    <text x="1106" y="180" class="h">handoff</text>
+    <text x="1106" y="206" class="b">report + evidence +</text>
+    <text x="1106" y="226" class="b">recommended rung</text>
+    <text x="1106" y="246" class="b">to a named person</text>
+    <text x="1106" y="292" class="s stop">the work stops here</text>
+    <text x="1106" y="312" class="s">then watch only</text>
+  </g>
+
+  <!-- main flow -->
+  <path class="flow" d="M190,240 L216,240" marker-end="url(#arrow)"/>
+  <path class="flow" d="M410,240 L436,240" marker-end="url(#arrow)"/>
+  <path class="flow" d="M650,240 L676,240" marker-end="url(#arrow)"/>
+  <path class="flow-accent" d="M1060,240 L1086,240" marker-end="url(#arrow-accent)"/>
+
+  <!-- probe results loop back into the evidence table -->
+  <path class="flow" d="M545,330 L545,366 L315,366 L315,334" marker-end="url(#arrow)"/>
+  <text x="340" y="384" class="s">probe results become new rows</text>
+
+  <!-- registry + hail feed ask -->
+  <g>
+    <rect class="stage" x="620" y="404" width="190" height="58" rx="8"/>
+    <text x="634" y="428" class="h" style="font-size:14px">registry</text>
+    <text x="634" y="448" class="s">planned underwater work</text>
+    <rect class="stage" x="830" y="404" width="210" height="58" rx="8"/>
+    <text x="844" y="428" class="h" style="font-size:14px">acoustic hail</text>
+    <text x="844" y="448" class="s">challenge-response (simulated)</text>
+    <path class="flow-accent" d="M730,404 L780,306" marker-end="url(#arrow-accent)"/>
+    <path class="flow-accent" d="M900,404 L798,306" marker-end="url(#arrow-accent)"/>
+  </g>
+
+  <!-- legend -->
+  <text x="20" y="500" class="s"><tspan style="fill:#d98a3d">propose only</tspan>: model output, replayed from fixtures by default, with a deterministic fallback; it never sets a rung, a threshold, or an approval.  Solid boxes: deterministic code.  Dashed rungs run only under signed standing orders.</text>
+</svg>
