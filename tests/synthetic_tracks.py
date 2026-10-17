@@ -8,11 +8,16 @@ compass headings (0 = north, clockwise positive), matching the feature code.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
 
+from soundings.canonical import round6
 from soundings.investigation.velocity import TrackArrays
+from soundings.schemas.geo import from_local_m
+from soundings.schemas.track import AcousticReading, Track, TrackGap, TrackPoint
 
 TICK_S = 2.0
 FArr = NDArray[np.float64]
@@ -158,3 +163,84 @@ def random_walk(
 def stationary(*, duration_s: float = 600.0, sigma_m: float = 5.0, seed: int = 0) -> TrackArrays:
     t = _times(duration_s)
     return make_track(t, np.zeros_like(t), np.zeros_like(t), sigma_m=sigma_m, seed=seed)
+
+
+# --- WO-010 Track builders -----------------------------------------------------------
+
+# Local-metre anchors on the real config/harbor.geojson map.
+FUEL_BERTHS_XY = (90.0, 300.0)  # inside fuel_berths (criticality 0.9), near hyd_1
+MAIN_CHANNEL_XY = (400.0, -1500.0)  # inside main_channel, near hyd_4
+OUTSIDE_ZONES_XY = (-2000.0, -2000.0)  # inside the bounding box, in no zone
+
+
+def to_track(
+    arrays: TrackArrays,
+    *,
+    contact_id: str = "c-0001",
+    origin_xy: tuple[float, float] = MAIN_CHANNEL_XY,
+    sigma_m: float = 1.0,
+    sensor_id: str = "hyd_4",
+    tick_s: float = TICK_S,
+    acoustic: AcousticReading | Sequence[AcousticReading] | None = None,
+    gaps: Sequence[tuple[int, int]] = (),
+) -> Track:
+    """A WO-010 ``Track`` from local-metre columns shifted by ``origin_xy``.
+
+    Ticks are ``round(t_s / tick_s)``; lat/lon are rounded to 6 dp like the sim output.
+    """
+    points = []
+    for i in range(len(arrays)):
+        lat, lon = from_local_m(
+            float(arrays.x_m[i]) + origin_xy[0], float(arrays.y_m[i]) + origin_xy[1]
+        )
+        if acoustic is None:
+            reading = AcousticReading()
+        elif isinstance(acoustic, AcousticReading):
+            reading = acoustic
+        else:
+            reading = acoustic[i]
+        points.append(
+            TrackPoint(
+                tick=int(round(float(arrays.t_s[i]) / tick_s)),
+                lat=round6(lat),
+                lon=round6(lon),
+                depth_m=round6(float(arrays.depth_m[i])),
+                sigma_m=sigma_m,
+                sensor_id=sensor_id,
+                confidence=round6(float(arrays.confidence[i])),
+                acoustic=reading,
+            )
+        )
+    return Track(
+        contact_id=contact_id,
+        tick_s=tick_s,
+        points=tuple(points),
+        gaps=tuple(TrackGap(start_tick=a, end_tick=b) for a, b in gaps),
+    )
+
+
+def line_track(
+    n: int,
+    *,
+    speed: float = 1.0,
+    heading_deg: float = 90.0,
+    confidence: float | FArr = 0.9,
+    **kwargs: object,
+) -> Track:
+    """A noise-free ``n``-point line at ``speed`` m/s, 2 s ticks."""
+    t = np.arange(n, dtype=np.float64) * TICK_S
+    h = math.radians(heading_deg)
+    arrays = make_track(t, speed * t * math.sin(h), speed * t * math.cos(h), confidence=confidence)
+    return to_track(arrays, **kwargs)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class FakeRun:
+    """The two ``SimRun`` fields the evidence table reads (WO-011 is not merged yet)."""
+
+    tracks: Mapping[str, Track] = field(default_factory=dict)
+    tick_s: float = TICK_S
+
+
+def calm(_x: float, _y: float, _t: float) -> tuple[float, float]:
+    return (0.0, 0.0)
