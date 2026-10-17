@@ -958,6 +958,63 @@ def _contact_fix(ctx: ProbeContext, tick: int) -> tuple[float, float, float | No
     return float(last.lat), float(last.lon), speed
 
 
+# --- WO-088D begin ---
+SEARCH_SETTLE_S: Final = 4.0
+"""Demo value: two ticks after the last lawnmower leg before the search result lands."""
+
+
+def search_spacing_m(port: object) -> float:
+    """The lawnmower lane spacing: the responder's ``search_track_spacing_m`` (config
+    ``config/responder.yaml``, one source of truth), else two sensor radii (a port
+    without one, e.g. a test double)."""
+    spacing = getattr(port, "search_track_spacing_m", None)
+    if isinstance(spacing, int | float) and not isinstance(spacing, bool) and spacing > 0:
+        return float(spacing)
+    return 2.0 * SEARCH_DETECT_RADIUS_M
+
+
+def search_detect_radius_m(port: object) -> float:
+    """The search sensor's range: at least half a lane, so legs ``spacing`` apart cover
+    the whole box (never below ``SEARCH_DETECT_RADIUS_M``)."""
+    return max(SEARCH_DETECT_RADIUS_M, search_spacing_m(port) / 2.0)
+
+
+# --- WO-088D end ---
+
+
+# --- WO-088D begin ---
+LOOK_SETTLE_S: Final = 20.0
+"""Demo value: after the transit ETA, time to settle on the station point (inside the
+5 m hysteresis) before the look is read."""
+
+
+def contact_fix(ctx: ProbeContext, tick: int) -> tuple[float, float, float | None] | None:
+    """The contact's last observed ``(lat, lon, speed)`` at or before ``tick``."""
+    return _contact_fix(ctx, tick)
+
+
+def advance_port(ctx: ProbeContext, port: ResponderPort, end: int) -> _SnapshotLike:
+    """Step the responder tick by tick up to ``end`` with ``ctx.contact_id``'s last fix
+    and nearest asset (the contact it is looking at); returns the latest snapshot."""
+    _step_to(ctx, port, int(port.snapshot.tick), end)
+    return port.snapshot
+
+
+def look_eta_estimate_s(ctx: ProbeContext) -> float | None:
+    """Before a dispatch: route time from where the responder is to the contact plus the
+    station radius and the settle time (None without a responder or a fix)."""
+    port = ctx.responder
+    fix = _contact_fix(ctx, ctx.tick)
+    if port is None or fix is None:
+        return None
+    snap = port.snapshot
+    transit = float(port.travel_time_s(snap.lat, snap.lon, fix[0], fix[1]))
+    return transit + (2.0 * LOOK_RANGE_REF_M) / NOMINAL_RESPONDER_SPEED_MPS + LOOK_SETTLE_S
+
+
+# --- WO-088D end ---
+
+
 def _responder_eta_s(ctx: ProbeContext, pid: ProbeId) -> float:
     """Transit time from where the responder is to the contact (or to the drift box)."""
     port = ctx.responder
@@ -968,9 +1025,17 @@ def _responder_eta_s(ctx: ProbeContext, pid: ProbeId) -> float:
         box = ctx.search_box
         if box is None:
             return ALLOWLIST[pid].latency_s
+        # --- WO-088D begin --- (the real lawnmower's own time when the port has one)
+        search_eta = getattr(port, "search_eta_s", None)
+        if callable(search_eta):
+            eta = float(search_eta(box))
+            if eta > 0.0:
+                return eta + SEARCH_SETTLE_S
+        spacing = search_spacing_m(port)
+        # --- WO-088D end ---
         transit = port.travel_time_s(snap.lat, snap.lon, box.center_lat, box.center_lon)
         side = 2.0 * box.radius_m
-        lanes = max(1, math.ceil(side / (2.0 * SEARCH_DETECT_RADIUS_M)))
+        lanes = max(1, math.ceil(side / spacing))  # WO-088D: the config's lane spacing
         sweep_m = lanes * side + side
         speed = NOMINAL_RESPONDER_SPEED_MPS
         return transit + sweep_m / speed
@@ -1166,12 +1231,15 @@ def _responder_search_box(
     if not dispatch.accepted:
         return _responder_unknown(ctx, pid, landed)
     found: tuple[float, float] | None = None
+    found_t = landed  # WO-088D: a find reports at the tick it was made
     snap = port.snapshot
     for t in range(max(ctx.tick, int(snap.tick)) + 1, landed + 1):
         snap = port.step(t)
         where = _truth_at(ctx, t)
-        if where is not None and distance_m(snap.lat, snap.lon, *where) <= SEARCH_DETECT_RADIUS_M:
+        reach = search_detect_radius_m(port)  # WO-088D: tied to the lane spacing
+        if where is not None and distance_m(snap.lat, snap.lon, *where) <= reach:
             found = where
+            found_t = t  # WO-088D
             break
     release(port, int(snap.tick))
     if found is None:
@@ -1183,8 +1251,8 @@ def _responder_search_box(
         ]
     position = f"{round6(found[0]):.6f},{round6(found[1]):.6f}"
     return [
-        _responder_row(ctx, pid, FeatureName.SEARCH_RESULT, "found", SEARCH_CONFIDENCE, landed),
-        _responder_row(ctx, pid, FeatureName.SEARCH_POSITION, position, SEARCH_CONFIDENCE, landed),
+        _responder_row(ctx, pid, FeatureName.SEARCH_RESULT, "found", SEARCH_CONFIDENCE, found_t),
+        _responder_row(ctx, pid, FeatureName.SEARCH_POSITION, position, SEARCH_CONFIDENCE, found_t),
     ]
 
 
@@ -1311,6 +1379,12 @@ __all__ = [
     "responder_args",
     "search_position",
     "catch_up",
+    "advance_port",  # WO-088D
+    "contact_fix",  # WO-088D
+    "look_eta_estimate_s",  # WO-088D
+    "search_detect_radius_m",  # WO-088D
+    "search_spacing_m",  # WO-088D
+    "LOOK_SETTLE_S",  # WO-088D
     "release",
     "state_name",
     "NOMINAL_CONFIDENCE",
