@@ -18,7 +18,9 @@ Row kinds and their payloads (typed, extra keys forbidden):
 * ``approval``: the token hash, never the token itself;
 * ``action``: action kind and idempotency key;
 * ``sitrep``: sha256 of the rendered markdown, writer, status, recommended rung;
-* ``llm_call``: role, fixture key, ``accepted|rejected|fallback_no_fixture``, violation reason.
+* ``llm_call``: role, fixture key, ``accepted|rejected|fallback_no_fixture|fallback``,
+  violation reason; with WO-087 also the path (``live|replay|fallback``), the fallback
+  reason, tokens in/out and latency (left out of the payload when unset).
 
 Retention label on every row: "30 days (demo)". The DB path defaults to env
 ``SOUNDINGS_DB`` (the registry's file).
@@ -34,7 +36,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import (
     BaseModel,
@@ -56,7 +58,7 @@ from soundings.ladder.approval import ApprovalToken, token_hash
 from soundings.ladder.checkpoint import LadderCheckpoint
 from soundings.ladder.types import GuardDecision
 from soundings.registry.store import db_path_from_env
-from soundings.schemas._base import HarborId, NonNegFloat, StrictModel
+from soundings.schemas._base import HarborId, NonNegFloat, NonNegInt, StrictModel
 from soundings.schemas.enums import LadderState, ProbeId, Rung
 
 GENESIS_HASH = "0" * 64
@@ -176,16 +178,91 @@ class SitrepPayload(StrictModel):
 
 
 class LlmCallPayload(StrictModel):
+    """One model call. The WO-087 fields are dropped from the stored payload when unset, so
+    rows written before them hash exactly as before."""
+
     role: HarborId
     fixture_key: Key
-    outcome: Literal["accepted", "rejected", "fallback_no_fixture"]
+    outcome: Literal["accepted", "rejected", "fallback_no_fixture", "fallback"]
     violation_reason: HarborId | None = None
+    # --- WO-087 begin: which path answered, why it fell back, tokens, latency ---
+    path: Literal["live", "replay", "fallback"] | None = None
+    reason: Key | None = None
+    tokens_in: NonNegInt | None = None
+    tokens_out: NonNegInt | None = None
+    latency_ms: NonNegFloat | None = None
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        for name in ("path", "reason", "tokens_in", "tokens_out", "latency_ms"):
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
+
+    # --- WO-087 end ---
 
     @model_validator(mode="after")
     def _reason_iff_rejected(self) -> LlmCallPayload:
         if (self.outcome == "rejected") != (self.violation_reason is not None):
             raise ValueError("violation_reason is set exactly when the outcome is rejected")
         return self
+
+
+# --- WO-087 begin: an llm_call row from a client call record ---
+class CallRecordLike(Protocol):
+    """The fields of a model client's call record this row reads (structural, so the audit
+    module never imports the model package)."""
+
+    @property
+    def path(self) -> Literal["live", "replay", "fallback"]: ...
+    @property
+    def reason(self) -> str | None: ...
+    @property
+    def tokens_in(self) -> int: ...
+    @property
+    def tokens_out(self) -> int: ...
+    @property
+    def latency_ms(self) -> float: ...
+
+
+def llm_call_payload(
+    *,
+    role: str,
+    fixture_key: str,
+    outcome: Literal["accepted", "rejected", "fallback_no_fixture", "fallback"],
+    violation_reason: str | None = None,
+    call: CallRecordLike | None = None,
+    reason: str | None = None,
+) -> LlmCallPayload:
+    """An ``llm_call`` row; ``call`` (the client's record) adds path, reason, tokens, latency.
+
+    With no ``call`` (the role's own budget refused the call before the client) the path is
+    ``fallback`` and only the outcome tells why.
+    """
+    if call is None:
+        return LlmCallPayload(
+            role=role,
+            fixture_key=fixture_key,
+            outcome=outcome,
+            violation_reason=violation_reason,
+            path="fallback" if outcome != "accepted" else None,
+            reason=reason,
+        )
+    return LlmCallPayload(
+        role=role,
+        fixture_key=fixture_key,
+        outcome=outcome,
+        violation_reason=violation_reason,
+        path=call.path,
+        reason=call.reason,
+        tokens_in=call.tokens_in,
+        tokens_out=call.tokens_out,
+        latency_ms=round6(call.latency_ms),
+    )
+
+
+# --- WO-087 end ---
 
 
 def guard_decision_payload(
@@ -763,6 +840,7 @@ __all__ = [
     "GuardInputsLog",
     "IdempotencyConflict",
     "LlmCallPayload",
+    "llm_call_payload",
     "ProbePayload",
     "SitrepPayload",
     "TransitionPayload",

@@ -543,9 +543,14 @@ def test_sitrep_path_rows_and_chain(tmp_path: Path) -> None:
     assert len(final["fixture_key"]) == 64 and "violation_reason" not in final
     assert final["recommended_rung"] == "hand_to_person" and final["channel"] == "ui"
     calls = [r.payload for r in good.audit.rows(kind="llm_call")]
+    # WO-087 adds path, tokens and latency to the llm_call row; the WO-042 fields are unchanged
+    (tokens_in, tokens_out) = (calls[0].get("tokens_in"), calls[0].get("tokens_out"))
+    assert isinstance(tokens_in, int) and tokens_in > 0
+    assert isinstance(tokens_out, int) and tokens_out > 0
     assert calls == [
         {"role": "sitrep_writer", "fixture_key": final["fixture_key"], "outcome": "accepted"}
         | {"violation_reason": None}
+        | {"path": "replay", "latency_ms": 0.0, "tokens_in": tokens_in, "tokens_out": tokens_out}
     ]
     packet_md = good.service.packets[1].markdown
     assert final["markdown_sha256"] == hashlib.sha256(packet_md.encode()).hexdigest()
@@ -603,3 +608,126 @@ def test_handoff_chain_deterministic(tmp_path: Path) -> None:
     assert [(r.kind, r.payload_json, r.row_hash) for r in a.audit.rows()] == [
         (r.kind, r.payload_json, r.row_hash) for r in b.audit.rows()
     ]
+
+
+# --- WO-087 begin: llm_call rows record the path of every SITREP and planner choice ---
+# Imports stay local to this block so the shared file's header is untouched.
+
+MODEL_CALL_FIXTURES = REPO / "tests" / "fixtures" / "model_calls"
+
+
+def test_llm_path_sitrep_live_replay_and_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SOUNDINGS_CI", raising=False)  # stub live calls; CI refuses real ones
+    from soundings.llm.client import FixtureStore, ModelClient, ModelMode
+    from soundings.llm.live_budget import LiveBudget
+    from tests.support.live_runs import STUB_MODEL, ScriptedTransport, handoff_s05
+
+    fixtures = FixtureStore(MODEL_CALL_FIXTURES)
+
+    def live_client(total: int) -> ModelClient:
+        return ModelClient(
+            mode=ModelMode.LIVE,
+            model_name=STUB_MODEL,
+            live_budget=LiveBudget(tmp_path / f"calls-{total}.json", total=total),
+            transport=ScriptedTransport(lambda role, inputs: fixtures.load(role, inputs) or {}),
+        )
+
+    runs = {
+        "replay": handoff_s05(tmp_path / "replay", ModelClient(ModelMode.REPLAY, fixtures)),
+        "live": handoff_s05(tmp_path / "live", live_client(5)),
+        "spent": handoff_s05(tmp_path / "spent", live_client(0)),
+    }
+    expected = {
+        "replay": ("fixture-replay", "accepted", "replay", None),
+        "live": ("live", "accepted", "live", None),
+        "spent": ("template", "fallback", "fallback", "budget_exhausted"),
+    }
+    for name, out in runs.items():
+        sitrep_path, outcome, call_path, reason = expected[name]
+        final = [r.payload for r in out.audit.rows(kind="sitrep")][1]
+        assert final["status"] == "final" and final["path"] == sitrep_path, name
+        (call,) = [r.payload for r in out.audit.rows(kind="llm_call")]
+        assert (call["outcome"], call["path"], call.get("reason")) == (outcome, call_path, reason)
+        assert call["fixture_key"] == final["fixture_key"]
+        assert {"tokens_in", "tokens_out", "latency_ms"} <= set(call)
+        assert out.audit.verify().ok
+    assert runs["live"].service.packets[1].markdown == runs["replay"].service.packets[1].markdown
+
+
+def test_llm_path_planner_choices(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SOUNDINGS_CI", raising=False)  # stub live calls and replay misses
+    from soundings.ladder.audit import llm_call_payload
+    from soundings.llm.client import FixtureStore, ModelClient, ModelMode
+    from soundings.llm.live_budget import LiveBudget
+    from soundings.llm.roles import ROLE_PROBE_PLANNER, llm_call_fields
+    from tests.support.live_runs import (
+        STUB_MODEL,
+        LlmMachinePlanner,
+        ScriptedTransport,
+        investigate,
+    )
+
+    slot: list[LlmMachinePlanner] = []
+    client = ModelClient(
+        mode=ModelMode.LIVE,
+        model_name=STUB_MODEL,
+        live_budget=LiveBudget(tmp_path / "calls.json", total=2),
+        transport=ScriptedTransport(lambda role, inputs: slot[0].deterministic_reply(role, inputs)),
+    )
+    inv = investigate("S05", client, tmp_path / "v.md", transport_slot=slot)
+    log = AuditLog(tmp_path / "audit.db")
+    for i, outcome in enumerate(inv.planner.outcomes):
+        payload = llm_call_payload(**llm_call_fields(ROLE_PROBE_PLANNER, outcome))
+        log.append(AuditKind.LLM_CALL, payload, run_id=RUN, t_s=float(i), contact_id=CID)
+    rows = [r.payload for r in log.rows(kind="llm_call")]
+    assert len(rows) == len(inv.planner.choices) >= 3
+    assert [r["path"] for r in rows] == ["live", "live"] + ["fallback"] * (len(rows) - 2)
+    assert [r["outcome"] for r in rows[:2]] == ["accepted", "accepted"]
+    assert all(r["outcome"] == "fallback" for r in rows[2:])
+    assert all(r["reason"] == "budget_exhausted" for r in rows[2:])
+    assert log.verify().ok
+
+    replay_log = AuditLog(tmp_path / "replay.db")
+    empty = FixtureStore(tmp_path / "no-fixtures")
+    replay = investigate("S05", ModelClient(ModelMode.REPLAY, empty), tmp_path / "r.md")
+    for i, outcome in enumerate(replay.planner.outcomes):
+        payload = llm_call_payload(**llm_call_fields(ROLE_PROBE_PLANNER, outcome))
+        replay_log.append(AuditKind.LLM_CALL, payload, run_id=RUN, t_s=float(i), contact_id=CID)
+    replay_rows = [r.payload for r in replay_log.rows(kind="llm_call")]
+    assert {(r["outcome"], r["path"], r.get("reason")) for r in replay_rows} == {
+        ("fallback_no_fixture", "fallback", "replay_miss")
+    }
+
+
+def test_llm_path_rejected_and_role_budget_rows() -> None:
+    from soundings.ladder.audit import llm_call_payload
+
+    rejected = llm_call_payload(
+        role="probe_planner",
+        fixture_key="k" * 64,
+        outcome="rejected",
+        violation_reason="names_rung",
+    )
+    assert rejected.model_dump(mode="json") == {
+        "role": "probe_planner",
+        "fixture_key": "k" * 64,
+        "outcome": "rejected",
+        "violation_reason": "names_rung",
+        "path": "fallback",
+    }
+    spent = llm_call_payload(
+        role="probe_planner", fixture_key="k" * 64, outcome="fallback", reason="llm_budget_spent"
+    )
+    assert spent.model_dump(mode="json")["reason"] == "llm_budget_spent"
+    plain = LlmCallPayload(role="sitrep_writer", fixture_key="k" * 64, outcome="accepted")
+    assert set(plain.model_dump(mode="json")) == {
+        "role",
+        "fixture_key",
+        "outcome",
+        "violation_reason",
+    }
+
+
+# --- WO-087 end ---
