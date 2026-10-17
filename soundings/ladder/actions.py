@@ -20,6 +20,9 @@ INTERRUPTION_KINDS: frozenset[ActionKind] = frozenset(
 )
 """Actions that ask a person to act (WO-040; WO-043 adds the handoff SITREP count)."""
 
+HOLD_LONGER = "hold_longer"
+"""The boundary action an approval request names when a hold reaches its limit."""
+
 
 class LadderAction(StrictModel):
     kind: ActionKind
@@ -55,6 +58,14 @@ def make_action(
         scope=scope,
         tick=event.tick,
         idempotency_key=action_key(contact_id, kind, scope, from_state, to_state, event),
+    )
+
+
+def _granted_hold(action: LadderAction) -> bool:
+    return (
+        action.kind is ActionKind.RECORD_APPROVED_ACTION
+        and action.scope is not None
+        and action.scope.action == HOLD_LONGER
     )
 
 
@@ -97,7 +108,10 @@ class ActionLedger:
         return tuple(r.action.idempotency_key for r in self.records(contact_id))
 
     def active_holds(self, exclude_contact: str | None = None) -> int:
-        """Contacts, across the whole run, with more ``start_hold`` than ``release_hold``.
+        """Contacts, across the whole run, with more holds started than released.
+
+        A hold starts with ``start_hold`` or with a person's granted ``hold_longer``
+        (``record_approved_action``); it ends with ``release_hold``.
 
         ``exclude_contact`` leaves one contact out: the machine passes its own id, so a
         re-delivered event after a crash sees the same world it saw the first time.
@@ -106,7 +120,7 @@ class ActionLedger:
         for r in self._records.values():
             if r.action.contact_id == exclude_contact:
                 continue
-            if r.action.kind is ActionKind.START_HOLD:
+            if r.action.kind is ActionKind.START_HOLD or _granted_hold(r.action):
                 balance[r.action.contact_id] = balance.get(r.action.contact_id, 0) + 1
             elif r.action.kind is ActionKind.RELEASE_HOLD:
                 balance[r.action.contact_id] = balance.get(r.action.contact_id, 0) - 1
