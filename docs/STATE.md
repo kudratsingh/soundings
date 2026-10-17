@@ -39,7 +39,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 030 | posterior | merged | wo/030-posterior | #11 | 69bd327 | 1043 passed (test_posterior) |
 | 031 | probes + planner | merged | wo/031-probes-planner | #19 | 5f10629 | see PR #19 |
 | 032 | llm planner guard | part A merged (#17, 51fcc2d); part B in progress | wo/032-llm-planner-guard | #17 | 51fcc2d | guard/fallback/fixture tests |
-| 033 | investigation machine | part A merged; part B pending | wo/033a-investigation-core | see PR | | 1266 passed (122 new: test_stopping_rule, test_investigation_machine, test_investigation part A) |
+| 033 | investigation machine | merged (part A #23 acdfa9c; part B #36) | wo/033b-investigation-wiring | #36 | squash of #36 (part A acdfa9c) | 1657 passed, 2 xfailed (S04 re-acquired track, open question); test_investigation 51 passed |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | merged (part A #18, 77e5b48; part B #37) | wo/042b-sitrep-writer-handoff (part B) | #37 | squash on merge | 1734 passed after rebase (part B: test_sitrep +17, test_audit +4) |
