@@ -12,7 +12,15 @@ from typing import Any
 import pytest
 import yaml
 
-from soundings.sim.scenario import SCENARIO_ROOT, SMOKE_PATH, catalog_paths
+from soundings.schemas.scenario import Scenario, scenario_paths
+from soundings.sim.scenario import (
+    SCENARIO_ROOT,
+    SMOKE_PATH,
+    UnknownScenarioError,
+    catalog_paths,
+    resolve_scenario,
+    scenario_path,
+)
 
 # SPEC-SIM section 3: id -> (ground truth, expected terminal state).
 SPEC_TABLE: dict[str, tuple[str, str]] = {
@@ -112,3 +120,18 @@ def test_smoke_file_shape() -> None:
     assert data["ground_truth"] == "FILED_ON_PLAN"
     assert data["expected"] == {"terminal_state": "CLEARED_AT_ASK"}
     assert sorted(c["behavior"]["type"] for c in data["contacts"]) == ["stationary", "transit"]
+
+
+@pytest.mark.parametrize("path", scenario_paths(SCENARIO_ROOT), ids=lambda p: p.name)
+def test_every_scenario_file_validates_via_resolver(path: Path) -> None:
+    by_path = resolve_scenario(path)
+    assert isinstance(by_path, Scenario)
+    ref = "smoke" if path == SMOKE_PATH else path.name[:3]
+    assert resolve_scenario(ref) == by_path
+    assert scenario_path(ref) == path
+
+
+def test_resolver_rejects_unknown_refs(tmp_path: Path) -> None:
+    for ref in ("nope", "S99", "s04", str(tmp_path / "missing.yaml")):
+        with pytest.raises(UnknownScenarioError):
+            resolve_scenario(ref)

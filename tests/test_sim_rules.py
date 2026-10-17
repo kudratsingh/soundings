@@ -1,22 +1,28 @@
 """Rule proofs for soundings/sim (CLAUDE.md sections 2.4 and 2.5).
 
-(b) An AST scan finds no global-RNG use and no module-level generator in the sim, and
-no wall-clock call. (c) No behavior name, toggle-like identifier, or string in the
-sim's YAML files matches config/denylist.txt. Part (a), running a full scenario with
-the wall clock patched to raise, joins this file with ``run_scenario``.
+(a) S05 runs to completion with ``time.time``, ``time.perf_counter`` and
+``datetime.datetime.now`` patched to raise. (b) An AST scan finds no global-RNG use and
+no module-level generator in the sim, and no wall-clock call. (c) No behavior name,
+toggle name, or string in the sim's YAML files matches config/denylist.txt.
 """
 
 from __future__ import annotations
 
 import ast
+import datetime
 import re
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import yaml
 
+from soundings.schemas.enums import BehaviorType, ToggleName
 from soundings.sim.behaviors import BEHAVIOR_TYPES
+from soundings.sim.hashing import track_hash
+from soundings.sim.run import run_scenario
+from soundings.sim.scenario import resolve_scenario
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SIM_DIR = REPO_ROOT / "soundings" / "sim"
@@ -50,6 +56,33 @@ WALL_CLOCK = {
     ("time", "monotonic"),
     ("datetime", "now"),
 }
+
+
+class _NoWallClock(datetime.datetime):
+    @classmethod
+    def now(cls, tz: datetime.tzinfo | None = None) -> _NoWallClock:
+        raise AssertionError("datetime.now called in the sim")
+
+
+def _raise(*_: object) -> float:
+    raise AssertionError("wall clock read in the sim")
+
+
+def test_a_s05_runs_with_wall_clock_patched_to_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    scenario = resolve_scenario("S05")
+    expected = track_hash(run_scenario(scenario))
+    with monkeypatch.context() as m:
+        m.setattr(time, "time", _raise)
+        m.setattr(time, "perf_counter", _raise)
+        m.setattr(datetime, "datetime", _NoWallClock)
+        with pytest.raises(AssertionError):
+            time.time()
+        with pytest.raises(AssertionError):
+            datetime.datetime.now()
+        run = run_scenario(scenario)
+        got = track_hash(run)
+    assert run.n_ticks == scenario.duration_ticks
+    assert got == expected
 
 
 def _sim_modules() -> list[Path]:
@@ -116,6 +149,12 @@ def test_denylist_compiled() -> None:
 
 def test_behavior_names_clean() -> None:
     assert all(_clean(name) for name in BEHAVIOR_TYPES)
+    assert all(_clean(b.value) for b in BehaviorType)
+
+
+def test_toggle_names_clean() -> None:
+    assert len(ToggleName) == 9
+    assert all(_clean(t.value) and _clean(t.name) for t in ToggleName)
 
 
 @pytest.mark.parametrize("path", SIM_YAML, ids=lambda p: p.name)

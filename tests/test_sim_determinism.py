@@ -1,16 +1,23 @@
 """Determinism of the sim building blocks (CLAUDE.md section 2.4, WORKFLOW.md section 8).
 
-Stage 1: the behavior and detection functions, driven by one seeded generator split
-with ``SeedSequence.spawn`` in a fixed order, give identical arrays for the same seed
-and different arrays for different seeds. The catalog-wide track-hash tests join this
-file with ``run_scenario``.
+The behavior and detection blocks, driven by one seeded generator split with
+``SeedSequence.spawn`` in a fixed order, give identical arrays for the same seed. Every
+catalog scenario S01..S08 with seeds 1, 2, 3 gives the same ``track_hash`` across two
+runs; the CLI output does not depend on ``PYTHONHASHSEED``; and seeds 1 and 2 differ.
 """
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import numpy.typing as npt
+import pytest
 
+from soundings.schemas.scenario import Scenario
 from soundings.sim.behaviors import (
     BehaviorParams,
     Drift,
@@ -34,6 +41,12 @@ from soundings.sim.detection import (
     sample_false_alarm_arrivals,
     sample_position_noise,
 )
+from soundings.sim.hashing import track_hash
+from soundings.sim.run import run_scenario
+from soundings.sim.scenario import catalog_paths, resolve_scenario
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CATALOG: dict[str, Scenario] = {p.name[:3]: resolve_scenario(p) for p in catalog_paths()}
 
 DT = 2.0
 N_TICKS = 300
@@ -107,3 +120,58 @@ def test_seeds_1_2_3_each_reproduce() -> None:
     for seed in (1, 2, 3):
         first, second = run_blocks(seed), run_blocks(seed)
         assert all(np.array_equal(first[k], second[k]) for k in first)
+
+
+# --- full runs: S01..S08 x seeds 1, 2, 3 ------------------------------------------
+
+
+def test_catalog_is_s01_to_s08() -> None:
+    assert sorted(CATALOG) == [f"S0{i}" for i in range(1, 9)]
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+@pytest.mark.parametrize("sid", sorted(CATALOG))
+def test_catalog_track_hash_identical_across_runs(sid: str, seed: int) -> None:
+    first = run_scenario(CATALOG[sid], seed=seed)
+    second = run_scenario(CATALOG[sid], seed=seed)
+    assert track_hash(first) == track_hash(second)
+    assert first.tracks == second.tracks
+    assert first.detections == second.detections
+    assert first.truth_paths == second.truth_paths
+
+
+@pytest.mark.parametrize("sid", sorted(CATALOG))
+def test_seeds_1_and_2_differ(sid: str) -> None:
+    assert track_hash(run_scenario(CATALOG[sid], seed=1)) != track_hash(
+        run_scenario(CATALOG[sid], seed=2)
+    )
+
+
+def _cli_with_hashseed(hashseed: str) -> bytes:
+    env = {**os.environ, "PYTHONHASHSEED": hashseed, "MODEL_MODE": "replay"}
+    res = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "soundings.sim",
+            "--seed",
+            "3",
+            "--ticks",
+            "120",
+            "--scenario",
+            "S05",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    return res.stdout
+
+
+def test_cli_output_independent_of_pythonhashseed() -> None:
+    a, b = _cli_with_hashseed("0"), _cli_with_hashseed("1")
+    assert a == b
+    lines = a.decode().splitlines()
+    assert len(lines) == 121 and lines[-1].startswith("track_hash=")

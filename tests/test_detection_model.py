@@ -1,7 +1,8 @@
 """Detection model properties (docs/SPEC-SIM.md section 2, SPEC-INVESTIGATION section 9.10).
 
-Stage 1 covers the pure functions in ``soundings.sim.detection``. The tests that need a
-full ``SimRun`` (the timeout re-acquisition case) join this file with ``run.py``.
+The pure functions in ``soundings.sim.detection``, plus the timeout re-acquisition case
+on a full ``SimRun``: a contact forced out of range for longer than
+``track_timeout_ticks`` comes back under a new observed id.
 """
 
 from __future__ import annotations
@@ -13,7 +14,16 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from soundings.sim.acoustics import TONAL_BANDS, load_acoustic_defaults
+from soundings.schemas.config import load_likelihood_spec
+from soundings.schemas.enums import Hypothesis
+from soundings.schemas.harbor import Harbor, load_harbor
+from soundings.schemas.scenario import AcousticSpec, scenario_from_data
+from soundings.sim.acoustics import (
+    TONAL_BANDS,
+    load_acoustic_defaults,
+    load_tonal_band_weights,
+    sample_acoustic_truth,
+)
 from soundings.sim.detection import (
     DEFAULT_SIM_CONFIG_PATH,
     DetectionParams,
@@ -32,6 +42,7 @@ from soundings.sim.detection import (
     sample_position_noise,
     split_on_timeout,
 )
+from soundings.sim.run import run_scenario
 
 PARAMS = DetectionParams()
 R0 = PARAMS.r0_m
@@ -269,3 +280,124 @@ def test_fuse_nearest_with_node_id_tiebreak() -> None:
     assert fuse_nearest([]) is None
     assert fuse_nearest([("hyd_2", 300.0), ("hyd_1", 120.0)]) == ("hyd_1", 120.0)
     assert fuse_nearest([("hyd_3", 50.0), ("hyd_2", 50.0)]) == ("hyd_2", 50.0)
+
+
+# --- track timeout and re-acquisition (full SimRun) -----------------------------------
+
+
+def _orbit_scenario() -> dict[str, object]:
+    # Orbit 200 m around fuel_berth_1 (about 210 m from hyd_1). With hyd_1's range cut
+    # to 100 m (detections only inside 200 m) the contact leaves coverage for much of
+    # each lap, far longer than track_timeout_ticks.
+    return {
+        "id": "S90",
+        "name": "Timeout fixture",
+        "seed": 4,
+        "duration_ticks": 1500,
+        "tick_s": 2,
+        "ground_truth": "UNAUTHORIZED_UUV",
+        "hour_of_day": 2,
+        "contacts": [
+            {
+                "id": "gt-1",
+                "start": {"lat": 33.7425, "lon": -118.2614, "depth_m": 8},
+                "behavior": {
+                    "type": "orbit",
+                    "target_asset": "fuel_berth_1",
+                    "radius_m": 200,
+                    "speed_mps": 1.0,
+                },
+                "registry": {"filed": False, "replies_to_hail": False},
+            }
+        ],
+        "expected": {"terminal_state": "HANDED_OFF"},
+    }
+
+
+def _one_short_node() -> Harbor:
+    harbor = load_harbor()
+    node = harbor.node("hyd_1").model_copy(update={"range_m": 100.0})
+    return harbor.model_copy(update={"sensor_nodes": (node,)})
+
+
+def test_timeout_reacquires_under_new_id() -> None:
+    scenario = scenario_from_data(_orbit_scenario())
+    params = DetectionParams(false_alarms_per_node_hour=0.0)
+    run = run_scenario(scenario, harbor=_one_short_node(), params=params)
+    ids = sorted(run.tracks)
+    assert len(ids) >= 2, ids
+    assert {run.contact_truth[c].gt_id for c in ids} == {"gt-1"}
+    timeout = params.track_timeout_ticks
+    for before, after in zip(ids, ids[1:], strict=False):
+        last = run.tracks[before].points[-1].tick
+        first = run.tracks[after].points[0].tick
+        assert first - last - 1 > timeout, (before, after, last, first)
+    # Inside one observed track no silence exceeds the timeout, and gaps are recorded.
+    for cid in ids:
+        track = run.tracks[cid]
+        assert all(g.n_ticks <= timeout for g in track.gaps)
+        ticks = [pt.tick for pt in track.points]
+        missing = sum(b - a - 1 for a, b in zip(ticks, ticks[1:], strict=False))
+        assert sum(g.n_ticks for g in track.gaps) == missing
+
+
+def test_timeout_ids_issued_in_order_of_first_detection() -> None:
+    scenario = scenario_from_data(_orbit_scenario())
+    run = run_scenario(scenario, harbor=_one_short_node())
+    firsts = [run.tracks[c].points[0].tick for c in sorted(run.tracks)]
+    assert firsts == sorted(firsts)
+    assert sorted(run.tracks) == [f"c-{i:04d}" for i in range(1, len(run.tracks) + 1)]
+
+
+def test_detection_rows_match_track_points() -> None:
+    scenario = scenario_from_data(_orbit_scenario())
+    run = run_scenario(scenario, harbor=_one_short_node(), ticks=400)
+    by_key = {(d.observed_contact_id, d.tick): d for d in run.detections}
+    assert len(by_key) == sum(len(t.points) for t in run.tracks.values())
+    for cid, track in run.tracks.items():
+        for pt in track.points:
+            d = by_key[(cid, pt.tick)]
+            assert (d.lat, d.lon, d.confidence, d.node_id) == (
+                pt.lat,
+                pt.lon,
+                pt.confidence,
+                pt.sensor_id,
+            )
+            expected = reading_confidence(d.range_m, 100.0, d.sensor_health)
+            assert d.confidence == pytest.approx(expected, abs=2e-6)
+            assert d.range_m <= 200.0 + 1e-6
+
+
+# --- acoustics sampled from the likelihood tables ---------------------------------------
+
+
+def test_unset_acoustics_follow_hypothesis_rows() -> None:
+    spec = load_likelihood_spec()
+    weights = load_tonal_band_weights()
+    rng = np.random.default_rng(707)
+    for hyp, p_tonal, p_bio in (
+        (Hypothesis.UNAUTHORIZED_UUV, 0.70, 0.03),
+        (Hypothesis.BIOLOGIC, 0.03, 0.70),
+    ):
+        draws = [
+            sample_acoustic_truth(rng, hyp, AcousticSpec(), spec, weights) for _ in range(10_000)
+        ]
+        assert abs(sum(d.propeller_tonal for d in draws) / 10_000 - p_tonal) < 0.02
+        assert abs(sum(d.biologic_signature for d in draws) / 10_000 - p_bio) < 0.02
+        for d in draws:
+            assert (d.tonal_band == "none") == (not d.propeller_tonal)
+
+
+def test_set_acoustics_used_as_is_and_draw_count_fixed() -> None:
+    spec = load_likelihood_spec()
+    weights = load_tonal_band_weights()
+    fixed = AcousticSpec(propeller_tonal=True, tonal_band="high", biologic_signature=False)
+    a, b = np.random.default_rng(1), np.random.default_rng(1)
+    truth = sample_acoustic_truth(a, Hypothesis.BIOLOGIC, fixed, spec, weights)
+    assert (truth.propeller_tonal, truth.tonal_band, truth.biologic_signature) == (
+        True,
+        "high",
+        False,
+    )
+    sample_acoustic_truth(b, Hypothesis.BIOLOGIC, AcousticSpec(), spec, weights)
+    assert a.random() == b.random()  # both consumed exactly three uniforms
