@@ -160,7 +160,7 @@ def orders_digest(mapping: Any) -> str:
     return hashlib.sha256(canonical_orders_yaml(mapping).encode("utf-8")).hexdigest()
 
 
-def read_document(path: str | Path) -> dict[str, Any]:
+def read_document(path: str | Path = STANDING_ORDERS_PATH) -> dict[str, Any]:
     """The whole YAML document as a mapping (``ValueError`` if it is not one)."""
     doc = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(doc, dict) or not isinstance(doc.get("orders"), dict):
