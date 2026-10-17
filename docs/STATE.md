@@ -36,7 +36,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
-| 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
+| 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | (see WO-060 Part A) | | 1256 passed after rebase (part A: 32 + 1 e2e smoke) |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
 | 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
 
