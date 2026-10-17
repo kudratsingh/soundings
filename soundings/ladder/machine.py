@@ -10,10 +10,23 @@ A step that fires no row (no row for the pair, or every guard blocked) leaves th
 exactly as it was, so the machine is a pure function of its checkpoints: ``restore``
 rebuilds state, rung, pending timers and ledger keys by re-applying each checkpointed
 transition with its recorded guard decisions (no guard is called again).
+
+``strict_holds`` (WO-043; DECISIONS.md 23:25 and the WO-040 open items) turns on three
+rules the ladder driver relies on; it is off by default so WO-040's behaviour is unchanged:
+
+1. A hold is released at its limit: ``HOLDING x timer(hold_limit)`` adds ``release_hold``
+   after ``request_approval``, and a hold limit that comes due while AWAITING_APPROVAL
+   (after ``scope_exceeded``) releases the hold there; the state stays AWAITING_APPROVAL
+   until the approval resolves. A row's ``release_hold`` with no hold active is skipped.
+2. A granted ``hold_longer`` is the hold in force after the handoff, and it is released on
+   departure (``WATCH_AFTER_HANDOFF x contact_departed`` adds ``release_hold``).
+3. A due timer whose event has no row is dropped once the state that armed it is left
+   (``TIMER_OWNER``), instead of staying pending forever.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 
@@ -27,7 +40,7 @@ from soundings.schemas import (
     Rung,
 )
 
-from .actions import ActionLedger, ActionRecord, LadderAction, make_action
+from .actions import HOLD_LONGER, ActionLedger, ActionRecord, LadderAction, make_action
 from .checkpoint import (
     GENESIS_HASH,
     CheckpointError,
@@ -63,12 +76,18 @@ TIMER_EVENTS: dict[str, tuple[EventKind, str]] = {
 }
 """The event each timer fires when it comes due (``LadderMachine.advance``)."""
 
-HOLD_LONGER = "hold_longer"
-"""The boundary action an approval request names when a hold reaches its limit."""
+TIMER_OWNER: dict[str, LadderState] = {
+    HOLD_LIMIT: LadderState.HOLDING,
+    SLOW_LIMIT: LadderState.ADVISING_SLOW,
+    APPROVAL_TIMEOUT: LadderState.AWAITING_APPROVAL,
+    SITREP_UPDATE: LadderState.WATCH_AFTER_HANDOFF,
+}
+"""The state each timer belongs to (``strict_holds`` drops a no-row timer outside it)."""
 
 TRANSITIONED = "transitioned"
 NO_ROW = "no_row"
 GUARD_BLOCKED = "guard_blocked"
+TIMER_DROPPED = "timer_dropped"
 
 Decide = Callable[[GuardName, GuardContext], GuardDecision]
 
@@ -108,8 +127,11 @@ class LadderMachine:
         store: CheckpointStore,
         timings: LadderTimings,
         listeners: Sequence[LadderListener] = (),
+        *,
+        strict_holds: bool = False,
     ) -> None:
         self.contact_id = contact_id
+        self.strict_holds = strict_holds
         self._guards = guards
         self._clock = clock
         self._ledger = ledger
@@ -159,6 +181,11 @@ class LadderMachine:
     def backup_paged(self) -> bool:
         return self._backup_paged
 
+    @property
+    def hold_scope(self) -> ActionScope | None:
+        """The hold in force for this contact (``None`` when no hold is active)."""
+        return self._hold_scope
+
     # --- stepping ------------------------------------------------------------------------
 
     def step(self, event: LadderEvent) -> StepResult:
@@ -201,7 +228,50 @@ class LadderMachine:
                 tick=tick,
                 payload=EventPayload(extra={"timer": timer.name, "deadline_s": timer.deadline_s}),
             )
-            results.append(self.step(event))
+            result = self.step(event)
+            if self.strict_holds and result.reason == NO_ROW:
+                result = self._drop_stale(timer, result)
+            results.append(result)
+
+    def _drop_stale(self, timer: Timer, result: StepResult) -> StepResult:
+        """``strict_holds``: drop a no-row timer once its owner state is left.
+
+        A hold limit dropped this way releases the hold first (DECISIONS.md 23:25). The
+        release is keyed on the deadline's tick, so a re-delivery after a restore hits the
+        ledger instead of releasing twice. It is not a transition, so no checkpoint is
+        written; listeners see it with ``checkpoint=None``.
+        """
+        if self._state is TIMER_OWNER.get(timer.name):
+            return result
+        self.timers.cancel(timer.name, self.contact_id)
+        actions: tuple[LadderAction, ...] = ()
+        records: tuple[ActionRecord, ...] = ()
+        if timer.name == HOLD_LIMIT and self._hold_scope is not None:
+            tick = result.event.tick
+            if isinstance(self._clock, TickClock):
+                tick = min(tick, math.ceil(round6(timer.deadline_s / self._clock.tick_s)))
+            event = result.event.model_copy(update={"tick": tick})
+            action = make_action(
+                self.contact_id,
+                ActionKind.RELEASE_HOLD,
+                self._hold_scope,
+                self._state,
+                self._state,
+                event,
+            )
+            self._hold_scope = None
+            actions = (action,)
+            records = (self._ledger.execute(action),)
+            self._notify(None, actions, ())
+        return StepResult(
+            transitioned=False,
+            reason=TIMER_DROPPED,
+            from_state=self._state,
+            to_state=self._state,
+            event=result.event,
+            actions=actions,
+            records=records,
+        )
 
     # --- restore -------------------------------------------------------------------------
 
@@ -217,6 +287,7 @@ class LadderMachine:
         timings: LadderTimings,
         listeners: Sequence[LadderListener] = (),
         contact_id: str | None = None,
+        strict_holds: bool = False,
     ) -> LadderMachine:
         """Rebuild a machine from its checkpoints without calling a guard.
 
@@ -230,7 +301,9 @@ class LadderMachine:
             if not checkpoints:
                 raise CheckpointError("contact_id is required to restore from no checkpoints")
             contact_id = checkpoints[0].contact_id
-        machine = cls(contact_id, guards, clock, ledger, store, timings, listeners)
+        machine = cls(
+            contact_id, guards, clock, ledger, store, timings, listeners, strict_holds=strict_holds
+        )
         for cp in checkpoints:
             if cp.contact_id != contact_id or cp.from_state is not machine.state:
                 raise CheckpointError(f"checkpoint {cp.seq} does not follow the machine state")
@@ -303,7 +376,9 @@ class LadderMachine:
         fired_timer = event.payload.extra.get("timer")
         if isinstance(fired_timer, str):
             self.timers.cancel(fired_timer, self.contact_id)
-        actions = tuple(self._act(kind, row, permit, event, now_s) for kind in row.actions)
+        actions = tuple(
+            self._act(kind, row, permit, event, now_s) for kind in self._action_kinds(row, event)
+        )
         if row.dst in HANDLING_TERMINAL_STATES:
             self.timers.cancel_contact(self.contact_id)
         if src is LadderState.ADVISING_SLOW and row.dst is not LadderState.ADVISING_SLOW:
@@ -344,6 +419,23 @@ class LadderMachine:
             row_index=index,
         )
 
+    def _action_kinds(self, row: TransitionRow, event: LadderEvent) -> list[ActionKind]:
+        """The row's actions, plus the ``strict_holds`` release rules (module docstring)."""
+        kinds = list(row.actions)
+        if not self.strict_holds:
+            return kinds
+        hold_active = self._hold_scope is not None
+        if row.src is LadderState.HOLDING and event.kind is EventKind.TIMER:
+            kinds.append(ActionKind.RELEASE_HOLD)
+        elif (
+            row.src is LadderState.WATCH_AFTER_HANDOFF and event.kind is EventKind.CONTACT_DEPARTED
+        ):
+            if hold_active:
+                kinds.append(ActionKind.RELEASE_HOLD)
+        elif not hold_active:
+            kinds = [k for k in kinds if k is not ActionKind.RELEASE_HOLD]
+        return kinds
+
     def _act(
         self,
         kind: ActionKind,
@@ -380,6 +472,8 @@ class LadderMachine:
             self.timers.arm(Timer(APPROVAL_TIMEOUT, cid, round6(now_s + wait)))
         elif kind is ActionKind.RECORD_APPROVED_ACTION:
             scope = self._requested
+            if self.strict_holds and scope is not None and scope.action == HOLD_LONGER:
+                self._hold_scope = scope
         elif kind in (ActionKind.START_WATCH, ActionKind.UPDATE_SITREP):
             base = now_s
             deadline_s = event.payload.extra.get("deadline_s")

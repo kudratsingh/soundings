@@ -33,7 +33,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
-| 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
+| 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
