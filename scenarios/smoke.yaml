@@ -1,0 +1,34 @@
+# Smoke scenario for `make sim`: one transit and one stationary contact near hyd_1.
+# Never graded; the catalog is scenarios/S[0-9][0-9]-*.yaml, so this file is not in it.
+id: smoke
+name: Smoke, one transit and one stationary
+seed: 7
+duration_ticks: 60
+tick_s: 2
+ground_truth: FILED_ON_PLAN
+hour_of_day: 12
+registry_plans:
+  - plan_id: P-SMOKE-001
+    operator: "Smoke test operator (demo)"
+    vehicle: "AUV-Smoke-1 and diver"
+    modem_id: "MOD-0001"
+    area: inner_basin_research
+    window: {start_tick: 0, end_tick: 60}
+    contact: "sim-phone-operator"
+contacts:
+  - id: gt-1
+    start: {lat: 33.7400, lon: -118.2690, depth_m: 6}
+    behavior:
+      type: transit
+      waypoint: {lat: 33.7420, lon: -118.2670}
+      speed_mps: 1.0
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-SMOKE-001, modem_id: "MOD-0001", replies_to_hail: true}
+  - id: gt-2
+    start: {lat: 33.7395, lon: -118.2675, depth_m: 3}
+    behavior: {type: stationary, jitter_mps: 0.1}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: true}
+    registry: {filed: true, plan_id: P-SMOKE-001, modem_id: "MOD-0001", replies_to_hail: true}
+toggles: []
+expected:
+  terminal_state: CLEARED_AT_ASK

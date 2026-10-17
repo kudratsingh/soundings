@@ -1,0 +1,35 @@
+# Tuesday. Two permitted divers clean a hull at the fuel berth under one filed plan.
+id: S03
+name: Permitted hull-cleaning divers
+seed: 5
+duration_ticks: 600
+tick_s: 2
+ground_truth: FILED_ON_PLAN
+hour_of_day: 9
+registry_plans:
+  - plan_id: P-2026-1017-002
+    operator: "Harbor Hull Care (demo)"
+    vehicle: "Two divers, hull cleaning"
+    modem_id: "MOD-5120"
+    area: fuel_berths
+    window: {start_tick: 0, end_tick: 600}
+    contact: "sim-phone-dive-supervisor"
+contacts:
+  - id: gt-1
+    start: {lat: 33.7426, lon: -118.2637, depth_m: 3}
+    behavior: {type: stationary, jitter_mps: 0.2}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: true}  # breathing
+    registry: {filed: true, plan_id: P-2026-1017-002, modem_id: "MOD-5120", replies_to_hail: true}
+  - id: gt-2
+    start: {lat: 33.7424, lon: -118.2633, depth_m: 3}
+    behavior: {type: stationary, jitter_mps: 0.2}
+    acoustic: {propeller_tonal: false, tonal_band: none, biologic_signature: true}  # breathing
+    registry: {filed: true, plan_id: P-2026-1017-002, modem_id: "MOD-5120", replies_to_hail: true}
+toggles: []
+expected:
+  terminal_state: CLEARED_AT_ASK
+  max_human_interruptions: 0
+notes: >-
+  SPEC-SIM section 3 adds a slow advisory under standing orders if a vessel approaches
+  the divers. No vessel or surface traffic is simulated in Phase 1, so that branch is
+  informational here.

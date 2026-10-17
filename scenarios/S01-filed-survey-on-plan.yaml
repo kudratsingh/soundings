@@ -1,0 +1,26 @@
+# Tuesday. A filed research AUV runs its survey exactly where and when its plan says.
+id: S01
+name: Filed survey, on plan
+seed: 1
+duration_ticks: 600
+tick_s: 2
+ground_truth: FILED_ON_PLAN
+hour_of_day: 10
+registry_plans:
+  - plan_id: P-2026-1017-001
+    operator: "USC Wrigley (demo)"
+    vehicle: "AUV-Survey-1"
+    modem_id: "MOD-3310"
+    area: inner_basin_research
+    window: {start_tick: 0, end_tick: 600}
+    contact: "sim-phone-operator"
+contacts:
+  - id: gt-1
+    start: {lat: 33.7400, lon: -118.2700, depth_m: 8}
+    behavior: {type: lawnmower, area: inner_basin_research, speed_mps: 1.0, lane_spacing_m: 50}
+    acoustic: {propeller_tonal: true, tonal_band: low, biologic_signature: false}
+    registry: {filed: true, plan_id: P-2026-1017-001, modem_id: "MOD-3310", replies_to_hail: true}
+toggles: []
+expected:
+  terminal_state: CLEARED_AT_ASK
+  max_human_interruptions: 0

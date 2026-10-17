@@ -113,7 +113,10 @@ watch (the sim feeds the evidence that watch reads; no rung logic here).
 §2.4 — `test_sim_determinism.py` (hash equality, PYTHONHASHSEED subprocess diff), `test_sim_rules.py` (a, b), `make sim` diff. §2.5 — `test_sim_rules.py` (c) and the denylist grep. §2.3 — no model calls; all tests run with `MODEL_MODE=replay` and no network.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: [#3](https://github.com/kudratsingh/soundings/pull/3) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, 273 passed (MODEL_MODE=replay) · STATE.md updated: yes (row 011)
+- Every exit test passes: determinism 47 (S01..S08 x seeds 1,2,3, PYTHONHASHSEED 0/1 subprocess diff, seeds 1 vs 2 differ, prefix stability 600 vs 900 on S05 seed 11), detection model 26 (`-k timeout` 3), behaviors 14, toggles 15, catalog 28, smoke 8, rules 57, catalog integration 10 (< 1 s). `make sim` twice: empty diff. Denylist grep: no output. `make sim-plot scenario=S04` writes a PNG.
+- Addenda done: prefix stability (`truncate_run`), `run_scenario(..., likelihoods=)`, S05 start moved to (33.7410, -118.2582): under 300 s to fuel_berth_1 from tick 109, 711 m from fuel_berth_2 (WO-010's 700-1100 m test unchanged).
+- Choices beyond the WO text (DECISIONS 2026-10-17 row): lawnmower survey box clipped to the nearest node's range square; unset `tonal_band` drawn from `tonal_band_when_tonal` in config/sim.yaml (no likelihood row); `silent_after_tick` applies from that tick on; erratic leash 300 m; false alarms skipped while their node has health 0; readings off the map bounding box are dropped.
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Prefix stability: `run_scenario(scenario, seed, ticks=N)` must reproduce the first `duration_ticks` ticks byte for byte when `N > duration_ticks` (derive per-tick RNG streams from `(seed, tick)`, or pre-draw per tick). Runner v3 (WO-043) extends the sim tail past `duration_ticks`. Exit test: hash of the first 600 ticks equal for N=600 and N=900 on S05 seed 11.
