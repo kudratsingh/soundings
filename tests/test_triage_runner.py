@@ -195,3 +195,16 @@ def test_triage_none_keeps_v2_api() -> None:
     result = ScenarioRunnerV2("S05").run()
     assert result.triage_log == ()
     assert result.triage_log_hash == ""
+
+
+def test_surge_toggle_wired_v3_source() -> None:
+    from soundings.stream.engine import SourceRequest
+    from soundings.stream.v3 import V3Source
+
+    req = SourceRequest(scenario=bt01_with_surge(25), seed=7, run_id="run-085-surge", speed=0.0)
+    src = V3Source(req)
+    assert src.rs.v2.triage_log_hash == surge_run().triage_log_hash != ""
+    plain = V3Source(
+        SourceRequest(scenario=resolve_scenario("S05"), seed=11, run_id="r", speed=0.0)
+    )
+    assert plain.rs.v2.triage_log_hash == ""

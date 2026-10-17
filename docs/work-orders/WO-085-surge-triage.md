@@ -147,8 +147,8 @@ PR: see branch PR (wo/085-surge-triage) · Merged commit: see STATE.md · Test s
 What landed (all opt-in; `triage=None` keeps v2/v3 byte-identical, proven against `tests/fixtures/triage_catalog_pre_wo085.json` captured on main first):
 - `soundings/triage.py` + `config/triage.yaml` as specified (`OfficerArbiter(cfg, tick_s)`; `TriageRecorder` builds the log; `TriageDecision.kind` names the granted interruption).
 - Runner: `ScenarioRunner(..., triage=)`; `_TriageV2Run` in the `# --- triage (WO-085) ---` block, chosen by `ScenarioRunnerV2.run` (v3 runs v2, so it inherits it). Seams in v2: `triage_admit` (re-key, free slots, admit), `may_start`, `triage_grant`; HANDOFF -> HANDED_OFF fires at its grant tick. The planner's eyes-on allowance is `BudgetLedger` plus `eyes_on_allowed` (`investigation_wiring.eyes_on_refused`).
-- Stream: `BatchReplaySource` runs v2 with triage for a scenario carrying `contact_surge` (`surge_runner`); `stepped.py` does not exist on main yet (WO-061), so it has no block.
-- `soundings/ladder/audit.py` (WO-085 block): a guard decision that arrives with no checkpoint and no action (every guard blocked) is keyed `guard:inputs_hash`; it raised `AuditError` with an empty contact prefix once triage moved S05's handoff.
+- Stream: `BatchReplaySource` runs v2 with triage for a scenario carrying `contact_surge` (`surge_runner`); WO-060 part B's `V3Source` (`soundings/stream/v3.py`, the stepped source; there is no `stepped.py`) builds `ScenarioRunnerV3(..., triage=load_triage_config())` for such a run (marked WO-085 block).
+- The audit-key crash triage exposed in S05 (a guard decision with no checkpoint and no action has no contact id) was fixed on main by WO-060B (`unattributed:` prefix); WO-085's own fix was dropped at rebase.
 
 Exit tests (synthetic stand-in `tests/fixtures/triage_bt_synthetic.yaml`, since BT-01 is not on main; v2, seed 7, `llm_roles=False`):
 - rogue_within_budget: passes (lineage end HANDED_OFF at tick 169 vs 120 without surge, slot = 60 ticks; within probe, paid and interruption budgets; before berth arrival).
