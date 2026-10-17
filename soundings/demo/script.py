@@ -59,10 +59,10 @@ class ActionName(_VocabEnum):
 ACTIONS: dict[ActionName, str | None] = {
     # None: the presenter overlay renders it today. A WO id: pending until that WO lands.
     ActionName.LADDER_CHIPS: None,
-    ActionName.FILE_PLAN_QR: "WO-061",
+    ActionName.FILE_PLAN_QR: None,  # WO-061: opens the judge panel on its QR code
     ActionName.PROPOSE_SLOT: "WO-082",
     ActionName.VESSEL_ADVISORY: "WO-083",
-    ActionName.JUDGE_DROPS_ROGUE: "WO-061",
+    ActionName.JUDGE_DROPS_ROGUE: None,  # WO-061: POST /api/inject (closing on fuel_berth_2)
     ActionName.TWIST_TOGGLES: "WO-060",
     ActionName.RUNG_LEDGER_EVAL: "WO-086",
     ActionName.END_CARD: None,

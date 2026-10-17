@@ -117,6 +117,125 @@ export function runSocketUrl(runId: string, after: number): string {
 }
 
 // --- WO-061 block (approve endpoint) ---
+// A person's answer to an approval request names the request only; the server mints the
+// token for exactly the requested scope and the ladder's guard decides. Judge injection
+// describes a contact (position, behavior, acoustic profile); nothing here names a rung.
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const j = (await res.json()) as { detail?: unknown }
+      if (typeof j.detail === 'string') detail = j.detail
+    } catch {
+      /* keep the status line */
+    }
+    throw new ApiError(res.status, detail)
+  }
+  return (await res.json()) as T
+}
+
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+export interface ApproveReply {
+  run_id: string
+  request_id: string
+  contact_id?: string
+  token_hash?: string
+  outcome?: string
+  status: string
+}
+
+export const postApprove = (runId: string, requestId: string, approver = 'Watch Officer') =>
+  postJson<ApproveReply>(`/api/runs/${encodeURIComponent(runId)}/approve`, { request_id: requestId, approver })
+export const postDecline = (runId: string, requestId: string, approver = 'Watch Officer') =>
+  postJson<ApproveReply>(`/api/runs/${encodeURIComponent(runId)}/decline`, { request_id: requestId, approver })
+
+export type JudgeBehavior = 'filed' | 'unfiled' | 'closing' | 'loitering' | 'silent'
+export type AcousticProfile = 'propeller' | 'biologic' | 'quiet'
+
+export interface InjectReq {
+  lat: number
+  lon: number
+  behavior: JudgeBehavior
+  acoustic: AcousticProfile | null
+}
+
+export interface InjectReply {
+  run_id: string
+  scenario_id: string
+  path: string
+  seed: number
+}
+
+/** Start a catalog run on a named source (`?source=stepped`: a person approves). */
+export const startRunOn = (source: string, scenario: string, seed: number | null, speed: number | null, toggles: string[] = []) =>
+  postJson<RunSummary>('/api/runs', { scenario, seed, speed, toggles, source })
+
+export const postInject = (req: InjectReq) => postJson<InjectReply>('/api/inject', req)
+export const postPrepare = (req: InjectReq) => postJson<{ prepared: boolean; scenario_id: string }>('/api/inject/prepare', req)
+
+export interface QrInfo {
+  url: string
+  loopback: boolean
+  lan?: boolean
+}
+
+export const fetchQrInfo = () => getJson<QrInfo>('/api/qr/info?target=/registry')
+
+export interface PlanConflict {
+  other_plan_id: string
+  overlap_start: string
+  overlap_end: string
+  overlap_minutes: number
+  reasons: string[]
+  resolved_by: string | null
+}
+
+export interface PlanView {
+  plan_id: string
+  operator: string
+  vehicle: string
+  area: string
+  start_at: string
+  end_at: string
+  status: 'active' | 'conflicted' | 'expired'
+  conflicts: PlanConflict[]
+  created_at?: string | null
+}
+
+export interface PlanShift {
+  plan_id: string
+  shift_min: number
+  new_start_at: string
+  new_end_at: string
+  start_at: string
+  end_at: string
+}
+
+export interface SlotProposal {
+  proposal_id: string
+  target_plan_id: string
+  zone_id: string
+  status: 'feasible' | 'infeasible'
+  shifts: PlanShift[]
+  total_delay_min: number
+  binding_constraint: string | null
+  detail: string
+}
+
+export const fetchActivePlans = () => getJson<PlanView[]>('/api/plans?status=active')
+export const proposeSlot = (planId: string) => postJson<SlotProposal>(`/api/plans/${encodeURIComponent(planId)}/proposal`, {})
+export const acceptProposal = (planId: string, proposalId: string) =>
+  postJson<unknown>(`/api/plans/${encodeURIComponent(planId)}/proposal/accept`, { proposal_id: proposalId })
+export const declineProposal = (planId: string, proposalId: string) =>
+  postJson<unknown>(`/api/plans/${encodeURIComponent(planId)}/proposal/decline`, { proposal_id: proposalId })
 // --- end WO-061 block ---
 
 // --- WO-062 block (demo runner) ---
