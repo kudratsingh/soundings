@@ -19,7 +19,7 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 | 000 | repo + scaffold | merged (direct, pre-protection) | main | — | 25e7dbb | 31 passed |
 | 010 | schemas + harbor map | PR open, auto-merge on green CI | wo/010-schemas-and-harbor-map | [#1](https://github.com/kudratsingh/soundings/pull/1) | squash commit on main (see PR #1) | 64 passed |
 | 011 | sim + scenario catalog | PR open, auto-merge on green CI | wo/011-sim-and-scenario-catalog | [#3](https://github.com/kudratsingh/soundings/pull/3) | squash commit on main (see PR) | 273 passed |
-| 012 | evidence table + features | pending | wo/012-evidence-table-and-features | | | |
+| 012 | evidence table + features | PR open, auto-merge on green CI | wo/012-evidence-table-and-features | [#7](https://github.com/kudratsingh/soundings/pull/7) | squash commit on main (see PR) | 754 passed (evidence 116, table 24, features 134, transit 65, pol 20) |
 | 020 | registry | PR open, auto-merge on green CI | wo/020-registry | [#4](https://github.com/kudratsingh/soundings/pull/4) | squash commit on main (see PR) | 330 passed (57 registry) |
 | 021 | challenge-response | PR open, auto-merge on green CI | wo/021-challenge-response | [#5](https://github.com/kudratsingh/soundings/pull/5) | squash commit on main (see PR) | 395 passed (65 hail: unit 55, integration 10) |
 | 022 | matcher + ask rung | pending | wo/022-matcher-ask-rung | | | |

@@ -159,4 +159,13 @@ watch (backs the free probes `kinematics_profile`, `drift_check`, `pattern_of_li
 §2.6 (the `disjoint` and `provenance` tests, and the ground-truth grep); §2.4 (the two-run `diff` and the `data/pol_table.json` regeneration diff); §2.2 (the `soundings.llm` grep: no model output enters the table); §2.5 (the denylist grep plus `make check`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: [#7](https://github.com/kudratsingh/soundings/pull/7) · Merged commit: squash commit on main (see PR) · Test summary: `754 passed` (full suite; tests/test_evidence.py 116, test_evidence_table.py 24, test_features.py 134, test_transit_pattern.py 65, test_pol.py 20) · STATE.md updated: yes (WO-012 row)
+
+- Exit tests: all pass with `MODEL_MODE=replay`. `make check` exits 0. The S05 seed 11 CLI dump is byte-identical across two runs (sha256 `28486872…e993`), and `make pol && git diff --exit-code data/pol_table.json` exits 0. The ground-truth, `soundings.llm` and denylist greps find nothing.
+- `make pol` regenerates `data/pol_table.json` (seed 42, 28 days, 970 populated cells including the pooled `*` cells) in about 11 s locally. `test_pol.py` regenerates it and checks the 60 s bound.
+- Interface differences from the WO text:
+  - `build_evidence(run, harbor, current_field, pol=None, *, hour_of_day, tide_phase_for_hour=None)`. `current_field` may be a `CurrentField`, in which case pass `tide_phase_for_hour`.
+  - `features.pol_observation(track, harbor, *, hour_of_day)` gives the section 4 vector that pol.py builds the month from.
+  - `PolTable.anomaly(zone, hour, weekday, observed)` falls back to the pooled `*` cell when the weekday cell has fewer than 8 characterized contacts.
+  - `PolCell` also carries `n_characterized`.
+- Interpretations and deviations: see DECISIONS.md 2026-10-16 22:29 (noise-robust kinematics) and 2026-10-17 00:05 (pattern-of-life details, and the S05 check at tick 180). No cut-line item was used.
