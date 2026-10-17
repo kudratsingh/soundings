@@ -1090,8 +1090,399 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 # --- WO-022 end ---
 
-# --- v2 (WO-033) ---
-# --- end v2 (WO-033) ---
+# --- WO-033 begin: runner v2 ---
+# Runner v2: the matcher's ESCALATE enters the investigation (ASKING -> INVESTIGATING, as in
+# v1), the part A ``InvestigationMachine`` runs tick by tick through WO-031's planner and
+# probes (WO-032's roles when ``llm_roles=True``, replay only), and its frozen
+# ``Recommendation`` ends the case through ``stop_rule_fired(outcome)``. ``ScenarioRunner``
+# (v1) is unchanged; ``ScenarioRunnerV2`` subclasses it. Phase 3 maps HANDOFF straight to
+# HANDED_OFF (nothing pre-authorized; WO-043 adds the slow/hold pass-through). The handoff
+# SITREP to the watch officer counts as one interruption, as does an eyes-on probe
+# (DECISIONS 2026-10-16 23:05, one definition). The recommended rung is a computed field
+# of the frozen recommendation; nothing here can edit it. runner.py imports nothing from
+# ``soundings.llm``: the model roles are built inside ``soundings.investigation_wiring``.
+
+from collections.abc import Mapping  # noqa: E402
+from types import MappingProxyType  # noqa: E402
+from typing import Any  # noqa: E402
+
+from soundings.investigation.machine import (  # noqa: E402
+    InvestigationCheckpoint,
+    InvestigationLedger,
+    InvestigationState,
+    Recommendation,
+    StopOutcome,
+    load_budgets,
+    load_stopping_config,
+)
+from soundings.investigation.planner import PlannerChoice  # noqa: E402
+from soundings.investigation.pol import load_pol_table  # noqa: E402
+from soundings.investigation.posterior import (  # noqa: E402
+    load_likelihood_tables,
+    load_prior_config,
+)
+from soundings.investigation_wiring import (  # noqa: E402
+    DEFAULT_VIOLATIONS_PATH,
+    InvestigationHandle,
+    ProbeWorld,
+    make_kit,
+)
+
+OUTCOME_STATES: dict[StopOutcome, LadderState] = {
+    StopOutcome.RESOLVED_BENIGN: S.RESOLVED_BENIGN,
+    StopOutcome.HAZARD_NOTICE: S.HAZARD_NOTICE,
+    StopOutcome.CLEARED_AT_ASK: S.CLEARED_AT_ASK,
+    StopOutcome.LOST_VEHICLE: S.LOST_VEHICLE,
+    StopOutcome.HANDOFF: S.HANDED_OFF,
+}
+
+V2_TRANSITIONS: frozenset[tuple[LadderState, RunnerEvent, LadderState]] = frozenset(
+    (S.INVESTIGATING, RunnerEvent.STOP_RULE_FIRED, to) for to in OUTCOME_STATES.values()
+)
+"""SPEC-LADDER section 3 INVESTIGATING rows runner v2 adds (Phase 3: no slow/hold)."""
+
+
+def check_transition_v2(from_state: LadderState, event: RunnerEvent, to_state: LadderState) -> None:
+    """Raise ``IllegalTransition`` unless ``(from, event, to)`` is in ``V2_TRANSITIONS``."""
+    if (from_state, event, to_state) not in V2_TRANSITIONS:
+        raise IllegalTransition(
+            f"{from_state.value} x {event.value} -> {to_state.value} is not a runner v2 row"
+        )
+
+
+def outcome_to_ladder_state(outcome: StopOutcome) -> LadderState:
+    """HANDOFF -> HANDED_OFF; every other outcome -> the same-named state."""
+    return OUTCOME_STATES[StopOutcome(outcome)]
+
+
+class ProbeCall(StrictModel):
+    """One investigation probe the run executed (``cached`` for an idempotent repeat)."""
+
+    case_id: StrictStr
+    contact_id: StrictStr
+    probe_id: ProbeId
+    tick: NonNegInt
+    idempotency_key: StrictStr
+    cost_usd: NonNegFloat
+    cached: StrictBool
+    source: StrictStr
+
+
+class CasePlannerChoice(StrictModel):
+    """One planner decision (WO-031 ``PlannerChoice``) with its case and tick."""
+
+    case_id: StrictStr
+    contact_id: StrictStr
+    tick: NonNegInt
+    choice: PlannerChoice
+
+    @property
+    def source(self) -> str:
+        return self.choice.source
+
+
+@dataclass(frozen=True)
+class RunResultV2(RunResult):
+    """``RunResult`` plus the investigation. ``recommendations`` is read-only."""
+
+    recommendations: Mapping[str, Recommendation] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    investigation_checkpoints: Mapping[str, tuple[InvestigationCheckpoint, ...]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    probe_calls: tuple[ProbeCall, ...] = ()
+    planner_choices: tuple[CasePlannerChoice, ...] = ()
+    nested_log: tuple[str, ...] = ()
+    nested_log_hash: str = ""
+
+
+def nested_log_text(lines: Iterable[str]) -> str:
+    return "".join(f"{line}\n" for line in lines)
+
+
+class _V2Run(_V1Run):
+    """Runner v1 plus one ``InvestigationHandle`` per escalated case, stepped each tick."""
+
+    def __init__(
+        self,
+        runner: ScenarioRunner,
+        *,
+        llm_roles: bool,
+        violations_path: Path,
+        fixture_store: Any,
+    ) -> None:
+        super().__init__(runner)
+        sc = runner.scenario
+        world = ProbeWorld(
+            run=self.sim,
+            scenario=sc,
+            harbor=self.harbor,
+            current_field=runner.current_field,
+            pol=load_pol_table(),
+            plans_at=self.plans.at,
+            hail=self.hail,
+            match_cfg=self.cfg,
+            known=runner.known,
+        )
+        self.kit = make_kit(
+            world,
+            tables=load_likelihood_tables(),
+            prior_cfg=load_prior_config(),
+            stopping=load_stopping_config(),
+            budgets=load_budgets(),
+            llm_roles=llm_roles,
+            fixture_store=fixture_store,
+            violations_path=violations_path,
+            label=f"{sc.id}/seed{runner.seed}/",
+        )
+        self.handles: dict[str, InvestigationHandle] = {}
+        self.recs: dict[str, Recommendation] = {}
+        self.choices: list[CasePlannerChoice] = []
+        self.calls: list[ProbeCall] = []
+        self.case_interruptions: dict[str, int] = {}
+        self.nested: list[str] = []
+        self.logged = 0
+
+    # --- entering the investigation -----------------------------------------------------
+
+    def ask_reply(self, case: _Case, c: _Contact, tick: int, hail: HailResult) -> None:
+        super().ask_reply(case, c, tick, hail)
+        if case.state is S.INVESTIGATING and case.case_id not in self.handles:
+            # Budget scope (DECISIONS 23:05): the ask-rung hails count as paid probes.
+            ledger = InvestigationLedger(paid_used=len(set(case.hail_keys)))
+            self.handles[case.case_id] = self.kit.handle(
+                c.cid, self.table, max_tick=self.sim.n_ticks - 1, ledger=ledger
+            )
+
+    # --- log --------------------------------------------------------------------------------
+
+    def flush_ladder(self) -> None:
+        for t in self.transitions[self.logged :]:
+            self.nested.append(canonical_json({"ladder": t}))
+        self.logged = len(self.transitions)
+
+    def log_checkpoints(self, case: _Case, cps: Sequence[InvestigationCheckpoint]) -> None:
+        for cp in cps:
+            line = {
+                "case_id": case.case_id,
+                "seq": cp.seq,
+                "contact_id": cp.contact_id,
+                "tick": cp.tick,
+                "from": cp.from_state,
+                "event": cp.label,
+                "to": cp.to_state,
+                "action_key": cp.action_key,
+                "hash": cp.hash,
+            }
+            if cp.recommendation is not None:
+                line["recommendation_hash"] = cp.recommendation.recommendation_hash
+                line["recommended_rung"] = cp.recommendation.recommended_rung
+            self.nested.append(canonical_json({"investigation": line}))
+
+    # --- stepping ---------------------------------------------------------------------------
+
+    def step(self, tick: int) -> None:
+        super().step(tick)
+        self.flush_ladder()
+        for case_id in sorted(self.handles, key=_case_sort_key):
+            handle = self.handles[case_id]
+            case = self.cases[case_id]
+            if handle.done or case.state is not S.INVESTIGATING:
+                continue
+            before = len(self.kit.choices)
+            cps = handle.step(tick) if handle.started else handle.start(tick)
+            for rc in self.kit.choices[before:]:
+                self.choices.append(
+                    CasePlannerChoice(
+                        case_id=case_id, contact_id=rc.contact_id, tick=rc.tick, choice=rc.choice
+                    )
+                )
+            self.log_checkpoints(case, cps)
+            if handle.done:
+                self.finish(case, handle, tick)
+                self.flush_ladder()
+
+    def finish(self, case: _Case, handle: InvestigationHandle, tick: int) -> None:
+        result = handle.result()
+        for call in result.probe_calls:
+            self.calls.append(
+                ProbeCall(
+                    case_id=case.case_id, **call.model_dump(exclude={"source"}), source=call.source
+                )
+            )
+        rec = result.recommendation
+        if result.state is not InvestigationState.STOPPED or rec is None:
+            case.failure = f"investigation {result.state.value}: {result.error}"
+            case.state = S.FAILED
+            case.closed_tick = tick
+            # A failed investigation goes to a person: one interruption (SPEC-LADDER 3).
+            self.case_interruptions[case.case_id] = result.ledger.interruptions + 1
+            return
+        self.recs[case.case_id] = rec
+        to_state = outcome_to_ladder_state(rec.outcome)
+        handoff = to_state is S.HANDED_OFF
+        self.case_interruptions[case.case_id] = rec.interruptions + (1 if handoff else 0)
+        cited = [i for i in rec.evidence_row_ids if i in self.table]
+        if to_state is S.LOST_VEHICLE:
+            c = self.contacts[case.contact_id]
+            view = self.view(c, tick)
+            outcome = case.outcome
+            if outcome is not None and (outcome.plan_id or view.lineage_plan_id):
+                notice = self.notice(case, c, view, outcome, tick)
+                self.notices.append(notice)
+                cited += list(notice.evidence_row_ids)
+        self.advance(
+            case,
+            tick,
+            RunnerEvent.STOP_RULE_FIRED,
+            to_state,
+            reason_code=f"{rec.outcome.value}:{rec.rule_id.value}",
+            row_ids=cited,
+            key=result.checkpoints[-1].action_key,
+        )
+        case.investigation_pending = False
+
+    def advance(
+        self,
+        case: _Case,
+        tick: int,
+        event: RunnerEvent,
+        to_state: LadderState,
+        *,
+        reason_code: str,
+        row_ids: Iterable[str],
+        key: str,
+    ) -> None:
+        """v1 ``advance`` for the ask rows; ``check_transition_v2`` for INVESTIGATING."""
+        if case.state is not S.INVESTIGATING:
+            super().advance(
+                case, tick, event, to_state, reason_code=reason_code, row_ids=row_ids, key=key
+            )
+            return
+        check_transition_v2(case.state, event, to_state)
+        ids = tuple(sorted(set(row_ids)))
+        if not ids or any(i not in self.table for i in ids):
+            raise RuntimeError(f"{case.case_id}: transition cites rows not in the table")
+        self.transitions.append(
+            Transition(
+                seq=len(self.transitions),
+                case_id=case.case_id,
+                contact_id=case.contact_id,
+                tick=tick,
+                from_state=case.state,
+                event=event,
+                to_state=to_state,
+                reason_code=reason_code,
+                evidence_row_ids=ids,
+                idempotency_key=key,
+            )
+        )
+        case.state = to_state
+        case.closed_tick = tick
+
+    def active(self) -> bool:
+        return any(
+            not h.done and self.cases[k].state is S.INVESTIGATING for k, h in self.handles.items()
+        )
+
+    def execute(self) -> RunResult:
+        n = self.sim.n_ticks
+        for tick in range(n):
+            self.clock.tick = tick
+            self.step(tick)
+        tick = n
+        while (
+            self.events or any(k.state is S.WATCHING for k in self.cases.values()) or self.active()
+        ):
+            self.clock.tick = tick
+            self.step(tick)
+            tick += 1
+        return self.result()
+
+    def result(self) -> RunResultV2:
+        base = super().result()
+        probes = dict(base.probes_used)
+        for call in self.calls:
+            if not call.cached:
+                probes[call.probe_id.value] = probes.get(call.probe_id.value, 0) + 1
+        checkpoints = {
+            k: self.handles[k].result().checkpoints
+            for k in sorted(self.handles)
+            if self.handles[k].started
+        }
+        nested = tuple(self.nested)
+        return RunResultV2(
+            scenario_id=base.scenario_id,
+            seed=base.seed,
+            sim=base.sim,
+            cases=base.cases,
+            transitions=base.transitions,
+            evidence=base.evidence,
+            notices=base.notices,
+            interruptions=sum(self.case_interruptions.values()),
+            probes_used=dict(sorted(probes.items())),
+            transition_log_hash=base.transition_log_hash,
+            hails=base.hails,
+            reacquisitions=base.reacquisitions,
+            recommendations=MappingProxyType(dict(sorted(self.recs.items()))),
+            investigation_checkpoints=MappingProxyType(checkpoints),
+            probe_calls=tuple(self.calls),
+            planner_choices=tuple(self.choices),
+            nested_log=nested,
+            nested_log_hash=hashlib.sha256(nested_log_text(nested).encode("utf-8")).hexdigest(),
+        )
+
+
+class ScenarioRunnerV2(ScenarioRunner):
+    """Runner v2: v1 through the matcher, then the investigation for every ESCALATE."""
+
+    def run(
+        self,
+        *,
+        llm_roles: bool = False,
+        violations_path: Path = DEFAULT_VIOLATIONS_PATH,
+        fixture_store: Any = None,
+    ) -> RunResultV2:
+        """``llm_roles`` defaults to False (DECISIONS 23:05); when on, replay only."""
+        run = _V2Run(
+            self,
+            llm_roles=llm_roles,
+            violations_path=violations_path,
+            fixture_store=fixture_store,
+        )
+        result = run.execute()
+        assert isinstance(result, RunResultV2)
+        return result
+
+
+def case_interruptions(result: RunResultV2, case_id: str) -> int:
+    """Interruptions of one case: eyes-on probes plus the handoff SITREP."""
+    rec = result.recommendations.get(case_id)
+    if rec is None:
+        return 0
+    return rec.interruptions + (1 if rec.outcome is StopOutcome.HANDOFF else 0)
+
+
+def main_v2(argv: Sequence[str] | None = None) -> int:
+    """``python -m soundings.runner_v2 --scenario S05 --seed 11``: the nested canonical
+    JSONL log (ladder transitions with the investigation transitions nested), then the
+    two hashes."""
+    parser = argparse.ArgumentParser(
+        prog="python -m soundings.runner_v2",
+        description="Run a scenario through the ask rung and the investigation (runner v2).",
+    )
+    parser.add_argument("--scenario", required=True, help="catalog id (S05), smoke, or a path")
+    parser.add_argument("--seed", type=int, default=None, help="default: the scenario's seed")
+    args = parser.parse_args(argv)
+    result = ScenarioRunnerV2(args.scenario, seed=args.seed).run()
+    sys.stdout.write(nested_log_text(result.nested_log))
+    print(f"transition_log_hash={result.transition_log_hash}")
+    print(f"nested_log_hash={result.nested_log_hash}")
+    return 0
+
+
+# --- WO-033 end: runner v2 ---
 
 # --- v3 (WO-043) ---
 # --- end v3 (WO-043) ---

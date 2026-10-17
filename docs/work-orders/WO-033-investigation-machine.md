@@ -161,7 +161,24 @@ ask (INVESTIGATING) and hand to a person (the `HANDOFF` recommendation and `HAND
 - §3: `thresholds_from_config`.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: #PRNUM (part B; part A #23) · Merged commit: squash of #PRNUM (see STATE) · Test summary: TESTSUMMARY · STATE.md updated: WO-033 row.
+
+Part B (recorded 2026-10-17 07:30 PDT, branch `wo/033b-investigation-wiring`):
+- `soundings/investigation_wiring.py` adapts the real collaborators to the part A Protocols: `PlannerAdapter` (WO-031 `DeterministicPlanner` or WO-032 `LlmPlanner`; cost/latency/rung from `ALLOWLIST`, args from `resolve_args` so the machine's probe key equals `run_probe`'s; `ran_probes` = probes with rows for the contact, so the ask hail and v1 registry lookups are not re-run), `RunProbeRunner` (`run_probe` + one shared `ProbeCache`; executor failures become `ProbeError`), `WriterAdapter` (`HypothesisWriter` with roles on, `template_question` off; only a HANDOFF gets a question), `make_kit(world, ..., llm_roles=False, fixture_store=None, violations_path=...)`.
+- Machine additions: `InvestigationMachine.advance(until_tick)`, `.done`, `.pending_tick`, `.recommendation`; a probe checkpoint now carries every row the probe produced (a wired executor appends its own rows).
+- Runner v2 (`soundings/runner.py`, block `# --- WO-033 begin: runner v2 ---`): `ScenarioRunnerV2(scenario, seed=...).run(*, llm_roles=False, violations_path=..., fixture_store=None) -> RunResultV2` (`recommendations` read-only mapping by case id, `investigation_checkpoints`, `probe_calls: tuple[ProbeCall]` with case ids, `planner_choices: tuple[CasePlannerChoice]`, `nested_log`, `nested_log_hash`; `probes_used` and `interruptions` include the investigation). `outcome_to_ladder_state`, `V2_TRANSITIONS`, `case_interruptions`. The v1 `ScenarioRunner.run()` and `python -m soundings.runner` are untouched (WO-022's tests pin them); the v2 CLI is `python -m soundings.runner_v2 --scenario S05 --seed 11` (nested canonical JSONL, then `transition_log_hash=` and `nested_log_hash=`).
+- Interruptions: per case, eyes-on probes plus one for the handoff SITREP (one definition); a failed investigation also counts one (a person takes it).
+
+Investigation handle for WO-043 part B and WO-085 (`soundings.investigation_wiring`):
+- `kit = make_kit(ProbeWorld(run, scenario, harbor, current_field, pol, plans_at, hail=, match_cfg=, known=), tables=, prior_cfg=, stopping=, budgets=, llm_roles=False)`.
+- `h = kit.handle(contact_id, table, max_tick=n_ticks-1, ledger=InvestigationLedger(paid_used=<ask hails>))`; `h.start(tick)` and `h.step(tick)` return the new `InvestigationCheckpoint`s (a probe lands at `sent + ceil(latency_s/tick_s)`); `h.done`, `h.state`, `h.recommendation` (frozen; `recommended_rung` computed), `h.result()`. `kit.choices` lists every planner decision. Tick-by-tick equals one-shot (`-k handle`).
+
+Results (catalog seeds, deterministic planner; the scenario is graded on the ground-truth lineage end, WO-022's S02 convention):
+- S01/S03 CLEARED_AT_ASK, S02 LOST_VEHICLE: v1 transitions and states identical under v2.
+- S05: lineage end c-0008#1 HANDED_OFF by C_THREAT, threat_mass 0.789823, P(UNAUTHORIZED_UUV) 0.636107 (after `second_sensor_dwell`); the first two tracks of the same vehicle hand off at 0.223617 (C_BUDGET, top BIOLOGIC) and 0.350442 (C_THREAT, fires at the 0.35 threshold).
+- S06 HANDED_OFF (0.887218, 0.768972); S07 RESOLVED_BENIGN (both tracks, top BIOLOGIC); S08 HAZARD_NOTICE (the re-acquired track; the first track resolves benign as BIOLOGIC).
+- S04: the primary track resolves RESOLVED_BENIGN by C_KNOWN_OPERATOR at tick 23 with zero interruptions; the re-acquired track (c-0009#1, tick 366) ends HANDED_OFF by C_BUDGET (P(UNFILED_KNOWN_OPERATOR) 0.605072) because its registry rows carry confidence 0.57 instead of 0.91. The lineage-end and lineage-interruption checks for S04 are strict xfails naming this; no table or threshold changed (open question to the coordinator).
+- Sim false alarms (biologic) mostly resolve benign; some near a critical asset hand off by C_BUDGET (benign mass >= 0.85 but inside `benign_time_guard_s`), so run-level interruptions exceed the per-scenario limits (S04 2, S05 6).
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Approved: the `C_KNOWN_OPERATOR` stop clause (reuses `benign_mass_resolve` and `benign_time_guard_s`; no new threshold) so S04 ends RESOLVED_BENIGN.
