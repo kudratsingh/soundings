@@ -3,8 +3,9 @@
 ``TickClock`` is the run clock in the sim, in tests and in replay: time is
 ``tick * tick_s`` and nothing else. ``WallClock`` exists only for the live UI mode and is
 the single wall-clock read under ``soundings/`` outside the API (CLAUDE.md 2.4; an AST
-scan in ``tests/test_clock.py`` holds this line). This module is standalone: it imports
-nothing from ``soundings.sim``, which keeps its own internal tick counter.
+scan in ``tests/test_clock.py`` holds this line). This module is standalone and imports
+nothing from ``soundings.sim``; ``soundings.sim.clock`` re-exports ``TickClock`` from here,
+so there is one tick clock (WO-011's ``t_s`` name is kept as an alias of ``now_s()``).
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ class TickClock:
 
     def now_s(self) -> float:
         return self.tick * self.tick_s
+
+    @property
+    def t_s(self) -> float:
+        """Sim time in seconds at the current tick (WO-011's name for ``now_s()``)."""
+        return self.now_s()
 
     def advance(self, n: int = 1) -> int:
         """Move ``n`` ticks forward (never backward) and return the new tick."""

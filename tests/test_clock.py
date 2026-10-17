@@ -111,3 +111,11 @@ def test_wall_clock_reads_only_in_wallclock() -> None:
     assert ladder_files
     for path in ladder_files:
         assert _wall_calls(path) == [], f"wall-clock read in {path.name}"
+
+
+def test_one_tick_clock_for_sim_and_ladder() -> None:
+    from soundings.sim.clock import TickClock as SimTickClock
+
+    assert SimTickClock is TickClock
+    clock = TickClock(tick_s=2.0, tick=3)
+    assert clock.t_s == clock.now_s() == 6.0
