@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -24,6 +25,7 @@ from soundings.investigation.probes import (
     run_probe,
     tick_bucket,
 )
+from soundings.physics import load_physics_config
 from soundings.registry.store import plan_views_from_scenario
 from soundings.schemas._base import from_file_data
 from soundings.schemas.config import load_ladder_config
@@ -121,6 +123,18 @@ def _ctx(
         current_rung=rung,
         contact_id=cid,
     )
+
+
+# --- WO-089 begin: camera attenuation exp(-k depth) exp(-turbidity), from config ---
+def _attenuation(run: SimRun, contact_id: str, tick: int) -> float:
+    cfg = load_physics_config()
+    depths = [p.depth_m for p in run.tracks[contact_id].points if p.tick <= tick]
+    depth = max(depths[-1], 0.0) if depths else 0.0
+    k, turbidity = cfg.camera.k_depth_per_m.value, cfg.camera.turbidity_default.value
+    return round(math.exp(-k * depth) * math.exp(-turbidity), 6)  # the law's 6-dp output
+
+
+# --- WO-089 end ---
 
 
 def _s05() -> tuple[Scenario, SimRun]:
@@ -412,9 +426,13 @@ def test_camera_and_eyes_on_under_fog() -> None:
     assert cam.rows[0].kind is EvidenceKind.DERIVED  # WO-012 labels visibility an assumption
     look = run_probe(ProbeId.REQUEST_WATCH_OFFICER_LOOK, ctx, table, cache=ProbeCache())
     assert all(r.value == UNKNOWN for r in look.rows)
-    clear = run_probe(ProbeId.CAMERA_CUE, _ctx(scenario, run), _table(scenario, run),
+    clear_ctx = _ctx(scenario, run)
+    clear = run_probe(ProbeId.CAMERA_CUE, clear_ctx, _table(scenario, run),
                       cache=ProbeCache())  # fmt: skip
-    assert clear.rows[0].value == 0.2  # 02:00, dark default
+    # 02:00, dark default 0.2, times the WO-089 attenuation at the contact's observed depth
+    row = clear.rows[0]
+    assert row.value == round(0.2 * _attenuation(run, clear_ctx.contact_id, row.t), 6)
+    assert isinstance(row.value, float) and 0.0 < row.value <= 0.2
 
 
 def test_camera_fact_without_prior_visibility_row() -> None:
@@ -430,7 +448,12 @@ def test_eyes_on_confidence_is_visibility() -> None:
         ProbeId.REQUEST_WATCH_OFFICER_LOOK, _ctx(scenario, run), table, cache=ProbeCache()
     )
     assert {r.feature for r in res.rows} == {FeatureName.DEPTH, FeatureName.TRANSIT_PATTERN}
-    assert all(r.confidence == 0.8 for r in res.rows if r.value != UNKNOWN)  # 11:00 daylight
+    # 11:00 daylight 0.8, times the WO-089 attenuation at the contact's observed depth
+    ctx = _ctx(scenario, run)
+    for r in res.rows:
+        if r.value != UNKNOWN:
+            assert r.confidence == round(0.8 * _attenuation(run, ctx.contact_id, r.t), 6)
+            assert isinstance(r.confidence, float) and 0.0 < r.confidence <= 0.8
 
 
 def test_second_sensor_dwell_combines_two_nodes() -> None:
