@@ -164,7 +164,7 @@ PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
 - If main lacks `run_scenario(..., likelihoods=None)` when WO-051 starts, WO-051 adds that keyword (one small commit in soundings/sim).
 
 ## Part A done (coordinator split)
-Built on main without runner v3 (2026-10-17 06:10 PDT). Branch `wo/051a-eval-core`; 42 new tests; `make check` green, 1186 passed.
+Built on main without runner v3 (2026-10-17 06:10 PDT). Branch `wo/051a-eval-core`; 42 new tests; `make check` green, 1454 passed after rebasing on WO-031, WO-032, WO-062 part A and WO-043 part A.
 
 Built:
 - `soundings/eval/perturb.py`: `perturb_likelihoods(spec, magnitude, seed)`, `unpin_acoustics(scenario, spec=None)`, `table_shift(a, b) -> TableShift(max_abs, mean_abs, cells)`, `ACOUSTIC_PIN_FEATURES`, `ZERO_FLOOR` (1e-4; structural zeros are floored so every perturbed bucket is > 0), `MIN_BUCKET` (1e-6).
@@ -180,4 +180,5 @@ Remains for Part B:
 - `soundings/eval/soundings_policy.py` (`SoundingsPolicy(planner=, fixture_store=, violations_log=)` over runner v3) and the runner's `# --- sim_likelihoods (WO-051) ---` block; `tests/test_soundings_policy.py`.
 - `tests/test_eval.py::test_catalog_claims` (catalog x seeds 1..5, soundings >= 70% at or below ask, S01/S03/S04 counted every seed, 0 missed threats; bang strictly highest shutdown-minutes and human_queue strictly highest interruptions over all three policies); the scorer-likelihood check in `test_misspecified_section`.
 - `tests/test_eval_llm_diff.py`, `tests/helpers/static_client.py`, `tests/fixtures/eval_static/*.json`.
+- The owner addendum `WO-051-ADDENDUM-eval-directive.md` items 2a-2e and 3 (perturbation at ±20%: pass the magnitude that maps to it, toggle sweep, threshold sweep, BT-01 scale, seeds 1-20 mean/min-max, planner ablation); part A does none of them.
 - `make eval` with all three policies; drop the `SOUNDINGS_PENDING` branches in `tests/test_eval.py` once soundings runs.
