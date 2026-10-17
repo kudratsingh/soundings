@@ -56,4 +56,9 @@ None in code. The README and diagram describe watch / ask / slow / hold / hand t
 §2.1 and §2.5 (vocabulary: denylist check over README and SVG text); §2.2 (diagram marks every model role "propose only"); §2.3 (quickstart runs with `MODEL_MODE=replay`, no key).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: this branch's PR (squash on merge) · Merged commit: see STATE · Test summary: `make check` exit 0, 1445 passed · STATE.md updated: yes (row 091)
+
+- README 52 lines, every section ≤ 12 lines; SVG parses and carries all five stages, three roles and "propose only"; PNGs 157–173 KB.
+- Screenshots captured from `main` after PR #20 (WO-060 part A) merged: S05 seed 11, S01 seed 1, S02 seed 3, tiles off, offline, dark scheme.
+- Fresh clone verified twice (main at 3059507 and after #20): `make setup && make demo` exit 0; setup ~10 s with warm uv/pnpm caches; `make demo` paces in real time, 250 s.
+- 8 PM pass: re-run `uv run python scripts/readme_shots.py` once WO-060 part B / WO-061 land (hypotheses panel, approval button, SITREP for S05); eval numbers live in `artifacts/eval/report.md`, not the README.
