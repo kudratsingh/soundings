@@ -1,11 +1,14 @@
 # STATE — read this first after CLAUDE.md
 
-Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
+Last updated: 2026-10-17 02:05 PT (Phases 0–1 complete; Phase 2 two-thirds; Phases 3–5 started)
 
 ## Where we are
-- **Phase 0 complete.** Repo `kudratsingh/soundings` (public), scaffold commit `25e7dbb`. `make check` green locally (ruff, mypy, denylist, 31 tests, web build). `/health` → `{"ok":true,"model_mode":"replay"}`. `python -m soundings.sim --seed 7 --ticks 60 --scenario smoke` is byte-identical across runs.
-- **Phase 1 in progress.** WO-010 (schemas + harbor map) first; WO-011 (sim + catalog) and WO-012 (evidence table + features) run in parallel worktrees once WO-010's interfaces land. Phase 1 target of Fri 11:30 PM has slipped (see `docs/log/DECISIONS.md` 22:25 rows).
-- Phase 2–6 work orders WO-020..WO-062 are in docs/work-orders/ with coordinator addenda; merge waves in DECISIONS.md 23:05.
+- **Phase 0 complete** (scaffold `25e7dbb`). **Phase 1 complete**: WO-010 schemas `6d7fd6c` (#1), WO-011 sim + catalog `32db5a7` (#3), WO-012 evidence table + pattern of life `26cea7d` (#7). `main` CI green, 809 tests, `make check` clean.
+- **Phase 2**: WO-020 registry `ff04e56` (#4) and WO-021 challenge-response `fcb8761` (#5) merged; WO-022 matcher + ask rung (runner v1) in progress.
+- **Phase 3**: WO-030 posterior in progress; WO-031 → 032 → 033 queued behind it and WO-022.
+- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) merged; WO-041 guards + standing orders in progress; WO-042/043 queued.
+- **Phase 5**: WO-050 baselines in progress; WO-051 queued. **Phase 6**: WO-060/061/062 queued.
+- All work orders WO-010..WO-062 are on `main` with coordinator addenda; rulings in `docs/log/DECISIONS.md`. Zero paid runs.
 - Lens declared at submission: Crisis Mitigation (Track 01 Marine, NULL Labs).
 
 ## Owner directives in force (2026-10-16 ~22:00 PT)
@@ -17,17 +20,17 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 | WO | title | status | branch | PR | merged commit | tests |
 |---|---|---|---|---|---|---|
 | 000 | repo + scaffold | merged (direct, pre-protection) | main | — | 25e7dbb | 31 passed |
-| 010 | schemas + harbor map | PR open, auto-merge on green CI | wo/010-schemas-and-harbor-map | [#1](https://github.com/kudratsingh/soundings/pull/1) | squash commit on main (see PR #1) | 64 passed |
-| 011 | sim + scenario catalog | PR open, auto-merge on green CI | wo/011-sim-and-scenario-catalog | [#3](https://github.com/kudratsingh/soundings/pull/3) | squash commit on main (see PR) | 273 passed |
-| 012 | evidence table + features | PR open, auto-merge on green CI | wo/012-evidence-table-and-features | [#7](https://github.com/kudratsingh/soundings/pull/7) | squash commit on main (see PR) | 754 passed (evidence 116, table 24, features 134, transit 65, pol 20) |
-| 020 | registry | PR open, auto-merge on green CI | wo/020-registry | [#4](https://github.com/kudratsingh/soundings/pull/4) | squash commit on main (see PR) | 330 passed (57 registry) |
-| 021 | challenge-response | PR open, auto-merge on green CI | wo/021-challenge-response | [#5](https://github.com/kudratsingh/soundings/pull/5) | squash commit on main (see PR) | 395 passed (65 hail: unit 55, integration 10) |
+| 010 | schemas + harbor map | merged | wo/010-schemas-and-harbor-map | #1 | 6d7fd6c | 64 passed (tests/test_schemas.py, test_config_integration.py) |
+| 011 | sim + scenario catalog | merged | wo/011-sim-and-scenario-catalog | #3 | 32db5a7 | 273 passed |
+| 012 | evidence table + features | merged | wo/012-evidence-table-and-features | #7 | 26cea7d | 809 passed |
+| 020 | registry | merged | wo/020-registry | #4 | ff04e56 | 330 passed (57 registry) |
+| 021 | challenge-response | merged | wo/021-challenge-response | #5 | fcb8761 | 395 passed (65 hail) |
 | 022 | matcher + ask rung | pending | wo/022-matcher-ask-rung | | | |
 | 030 | posterior | pending | wo/030-posterior | | | |
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
-| 040 | ladder machine | PR open, auto-merge on green CI | wo/040-ladder-machine | [#6](https://github.com/kudratsingh/soundings/pull/6) | squash commit on main (see PR #6) | 450 passed (55 ladder/clock) |
+| 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | pending | wo/041-guards-standing-orders | | | |
 | 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
 | 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
@@ -46,9 +49,9 @@ Last updated: 2026-10-16 22:35 PT (Phase 0 complete; Phase 1 starting)
 | domain / eval / deck | (unassigned; coordinator Kudrat) | | Phase 5, 7, 8, mentor liaison, Devpost |
 
 ## Next
-1. Phase 1 — WO-010 → WO-011 ∥ WO-012.
-2. Phase 2 and Phase 4 ladder machine can start as soon as WO-010 merges (they need schemas, not the sim).
-3. Twist 1 lands Fri 11:30 PM: switch to `docs/TWIST-PLAYBOOK.md` on `twist/1-<slug>` when the owner pastes the notice.
+1. Phase 2 → WO-022 (critical path), then Phase 3 WO-031 → 032 → 033.
+2. Phase 4 WO-042 → 043 (runner v3), then Phase 6 WO-060/061 and Phase 5 WO-051, then WO-062 demo.
+3. Twist 1 (Fri 11:30 PM) has landed by the clock: when the owner pastes the notice, switch to `docs/TWIST-PLAYBOOK.md` on `twist/1-<slug>`.
 
 ## Blocked
 - Nothing. (Twist notices and Devpost steps need the owner.)
