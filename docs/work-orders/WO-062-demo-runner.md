@@ -3,6 +3,8 @@
 Phase: 6 · Branch: `wo/062-demo-runner` · Worktree: `../soundings-worktrees/wo-062-demo-runner` · Est: 4 h · Owner: frontend / demo (unassigned); coordinator Kudrat
 Depends on: WO-010 (`ToggleName`, `LadderState`, `assert_clean`), WO-051 (eval report and CLI), WO-060 (API, run engine, event schema, `python -m soundings.stream`), WO-061 (`/api/inject`, the approve endpoint, the stepped source). Wave 10, the last merge.
 
+> **Binding addenda (owner directives 2026-10-17 06:15 PDT):** see `WO-062-ADDENDUM-video-sound.md` in this folder — presenter mode (`/?presenter=1`), the 3:00 shot list, recording spec, voiceover prep, sound design, and the exit tests. They supersede this file where they differ.
+
 ## Goal
 `make demo` replays the pitch sequence in `docs/demo-script.yaml` end to end, headless, with `MODEL_MODE=replay` and no network. It starts the API on loopback, runs each step's scenario through the real run engine, acts as the scripted watch officer on the approval request, prints each `say` line at its time mark with the state reached, and ends on the eval table. A `--record` mode drives the real UI in Playwright chromium with video recording. This produces `artifacts/demo-fallback.webm`, which is converted to `artifacts/demo-fallback.mp4` (≤ 3 min) when ffmpeg is available. That video is the fallback if the live demo fails on stage, and the Devpost upload.
 
