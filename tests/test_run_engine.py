@@ -4,7 +4,10 @@ changed by the clock, with every citation sent before it is used."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
@@ -31,6 +34,12 @@ class FakeClock:
     def now_s(self) -> float:
         self.t += self.step
         return self.t
+
+
+def _run(coro: Coroutine[Any, Any, list[int]]) -> list[int]:
+    """asyncio.run in a fresh thread (a session browser fixture may hold this thread's loop)."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _by_type(events: list[StreamEvent], kind: str) -> list[StreamEvent]:
@@ -162,11 +171,11 @@ def test_subscribe_backlog_then_live_and_resume() -> None:
                 break
         return out
 
-    first = asyncio.run(collect(-1, 50))
+    first = _run(collect(-1, 50))
     assert first == list(range(50))
-    resumed = asyncio.run(collect(first[-1], 20))
+    resumed = _run(collect(first[-1], 20))
     assert resumed == list(range(50, 70))
-    rest = asyncio.run(collect(69, 10**9))
+    rest = _run(collect(69, 10**9))
     assert rest == list(range(70, len(h.events)))
 
 

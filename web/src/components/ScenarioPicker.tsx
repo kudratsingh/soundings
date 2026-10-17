@@ -1,0 +1,44 @@
+import { useState } from 'react'
+import type { ScenarioInfo } from '../api'
+
+interface Props {
+  scenarios: ScenarioInfo[]
+  initial: { scenario: string; seed: string; speed: string }
+  onStart(scenario: string, seed: number | null, speed: number | null): void
+}
+
+const SPEEDS = ['1', '5', '20', '50', '100', '0']
+
+export default function ScenarioPicker({ scenarios, initial, onStart }: Props) {
+  const [scenario, setScenario] = useState(initial.scenario || 'S02')
+  const [seed, setSeed] = useState(initial.seed)
+  const [speed, setSpeed] = useState(initial.speed || '20')
+  return (
+    <form
+      className="picker"
+      onSubmit={(e) => {
+        e.preventDefault()
+        onStart(scenario, seed === '' ? null : Number(seed), Number(speed))
+      }}
+    >
+      <select aria-label="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)}>
+        {scenarios.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.id} · {s.name}
+          </option>
+        ))}
+      </select>
+      <input aria-label="seed" placeholder="seed" value={seed} onChange={(e) => setSeed(e.target.value.replace(/\D/g, ''))} size={4} />
+      <select aria-label="speed" value={speed} onChange={(e) => setSpeed(e.target.value)}>
+        {SPEEDS.map((s) => (
+          <option key={s} value={s}>
+            {s === '0' ? 'unpaced' : `${s}×`}
+          </option>
+        ))}
+      </select>
+      <button type="submit" data-testid="start-run">
+        Start
+      </button>
+    </form>
+  )
+}

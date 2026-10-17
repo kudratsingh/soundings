@@ -2,7 +2,7 @@
 # it on the command line after a paid-run approval (docs/WORKFLOW.md §7).
 export MODEL_MODE ?= replay
 
-.PHONY: setup check lint types test web dev sim sim-plot pol demo eval denylist clean
+.PHONY: setup check lint types test web e2e dev sim sim-plot pol demo eval denylist clean
 
 setup:
 	uv sync --all-extras
@@ -24,6 +24,9 @@ test:
 
 web:
 	pnpm -C web exec tsc --noEmit && pnpm -C web build
+
+e2e:
+	pnpm -C web build && SOUNDINGS_E2E_REQUIRED=1 uv run pytest tests/e2e -q
 
 dev:
 	uv run uvicorn soundings.api:app --reload --port 8000
