@@ -1,12 +1,26 @@
+// The harbor map (WO-060; radar-scope styling pulled forward from WO-086 in the design pass).
+// Dark scope by default: a CSS filter on the OSM base tiles only (the OpenSeaMap seamarks and
+// the attribution stay as served, so the tile policy is unchanged); `?style=chart` keeps the
+// light chart. Zones are thin outlines with a light fill and a small label, assets small
+// labelled diamonds, sensor rings subtle (WO-089 live ranges). Each contact draws a fading
+// trail of its last 60 fixes, a 60 s velocity leader, and its case colour (benign teal,
+// unknown white, threat amber); the selected case gets a halo and a label. The map never
+// pans by itself unless 'follow selected' is on.
+
 import L from 'leaflet'
-import { useEffect, useMemo, useRef } from 'react'
-import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMapEvents } from 'react-leaflet'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Circle, CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import type { CircleMarker as LCircleMarker } from 'leaflet'
 import type { AboutInfo, HarborGeoJson } from '../api'
+import type { Tone } from '../cases'
 import type { ContactView } from '../useRun'
 import type { SensorRangeRow } from '../events' // WO-089
 
 const CENTER: [number, number] = [33.736, -118.262]
+export const TRAIL_FIXES = 60
+const LEADER_S = 60
+
+export type MapStyle = 'radar' | 'chart'
 
 interface Props {
   harbor: HarborGeoJson | null
@@ -20,6 +34,21 @@ interface Props {
   // --- WO-089 begin: live passive-sonar range per node (shrinks when a vessel passes) ---
   ranges?: Record<string, Pick<SensorRangeRow, 'effective_range_m' | 'nl_db'>>
   // --- WO-089 end ---
+  /** Case colour of each contact id (design pass). */
+  toneOf?: Record<string, Tone>
+  /** Contact ids of the selected case (all of its lineage). */
+  selectedIds?: Set<string>
+  /** The case id each contact id belongs to (for the label). */
+  caseLabel?: Record<string, string>
+  mapStyle?: MapStyle
+  tickS?: number
+}
+
+const TONE_COLOR: Record<Tone, string> = {
+  threat: '#f5b13d',
+  approval: '#f5b13d',
+  unknown: '#f2f5f8',
+  benign: '#3fd2c0',
 }
 
 // --- WO-089 begin: one ring per sensor node, radius from the live sensor_ranges ---
@@ -34,7 +63,7 @@ function SensorRing({ nodeId, name, lat, lon, radius, nl }: { nodeId: string; na
     }
   })
   return (
-    <Circle ref={ref} center={[lat, lon]} radius={radius} pathOptions={{ color: '#0e7490', weight: 1, dashArray: '4 4', fillOpacity: 0.03 }}>
+    <Circle ref={ref} center={[lat, lon]} radius={radius} className="sensor-ring" pathOptions={{ weight: 1, dashArray: '3 5', fillOpacity: 0.02 }}>
       <Tooltip>{nl === null ? name : `${name}: range ${radius.toFixed(0)} m at NL ${nl.toFixed(1)} dB (simulated)`}</Tooltip>
     </Circle>
   )
@@ -46,7 +75,77 @@ function ClickCatcher({ onMapClick }: { onMapClick?(lat: number, lon: number): v
   return null
 }
 
-function ContactMarker({ c, selected, onSelect }: { c: ContactView; selected: boolean; onSelect(id: string): void }) {
+function Follow({ at, on }: { at: [number, number] | null; on: boolean }) {
+  const map = useMap()
+  const last = useRef(0)
+  useEffect(() => {
+    if (!on || !at) return
+    const now = performance.now()
+    if (now - last.current < 1000) return
+    last.current = now
+    if (!map.getBounds().pad(-0.2).contains(at)) map.panTo(at, { animate: false })
+  }, [on, at, map])
+  return null
+}
+
+/** Fit the harbor to the map, and refit when the panel resizes, until the user pans or zooms
+ * (the initial view only: nothing here follows a contact). */
+function FitHarbor({ bounds }: { bounds: [number, number][] }) {
+  const map = useMap()
+  const touched = useRef(false)
+  useEffect(() => {
+    if (bounds.length < 2) return
+    const el = map.getContainer()
+    const fit = () => {
+      map.invalidateSize({ animate: false })
+      const size = map.getSize()
+      if (!touched.current && size.x > 50 && size.y > 50) {
+        map.fitBounds(L.latLngBounds(bounds), { padding: [28, 28], animate: false })
+      }
+    }
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    const mark = () => {
+      touched.current = true
+    }
+    el.addEventListener('pointerdown', mark)
+    el.addEventListener('wheel', mark, { passive: true })
+    return () => {
+      ro.disconnect()
+      el.removeEventListener('pointerdown', mark)
+      el.removeEventListener('wheel', mark)
+    }
+  }, [bounds, map])
+  return null
+}
+
+/** The 60 s velocity leader end from the last few fixes (one fix per tick). */
+export function leaderEnd(track: [number, number][], tickS: number, seconds = LEADER_S): [number, number] | null {
+  const n = track.length
+  const k = Math.min(5, n - 1)
+  if (k < 2) return null
+  const [la, lo] = track[n - 1]
+  const [pa, po] = track[n - 1 - k]
+  const perTick: [number, number] = [(la - pa) / k, (lo - po) / k]
+  const ticks = seconds / Math.max(tickS, 0.001)
+  return [la + perTick[0] * ticks, lo + perTick[1] * ticks]
+}
+
+const ContactLayer = memo(function ContactLayer({
+  c,
+  selected,
+  tone,
+  label,
+  tickS,
+  onSelect,
+}: {
+  c: ContactView
+  selected: boolean
+  tone: Tone
+  label: string
+  tickS: number
+  onSelect(id: string): void
+}) {
   const ref = useRef<LCircleMarker | null>(null)
   useEffect(() => {
     const el = ref.current?.getElement()
@@ -55,63 +154,155 @@ function ContactMarker({ c, selected, onSelect }: { c: ContactView; selected: bo
       el.setAttribute('data-contact', c.contact_id)
     }
   })
+  const color = TONE_COLOR[tone]
+  const trail = c.track.slice(-TRAIL_FIXES)
+  const third = Math.max(1, Math.floor(trail.length / 3))
+  const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
+  const pos: [number, number] = [c.last.lat, c.last.lon]
+  const lead = leaderEnd(c.track, tickS)
   return (
-    <CircleMarker
-      ref={ref}
-      center={[c.last.lat, c.last.lon]}
-      radius={selected ? 8 : 6}
-      pathOptions={{ color: selected ? '#0b2a3a' : '#2563eb', weight: selected ? 4 : 1.5, fillColor: '#60a5fa', fillOpacity: 0.85 }}
-      eventHandlers={{ click: () => onSelect(c.contact_id) }}
-    >
-      <Tooltip>{c.contact_id}</Tooltip>
-    </CircleMarker>
+    <>
+      {segs.map((s, i) =>
+        s.length > 1 ? (
+          <Polyline
+            key={i}
+            positions={s}
+            interactive={false}
+            className="contact-trail"
+            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] }}
+          />
+        ) : null,
+      )}
+      {lead && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9, dashArray: '2 4' }} />}
+      {selected && <CircleMarker center={pos} radius={15} interactive={false} className="halo" pathOptions={{ color, weight: 1.5, opacity: 0.9, fillOpacity: 0.08 }} />}
+      <CircleMarker
+        ref={ref}
+        center={pos}
+        radius={selected ? 7 : 5}
+        pathOptions={{ color: '#06121c', weight: 1.5, fillColor: color, fillOpacity: 1 }}
+        eventHandlers={{ click: () => onSelect(c.contact_id) }}
+      >
+        <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
+          {label}
+        </Tooltip>
+      </CircleMarker>
+    </>
   )
-}
-
-const zoneColor = (crit: number) => `rgba(220, 38, 38, ${0.08 + 0.35 * crit})`
+})
 
 function ringFor(coords: unknown): [number, number][] {
   const ring = (coords as number[][][])[0] ?? []
   return ring.map(([lon, lat]) => [lat, lon] as [number, number])
 }
 
-export default function HarborMap({ harbor, about, tilesOn, contacts, selected, onSelect, onMapClick, overlay, ranges }: Props) {
+function Legend() {
+  return (
+    <div className="legend-panel" data-testid="legend-panel">
+      <div>
+        <i className="lg dot threat" /> threat
+      </div>
+      <div>
+        <i className="lg dot unknown" /> unknown
+      </div>
+      <div>
+        <i className="lg dot benign" /> benign
+      </div>
+      <div>
+        <i className="lg line" /> trail · last 60 fixes
+      </div>
+      <div>
+        <i className="lg dash" /> 60 s velocity leader
+      </div>
+      <div>
+        <i className="lg zone" /> security zone
+      </div>
+      <div>
+        <i className="lg diamond" /> critical asset
+      </div>
+      <div>
+        <i className="lg ring" /> sensor range (simulated)
+      </div>
+    </div>
+  )
+}
+
+export default function HarborMap({
+  harbor,
+  about,
+  tilesOn,
+  contacts,
+  selected,
+  onSelect,
+  onMapClick,
+  overlay,
+  ranges,
+  toneOf = {},
+  selectedIds,
+  caseLabel = {},
+  mapStyle = 'radar',
+  tickS = 2,
+}: Props) {
+  const [legend, setLegend] = useState(false)
+  const [follow, setFollow] = useState(false)
   const features = harbor?.features ?? []
-  const zones = features.filter((f) => f.properties.kind === 'zone')
-  const assets = features.filter((f) => f.properties.kind === 'asset')
-  const nodes = features.filter((f) => f.properties.kind === 'sensor_node')
+  const zones = useMemo(() => features.filter((f) => f.properties.kind === 'zone'), [features])
+  const assets = useMemo(() => features.filter((f) => f.properties.kind === 'asset'), [features])
+  const nodes = useMemo(() => features.filter((f) => f.properties.kind === 'sensor_node'), [features])
   const icons = useMemo(() => {
     const out: Record<string, L.DivIcon> = {}
+    // Assets that differ only by a number or side (Fuel Berth 1/2) share one label.
+    const base = (n: string) => n.replace(/\s*(\d+|\((west|east|north|south)\))$/i, '')
+    const count = new Map<string, number>()
+    for (const a of assets) count.set(base(String(a.properties.name)), (count.get(base(String(a.properties.name))) ?? 0) + 1)
+    const labelled = new Set<string>()
     for (const a of assets) {
-      const size = Math.round(8 + 12 * Number(a.properties.criticality))
+      const b = base(String(a.properties.name))
+      const n = count.get(b) ?? 1
+      const text = labelled.has(b) ? '' : n > 1 ? `${b} ×${n}` : String(a.properties.name)
+      labelled.add(b)
       out[String(a.properties.asset_id)] = L.divIcon({
-        className: 'asset-diamond',
-        html: `<span style="width:${size}px;height:${size}px"></span>`,
-        iconSize: [size, size],
+        className: 'asset-mark',
+        html: `<span class="asset-diamond"></span>${text ? `<span class="asset-name">${text.replace(/[<>&]/g, '')}</span>` : ''}`,
+        iconSize: [10, 10],
+        iconAnchor: [5, 5],
       })
     }
     return out
   }, [assets])
+  const harborBounds = useMemo(() => zones.flatMap((z) => ringFor(z.geometry.coordinates)), [zones])
+  const isSel = (id: string) => (selectedIds ? selectedIds.has(id) : id === selected)
+  const followAt = useMemo(() => {
+    const c = contacts.find((x) => isSel(x.contact_id) && x.contact_id === selected) ?? contacts.find((x) => isSel(x.contact_id))
+    return c ? ([c.last.lat, c.last.lon] as [number, number]) : null
+  }, [contacts, selected, selectedIds])
 
   return (
-    <div className="map-wrap">
-      <MapContainer center={CENTER} zoom={14} className="map" attributionControl={false}>
+    <div className={`map-wrap ${mapStyle}`}>
+      <MapContainer center={CENTER} zoom={14} zoomSnap={0.25} className="map" attributionControl={false} zoomControl={false}>
         {tilesOn && about && (
           <>
-            <TileLayer url={about.tiles.base.url} attribution={about.tiles.base.attribution} />
-            <TileLayer url={about.tiles.seamarks.url} attribution={about.tiles.seamarks.attribution} />
+            <TileLayer url={about.tiles.base.url} attribution={about.tiles.base.attribution} className="base-tiles" />
+            <TileLayer url={about.tiles.seamarks.url} attribution={about.tiles.seamarks.attribution} className="seamark-tiles" />
           </>
         )}
         <ClickCatcher onMapClick={onMapClick} />
-        {zones.map((z) => (
-          <Polygon
-            key={String(z.properties.zone_id)}
-            positions={ringFor(z.geometry.coordinates)}
-            pathOptions={{ color: '#b91c1c', weight: 1, fillColor: zoneColor(Number(z.properties.criticality)), fillOpacity: 1 }}
-          >
-            <Tooltip>{`${z.properties.name} (criticality ${z.properties.criticality})`}</Tooltip>
-          </Polygon>
-        ))}
+        <FitHarbor bounds={harborBounds} />
+        <Follow at={followAt} on={follow} />
+        {zones.map((z) => {
+          const crit = Number(z.properties.criticality)
+          return (
+            <Polygon
+              key={String(z.properties.zone_id)}
+              positions={ringFor(z.geometry.coordinates)}
+              className="zone"
+              pathOptions={{ weight: 1, fillOpacity: 0.08 + 0.07 * crit }}
+            >
+              <Tooltip permanent direction="center" className="zone-label">
+                {String(z.properties.name)}
+              </Tooltip>
+            </Polygon>
+          )
+        })}
         {/* --- WO-089 begin: rings from the live sensor_ranges (harbor range_m until the first one) --- */}
         {nodes.map((n) => {
           const [lon, lat] = n.geometry.coordinates as number[]
@@ -133,23 +324,33 @@ export default function HarborMap({ harbor, about, tilesOn, contacts, selected, 
         {assets.map((a) => {
           const [lon, lat] = a.geometry.coordinates as number[]
           return (
-            <Marker key={String(a.properties.asset_id)} position={[lat, lon]} icon={icons[String(a.properties.asset_id)]}>
+            <Marker key={String(a.properties.asset_id)} position={[lat, lon]} icon={icons[String(a.properties.asset_id)]} keyboard={false}>
               <Tooltip>{`${a.properties.name} (criticality ${a.properties.criticality})`}</Tooltip>
             </Marker>
           )
         })}
         {contacts.map((c) => (
-          <Polyline
-            key={`trk-${c.contact_id}`}
-            positions={c.track}
-            pathOptions={{ color: c.contact_id === selected ? '#0b2a3a' : '#3b82f6', weight: c.contact_id === selected ? 3 : 1.5, opacity: 0.7 }}
+          <ContactLayer
+            key={c.contact_id}
+            c={c}
+            selected={isSel(c.contact_id)}
+            tone={toneOf[c.contact_id] ?? 'unknown'}
+            label={caseLabel[c.contact_id] && caseLabel[c.contact_id] !== c.contact_id ? `${caseLabel[c.contact_id]} (${c.contact_id})` : c.contact_id}
+            tickS={tickS}
+            onSelect={onSelect}
           />
-        ))}
-        {contacts.map((c) => (
-          <ContactMarker key={c.contact_id} c={c} selected={c.contact_id === selected} onSelect={onSelect} />
         ))}
         {overlay}
       </MapContainer>
+      <div className="map-tools">
+        <button type="button" data-testid="legend" aria-expanded={legend} onClick={() => setLegend((v) => !v)}>
+          Legend
+        </button>
+        <button type="button" data-testid="follow" aria-pressed={follow} className={follow ? 'on' : ''} onClick={() => setFollow((v) => !v)}>
+          {follow ? 'following selected' : 'follow selected'}
+        </button>
+      </div>
+      {legend && <Legend />}
       <div className="map-attribution" data-testid="map-attribution">
         {about?.tiles.map_attribution ?? '© OpenStreetMap contributors · © OpenSeaMap contributors'}
       </div>

@@ -1,0 +1,96 @@
+/* Design tokens for the watch-officer screen (WO-060 design pass B1). The only place colours,
+   type sizes and motion timings are defined; every other stylesheet reads these variables.
+   One sans family (the system stack, no web fonts). Three accents (threat amber, benign teal,
+   evidence blue) plus assumption orange and derived grey.
+
+   Contrast: tests/test_ui_tokens.py reads the `pair:` lines below and checks each text /
+   background pair is at least 4.5:1 (WCAG AA for body text). Dimmed placeholders use the
+   muted text colour, never opacity, so they stay readable.
+
+   pair: --text on --bg
+   pair: --text on --surface
+   pair: --text on --raised
+   pair: --text on --hover
+   pair: --text-muted on --bg
+   pair: --text-muted on --surface
+   pair: --text-muted on --raised
+   pair: --text-muted on --hover
+   pair: --threat on --surface
+   pair: --threat on --raised
+   pair: --benign on --surface
+   pair: --benign on --raised
+   pair: --unknown on --surface
+   pair: --unknown on --raised
+   pair: --evidence on --surface
+   pair: --evidence on --raised
+   pair: --assumption on --surface
+   pair: --assumption on --raised
+   pair: --derived on --surface
+   pair: --derived on --raised
+   pair: --ink on --threat
+   pair: --ink on --benign
+   pair: --ink on --evidence
+   pair: --ink on --assumption
+   pair: --ink on --unknown
+   pair: --chart-text on --chart-bg
+   pair: --problem-text on --problem-bg
+*/
+
+:root {
+  /* surfaces */
+  --bg: #0a1117;
+  --surface: #0f1a22;
+  --raised: #16242f;
+  --hover: #1c2d3a;
+  --line: #263845;
+  --line-strong: #3a5163;
+
+  /* text */
+  --text: #e7eef3;
+  --text-muted: #a3b4c0;
+  --ink: #10161c;
+
+  /* accents */
+  --threat: #f5b13d;
+  --benign: #3fd2c0;
+  --unknown: #f2f5f8;
+  --evidence: #74b4ff;
+  --assumption: #ff9f5a;
+  --derived: #a9b2bc;
+
+  /* provenance (evidence rows): fact blue, assumption orange, derived grey */
+  --fact: var(--evidence);
+
+  /* the radar scope (map) */
+  --scope-bg: #06121c;
+  --scope-zone: #f5b13d;
+  --scope-ring: #3fd2c0;
+  --scope-asset: #e7eef3;
+
+  /* the light chart style (?style=chart) and its attribution box */
+  --chart-bg: #ffffff;
+  --chart-text: #0b2a3a;
+
+  /* errors */
+  --problem-bg: #3b1212;
+  --problem-text: #ffd7d7;
+
+  /* type */
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --fs-body: 14px;
+  --fs-strong: 15px;
+  --fs-label: 12px;
+  --fs-now: 19px;
+  --fs-title: 16px;
+
+  /* sizes */
+  --row-h: 24px;
+  --topbar-h: 48px;
+  --radius: 8px;
+
+  /* motion: opacity and transform only */
+  --flash-ms: 600ms;
+  --fade-ms: 180ms;
+
+  color-scheme: dark;
+}

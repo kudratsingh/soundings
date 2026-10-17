@@ -1106,6 +1106,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 # --- WO-022 end ---
 
+# --- WO-080 begin: re-acquisition gap pre-filter ---
+
+
+def _beyond_reacquire_gap(run: _V1Run, last_tick: int, first_tick: int) -> bool:
+    """``match_reacquisition``'s own gap test, applied before building a ``LostTrack``.
+
+    Outcome-identical (the matcher rejects these candidates by the same test); it saves
+    building a LostTrack for every long-lost track, which dominated BT-01's runtime.
+    """
+    return (first_tick - last_tick) * run.tick_s > run.cfg.reacquire.max_gap_s
+
+
+# --- WO-080 end ---
+
 # --- WO-033 begin: runner v2 ---
 # Runner v2: the matcher's ESCALATE enters the investigation (ASKING -> INVESTIGATING, as in
 # v1), the part A ``InvestigationMachine`` runs tick by tick through WO-031's planner and
