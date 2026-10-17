@@ -219,7 +219,7 @@ _FENCE_RE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?\s*```\s*$", re.S)
 def parse_model_json(text: str, role: str) -> dict[str, Any]:
     """Parse a model reply as one JSON object, tolerating a Markdown code fence or prose.
 
-    Order: the raw text; the text inside a single ``\`\`\`json`` fence; the span from the
+    Order: the raw text; the text inside a single Markdown code fence; the span from the
     first ``{`` to the last ``}``. Anything else raises ``ValueError``. This is parse
     robustness only: the object still goes through the role guard like any other reply,
     and nothing here changes what the reply says.
