@@ -196,6 +196,13 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
         <p className="presenter-caption" data-testid="presenter-caption">
           {problem ? `presenter: ${problem}` : (step?.caption ?? (script ? '' : 'loading the shot list…'))}
         </p>
+        {/* --- WO-088 begin --- */}
+        {!problem && step?.subcaption && (
+          <p className="presenter-subcaption" data-testid="presenter-subcaption">
+            {step.subcaption}
+          </p>
+        )}
+        {/* --- WO-088 end --- */}
         <div className="presenter-controls" data-presenter-control>
           <span className="presenter-counter" data-testid="presenter-counter">
             {total ? `${nav.index + 1} / ${total}` : '– / –'}
