@@ -38,7 +38,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
 | 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
-| 062 | demo runner | pending | wo/062-demo-runner | | | |
+| 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
 
 ## Team
 | role | name | github | owns |

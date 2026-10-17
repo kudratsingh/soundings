@@ -128,3 +128,14 @@ PR: · Merged commit: · Test summary: · STATE.md updated:
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - Approved dev dependency: `imageio-ffmpeg` (bundled ffmpeg binary) for the webm→mp4 conversion; no system ffmpeg install. If conversion fails, keep the webm and flag it.
 - Video: squeeze all demo-script steps to ≤ 170 s including a short eval card; do not drop the eval step.
+
+## Part A done (coordinator split)
+Built (branch `wo/062a-demo-runner-core`, headless, in-process, runner v1, no network, no model calls):
+- `soundings/demo/script.py`: `DemoStep` (StrictModel, `extra="forbid"`; `t`, `scenario` (S\d\d | live | twist) xor `eval`, `say: FreeText`, optional `seed`, `scenario_ref`, `toggles: tuple[ToggleName, ...]`, `continue_run`, `approve`, `inject` (untyped mapping for now), `expect_state`), `DemoScript.load(path)` (strictly increasing marks, twist needs `scenario_ref` + `toggles`, `continue_run` needs a previous step on the same scenario, unknown catalog ids rejected), `parse_mark`, `format_mark`.
+- `soundings/demo/schedule.py`: `Pace` (realtime | fast | video), `build_schedule(marks_s, pace, total_s=170, tail_s=10, speed=1) -> Schedule` (`ScheduledStep.at_s`, `Schedule.total_s`, 6 dp).
+- `soundings/demo/headless.py`: Protocol `ScenarioExecutor.run_scenario(scenario, seed) -> Sequence[CaseView]`; `RunnerV1Executor` (wraps `soundings.runner.ScenarioRunner`); `headline(cases, seed) -> StepOutcome`; `with_toggles`; `eval_headline(report_path)`; `TranscriptLine.render()` = `[m:ss] <label> seed=<n> -> <state> tick=<n>[ ; note] | say: <line>`; `run_demo(script, pace, total_s, tail_s, speed, executor, eval_report, emit, clock, sleep) -> DemoResult`.
+- `soundings/demo/__main__.py` (typer): `--script --mode replay [--pace] [--total-s] [--tail-s] [--speed] [--transcript] [--eval-report] [--dry-run]`; record|live exit 3 before loading anything; bad script exit 2; missed `expect_state` exit 1.
+- `docs/demo-script.yaml` additive keys: S01/S02 `expect_state`, second S05 `continue_run: true, approve: true`, twist `scenario_ref: S05, toggles: [network_down]`. Say lines verbatim.
+- Tests: `tests/test_demo_script.py`, `tests/test_demo_schedule.py`, `tests/test_demo_headless.py` (53).
+
+Remaining for Part B: `soundings/demo/runner.py` `DemoRunner` over uvicorn + POST /api/runs, WS follow, /approve, POST /api/inject (an API-backed `ScenarioExecutor` or a replacement loop reusing `TranscriptLine`); type `inject` as `InjectRequest` and require it on `live`; S05/live/twist `expect_state` once runner v3 lands; eval step printing the per-policy table (or running `soundings.eval`); `record.py` (Playwright), `web/src/useFollow.ts` + App.tsx block, `scripts/webm-to-mp4.sh` (imageio-ffmpeg), `make demo-video`, `artifacts/demo-fallback.json`, `tests/test_demo_runner.py`, `tests/e2e/test_demo_record.py`.
