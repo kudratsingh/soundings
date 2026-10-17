@@ -455,7 +455,13 @@ def test_devpost_fields_present() -> None:
         inputs, "Twists (Devpost writeup; scored at final submission)"
     )
     built = _section(text, "Built with (tools used)")
-    for tool in ("Incident Commander", "Anthropic API", "fixtures", "fallback", "OpenSeaMap"):
+    for tool in (
+        "a state-machine agent design the owner has used before",
+        "Anthropic API",
+        "fixtures",
+        "fallback",
+        "OpenSeaMap",
+    ):
         assert tool in built, tool
     assert "Leaflet" in built and "FastAPI" in built
     prize = [h for h in re.findall(r"^## (.+)$", text, re.M) if "Bob" in h]

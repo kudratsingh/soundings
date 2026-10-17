@@ -3,7 +3,10 @@
 ``SimRun.tracks`` holds WO-010 ``Track`` objects: observed data only, the one field the
 investigation reads. Ground truth lives only in ``contact_truth``, ``truth_paths`` and
 the ``Detection`` rows (``gt_id``, ``is_false_alarm``), for tests and grading; the
-investigation never reads them (WO-012 checks this with a grep).
+investigation never reads them (``tests/test_boundary.py``). The two ``SimRun`` methods
+``hail_responder`` and ``eyes_on_path`` are the world answering a physical probe
+(``soundings.ports.WorldRun``): they read truth here, inside the simulator, and return
+no hypothesis label.
 
 Every float here is already rounded to 6 dp (the ``SimRun`` output boundary).
 """
@@ -14,6 +17,7 @@ from dataclasses import dataclass
 
 from pydantic import StrictBool
 
+from soundings.ports import EyesOnPoint, HailResponder
 from soundings.schemas._base import (
     HarborId,
     Lat,
@@ -50,6 +54,10 @@ class Detection(StrictModel):
     breathing_or_click_present: StrictBool
     broadband_level: float
     is_false_alarm: StrictBool
+
+
+FALSE_ALARM_PREFIX = "fa-"
+"""Ground-truth id prefix of a sensor false alarm (nothing physical is there)."""
 
 
 class ContactTruth(StrictModel):
@@ -96,3 +104,25 @@ class SimRun:
     contact_truth: dict[str, ContactTruth]
     truth_paths: dict[str, list[TruthPoint]]
     toggle_report: ToggleReport
+
+    def hail_responder(self, contact_id: str) -> HailResponder | None:
+        """How the thing behind ``contact_id`` answers a hail; None if nothing can.
+
+        An id with no truth entry, or a false alarm, never replies. ``ContactTruth`` is
+        read (not the scenario file), so a ``contact_goes_quiet`` toggle is honoured.
+        """
+        truth = self.contact_truth.get(contact_id)
+        if truth is None or truth.gt_id.startswith(FALSE_ALARM_PREFIX):
+            return None
+        return HailResponder(
+            registry_contact_id=truth.gt_id,
+            replies_to_hail=truth.replies_to_hail,
+            silent_after_tick=truth.silent_after_tick,
+        )
+
+    def eyes_on_path(self, contact_id: str) -> list[EyesOnPoint]:
+        """``(tick, lat, lon, depth_m)`` of the simulated contact behind ``contact_id``."""
+        truth = self.contact_truth.get(contact_id)
+        if truth is None:
+            return []
+        return [(p.tick, p.lat, p.lon, p.depth_m) for p in self.truth_paths.get(truth.gt_id, [])]

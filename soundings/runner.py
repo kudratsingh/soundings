@@ -16,8 +16,9 @@ Rules the runner keeps (CLAUDE.md section 2):
 * 2.6: every transition, outcome and notice line cites evidence row ids in
   ``RunResult.evidence``.
 * The runner reads only observed data (``SimRun.tracks``, ``tick_s``, ``n_ticks``) and
-  never a track point after the current tick. Ground truth (``contact_truth``,
-  ``truth_paths``) is read only by the simulated hail (WO-021) and by tests.
+  never a track point after the current tick. Ground truth is read only inside the
+  simulator (which answers the hail and eyes-on probes through ``soundings.ports``), by
+  ``soundings.eval`` and by tests (``tests/test_boundary.py``).
 
 Interruptions follow the one definition of DECISIONS.md 2026-10-16 23:05: an event that
 needs the watch officer or backup approver to look or act. Runner v1 raises none; a
