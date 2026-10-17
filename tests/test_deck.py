@@ -10,6 +10,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
@@ -480,5 +481,19 @@ def test_pdf_has_eleven_pages(tmp_path: Path) -> None:
     html_path = tmp_path / "index.html"
     build_deck.build(FIXTURE, html_path, devpost=None, curve=tmp_path / "none.png")
     pdf = tmp_path / "deck.pdf"
-    assert export_deck.export(html_path, pdf, None) == 0
+    # a subprocess, so a Playwright sync session another test holds open cannot collide
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(REPO / "scripts" / "export_deck.py"),
+            "--html",
+            str(html_path),
+            "--pdf",
+            str(pdf),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
     assert export_deck.count_pdf_pages(pdf) == 11
