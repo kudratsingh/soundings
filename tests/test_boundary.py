@@ -140,6 +140,11 @@ def is_sim(name: str) -> bool:
     return name == SIM or name.startswith(SIM + ".")
 
 
+def in_guarded_package(mod: str) -> bool:
+    """``soundings.investigation.x`` is guarded; ``soundings.investigation_wiring`` is not."""
+    return any(mod == pkg or mod.startswith(pkg + ".") for pkg in GUARDED_PACKAGES)
+
+
 def _docstring_nodes(tree: ast.AST) -> set[int]:
     out: set[int] = set()
     for node in ast.walk(tree):
@@ -272,6 +277,8 @@ def _direct_sim_imports() -> list[Hit]:
 def test_guarded_packages_exist() -> None:
     for package in GUARDED_PACKAGES:
         assert package_files(package), package
+    assert in_guarded_package("soundings.investigation.probes")
+    assert not in_guarded_package("soundings.investigation_wiring")
 
 
 def test_investigation_and_ladder_import_nothing_from_sim() -> None:
@@ -315,7 +322,7 @@ def test_no_transitive_path_from_investigation_or_ladder_to_sim() -> None:
     graph = _import_graph()
     chains = []
     for mod in sorted(graph):
-        if mod.startswith(GUARDED_PACKAGES):
+        if in_guarded_package(mod):
             chain = _path_to_sim(graph, mod)
             if chain is not None:
                 chains.append(" -> ".join(chain))
