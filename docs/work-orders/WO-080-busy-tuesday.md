@@ -163,7 +163,13 @@ watch (vessel feed, evidence), ask (39 filed jobs clear on hail and registry), h
 - §2.6: the BT-01 citation check.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: #33 (part A), part B PR on `wo/080-busy-tuesday-b` · Merged commit: see STATE.md · Test summary: see part B notes · STATE.md updated: yes (WO-080 row)
+
+### Part B done (2026-10-17 07:31 PDT)
+- `ScenarioRunner(..., skip_idle_ticks=False)`, `RunResult.ticks_stepped`, `_V1Run.next_wake_tick` (delegates to `_next_wake_tick` in the `# --- tick skipping (WO-080) ---` block), `_ActiveIndex` (step iterates only the contacts whose `[first_tick, dropped_at]` covers the tick), `_wake_every_tick` (any case in INVESTIGATING/ADVISING_SLOW/HOLDING/AWAITING_APPROVAL/WATCH_AFTER_HANDOFF wakes every tick; exact `_V1Run` parks INVESTIGATING because v1 never acts on it, and any subclass is stepped per tick).
+- Profiling found the time in event handling, not the per-tick loop. Before: 113 s profiled, with `try_reacquire` building a `LostTrack` for every older track (52 s). One more edit inside WO-022's block skips lost tracks past `reacquire.max_gap_s` before building them; `match_reacquisition` rejects those by the same test, so outcomes are identical. After: 64 s profiled, 33.7 s wall, 4,065 of 5,760 ticks stepped. tick_s stays 5 and needs no fallback. Cut item 2 (re-hail extraction) was not needed.
+- Tests: `test_tick_skipping.py` (S01..S08 x seeds 1-3 plus the 2.5 h BT-01, skipped equal to unskipped); `test_busy_tuesday.py` `-k runtime`, `-k two_runs`, `-k no_show` (`--plans db` gives the same hash), `-k ais_feature`, `-k reacquire_precision`; part B rules (§2.1 the skip block only schedules, §2.2 it reads no truth).
+- reacquire_precision: the rogue is never laundered. No `registry:` plan row and no lineage plan reach a rogue case, and no carry-over link touches the rogue. Position-only `registry.position:` rows appear while it crosses a dredge plan's main_channel area; DECISIONS 23:44 says those are area matches, not identities. The every-link-same-gt clause is a strict xfail: v1 links co-working jobs that share one survey or dredge box (job-02/job-07, job-17/job-37), and three biologic false alarms to jobs. See the open question.
 
 ### Part A done (2026-10-17 07:01 PDT)
 - Schema: `JobType` (enums), `BehaviorType.VESSEL_TRANSIT`, `RegistryPlan.job_type`, `ScenarioContact.start_tick/end_tick/hypothesis`, `Expected.contacts`/`ExpectedContact`, `ScenarioId` accepts `BT-NN`; `VESSEL_SPEED_MIN_MPS/MAX_MPS` (3, 6) in `soundings.schemas.scenario`.
