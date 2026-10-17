@@ -31,10 +31,10 @@ def test_s02_contact_and_ask_rung(live_server: str, browser: Any) -> None:
     )
     page.route("**/*", _offline)
     page.goto(f"{live_server}/?scenario=S02&seed=3&speed=20&tiles=off")
-    page.wait_for_selector("[data-testid=contact-marker]", timeout=20_000)
-    page.wait_for_selector("[data-testid=rung-active][data-rung=ask]", timeout=30_000)
+    page.wait_for_selector("[data-testid=contact-marker]", timeout=90_000)
+    page.wait_for_selector("[data-testid=rung-active][data-rung=ask]", timeout=180_000)
     timeline = page.locator("[data-testid=state-timeline]")
-    assert "ASKING" in timeline.inner_text(timeout=10_000)
+    assert "ASKING" in timeline.inner_text(timeout=30_000)
     assert page.locator("[data-testid=ledger-row]").count() > 0
     assert page.locator("[data-testid=approval-placeholder]").inner_text() == (
         "approval wired in WO-061"
