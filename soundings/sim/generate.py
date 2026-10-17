@@ -58,6 +58,21 @@ JOB_TYPES: tuple[JobType, ...] = (
 WINDOW_PAD_S = 300.0
 """Plan windows pad the in-water interval on both sides (covers a re-issued id's hail)."""
 
+# WO-095: filing-window flexibility per job type, in minutes either side of the filed
+# start. Source: demo values (DECISIONS 2026-10-17, WO-095), not port rules or operator
+# data: a survey crew can shift a lawnmower run by an hour and a half, divers on a hull
+# by two hours, a pile-inspection ROV by three (slack tide work), a dredge sled less
+# (channel traffic windows). The plan window itself stays the padded in-water interval;
+# only the registry's start bounds (``earliest_start_tick``/``latest_start_tick``) come
+# from here, clipped to the scenario day: never before tick 0, and a plan moved to its
+# latest start still ends by ``duration_ticks``.
+WINDOW_FLEX_MIN: dict[JobType, int] = {
+    JobType.SURVEY: 90,
+    JobType.HULL_CLEANING: 120,
+    JobType.PILE_INSPECTION: 180,
+    JobType.DREDGE: 45,
+}
+
 START_MAX_S = 2.5 * 3600.0
 QUANTUM_S = 60.0
 HEARD_FRACTION = 0.6  # a job starts within 0.6 x range_m of its nearest node (WO-011 rule)
@@ -324,6 +339,23 @@ def _place_job(
     raise RuntimeError(f"no feasible start for job type {jt.value} after {MAX_TRIES} tries")
 
 
+def flex_window(
+    start_tick: int, end_tick: int, jt: JobType, *, tick_s: float, n_ticks: int
+) -> PlanWindow:
+    """The plan window ``[start_tick, end_tick]`` with WO-095 start bounds for ``jt``.
+
+    ``earliest = max(start - flex, 0)`` and ``latest = min(start + flex, n_ticks -
+    (end - start))``, so ``earliest <= start <= latest`` and the latest slot ends in the run.
+    """
+    flex = int(round(WINDOW_FLEX_MIN[jt] * 60.0 / tick_s))
+    return PlanWindow(
+        start_tick=start_tick,
+        end_tick=end_tick,
+        earliest_start_tick=max(start_tick - flex, 0),
+        latest_start_tick=min(start_tick + flex, n_ticks - (end_tick - start_tick)),
+    )
+
+
 def peak_tick(intervals: Sequence[tuple[int, int]], n_ticks: int) -> tuple[int, int]:
     """(earliest tick of peak concurrency, peak count) over ``[start, end)`` intervals."""
     delta = [0] * (n_ticks + 1)
@@ -404,8 +436,12 @@ def generate_busy_day(
                 vehicle=spec.vehicle,
                 modem_id=modem,
                 area=zone_id,
-                window=PlanWindow(
-                    start_tick=max(start_t - pad, 0), end_tick=min(end_t + pad, n_ticks)
+                window=flex_window(
+                    max(start_t - pad, 0),
+                    min(end_t + pad, n_ticks),
+                    jt,
+                    tick_s=tick_s,
+                    n_ticks=n_ticks,
                 ),
                 contact=f"sim-phone-{jt.value}-{n_type:02d}",
                 job_type=jt,

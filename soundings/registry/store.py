@@ -919,9 +919,17 @@ def plans_from_scenario(
                 created_at=epoch,
                 job_type=_scenario_job_type(p),  # WO-081
                 tick_s=scenario.tick_s,  # WO-081
+                # WO-095: the plan's filing-window flexibility, when the scenario gives it
+                earliest_start_at=_tick_or_none(epoch, p.window.earliest_start_tick, scenario),
+                latest_start_at=_tick_or_none(epoch, p.window.latest_start_tick, scenario),
             )
         )
     return out
+
+
+def _tick_or_none(epoch: datetime, tick: int | None, scenario: Scenario) -> datetime | None:
+    """``tick_to_datetime`` for an optional tick (WO-095 start bounds)."""
+    return None if tick is None else tick_to_datetime(epoch, tick, scenario.tick_s)
 
 
 def _scenario_job_type(plan: Any) -> JobTypeName:
@@ -971,6 +979,8 @@ def plan_views_from_scenario(
                 depth_min_m=p.depth_min_m,
                 depth_max_m=p.depth_max_m,
                 tick_s=p.tick_s,
+                earliest_start_at=p.earliest_start_at,  # WO-095
+                latest_start_at=p.latest_start_at,  # WO-095
             )
         )
     # --- WO-081 begin: conflicts, as sequential create() would record them ---
