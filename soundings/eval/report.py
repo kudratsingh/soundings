@@ -321,6 +321,10 @@ def per_scenario_rows(
 ) -> tuple[ScenarioRow, ...]:
     rows: list[ScenarioRow] = []
     for sc in sorted(scenarios, key=lambda s: s.id):
+        # --- WO-061 begin: a judge-injected live scenario (L-) has no expected terminal ---
+        if sc.expected.terminal_state is None:
+            continue
+        # --- WO-061 end ---
         for policy in PolicyName:
             mine = sorted(
                 (r for r in runs if r.scenario_id == sc.id and r.policy is policy),

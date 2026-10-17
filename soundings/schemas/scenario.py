@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from pydantic import Field, StrictBool, StringConstraints, model_validator
+from pydantic import Field, StrictBool, StringConstraints, field_validator, model_validator
 
 from soundings.schemas._base import (
     REPO_ROOT,
@@ -214,7 +214,17 @@ class ExpectedContact(StrictModel):
 
 
 class Expected(StrictModel):
-    terminal_state: LadderState
+    # --- WO-061 begin: optional only for judge-injected live scenarios (^L-) ---
+    terminal_state: LadderState | None = None
+
+    @field_validator("terminal_state", mode="before")
+    @classmethod
+    def _no_explicit_null(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("terminal_state may be omitted (L- ids only), never null")
+        return value
+
+    # --- WO-061 end ---
     passes_through: tuple[LadderState, ...] = ()
     top_hypothesis: Hypothesis | None = None
     min_threat_mass: Probability | None = None
@@ -245,6 +255,10 @@ class Scenario(StrictModel):
         contact_ids = [c.id for c in self.contacts]
         if len(set(contact_ids)) != len(contact_ids):
             raise ValueError("contact ids must be unique")
+        # --- WO-061 begin: an empty expected block only for judge-injected live ids ---
+        if self.expected.terminal_state is None and not self.id.startswith("L-"):
+            raise ValueError("expected.terminal_state is required (only L- ids may omit it)")
+        # --- WO-061 end ---
         plan_ids = [p.plan_id for p in self.registry_plans]
         if len(set(plan_ids)) != len(plan_ids):
             raise ValueError("plan ids must be unique")

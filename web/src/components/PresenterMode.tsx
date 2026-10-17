@@ -33,6 +33,16 @@ function isTyping(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable
 }
 
+// --- WO-061 begin: the judge-panel presenter actions (App.tsx listens for these) ---
+export const JUDGE_ACTIONS = ['file_plan_qr', 'judge_drops_rogue'] as const
+
+function judgeActions(step: PresenterStep): void {
+  const named = [step.action, ...(step.beats ?? [])]
+  for (const action of JUDGE_ACTIONS)
+    if (named.includes(action)) window.dispatchEvent(new CustomEvent('soundings:presenter-action', { detail: { action } }))
+}
+// --- WO-061 end ---
+
 /** Start what a step starts; returns the run id, or null when the step starts no run. */
 async function applyStep(step: PresenterStep, previousRunRef: string | null): Promise<string | null> {
   for (const note of step.pending) console.info(`presenter: step ${step.index + 1}: ${note}`)
@@ -81,6 +91,7 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
     setApplied(null)
     setPaused(Boolean(step.pause_for_click))
     logPresenter(step.index, nav.kind)
+    judgeActions(step) // WO-061
     applyStep(step, runRef.current)
       .then((runId) => {
         if (gen !== generation.current) return

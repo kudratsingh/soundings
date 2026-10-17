@@ -37,7 +37,7 @@ def test_s02_contact_and_ask_rung(live_server: str, browser: Any) -> None:
     assert "ASKING" in timeline.inner_text(timeout=30_000)
     assert page.locator("[data-testid=ledger-row]").count() > 0
     assert page.locator("[data-testid=approval-placeholder]").inner_text() == (
-        "approval wired in WO-061"
+        "a person approves here when the ladder asks"  # WO-061 wired the approval path
     )
     assert page.locator("[data-testid=approve]").count() == 0  # no approval is pending
     assert (

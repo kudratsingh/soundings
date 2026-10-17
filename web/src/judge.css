@@ -1,0 +1,220 @@
+/* WO-061: judge panel, plan layer, proposal card, LAN banner (tokens from theme.css). */
+
+.judge-dock {
+  position: fixed;
+  left: 12px;
+  bottom: 56px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+}
+
+.judge-tab {
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: var(--radius, 6px);
+  padding: 4px 10px;
+}
+
+.judge-started {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  padding: 3px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.judge-panel {
+  position: fixed;
+  left: 12px;
+  bottom: 56px;
+  z-index: 900;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+.judge-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.judge-head strong {
+  flex: 1;
+}
+
+.judge-body {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  flex-wrap: wrap;
+}
+
+.judge-controls {
+  flex: 1 1 280px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.judge-controls button.on {
+  border-color: var(--threat);
+}
+
+.judge-behaviors {
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.judge-radio {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.judge-acoustic {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.judge-go {
+  justify-self: start;
+  border: 1px solid var(--threat);
+  background: var(--raised);
+  color: var(--text);
+  padding: 4px 18px;
+  font-weight: 600;
+}
+
+.judge-error,
+.judge-warn {
+  color: var(--problem-text);
+  background: var(--problem-bg);
+  border-radius: var(--radius, 6px);
+  padding: 4px 8px;
+  margin: 0;
+}
+
+.judge-help ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.judge-qr {
+  margin: 0;
+  flex: 0 1 180px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.judge-qr img {
+  background: #ffffff;
+  border-radius: 4px;
+}
+
+.judge-qr figcaption {
+  display: grid;
+  gap: 2px;
+}
+
+.judge-qr-url {
+  word-break: break-all;
+  font-size: var(--fs-label, 12px);
+}
+
+.judge-placing .leaflet-container {
+  cursor: crosshair;
+}
+
+.judge-pin {
+  stroke: var(--threat);
+  fill: var(--threat);
+}
+
+.plan-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  border: 2px solid var(--benign);
+  background: var(--bg);
+}
+
+.plan-dot.conflicted {
+  border-color: var(--threat);
+  background: var(--threat);
+}
+
+.plan-zone {
+  stroke: var(--benign);
+  fill: var(--benign);
+}
+
+.proposal-card {
+  position: fixed;
+  left: 12px;
+  top: 136px;
+  z-index: 880;
+  width: min(360px, calc(100vw - 24px));
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--threat);
+  border-radius: var(--radius, 6px);
+}
+
+.proposal-conflict,
+.proposal-none {
+  overflow-wrap: anywhere;
+}
+
+.proposal-shifts {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.proposal-actions,
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.approve-btn {
+  border: 1px solid var(--threat);
+  font-weight: 600;
+}
+
+.lan-banner {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: var(--threat);
+  color: var(--ink);
+  padding: 2px 10px;
+  border-radius: 0 0 6px 6px;
+  font-size: var(--fs-label, 12px);
+  font-weight: 600;
+}

@@ -2,7 +2,7 @@
 # it on the command line after a paid-run approval (docs/WORKFLOW.md §7).
 export MODEL_MODE ?= replay
 
-.PHONY: setup check lint types test web e2e dev sim sim-plot pol demo eval deck denylist clean
+.PHONY: setup check lint types test web e2e dev dev-lan sim sim-plot pol demo eval deck denylist clean
 
 setup:
 	uv sync --all-extras
@@ -30,6 +30,19 @@ e2e:
 
 dev:
 	uv run uvicorn soundings.api:app --reload --port 8000
+
+# --- WO-061 QR begin: the demo laptop on the venue network (judges file plans from a phone).
+# Binds 0.0.0.0 only with SOUNDINGS_LAN=1 (the screen then shows a "demo network mode"
+# banner); otherwise it stays on 127.0.0.1 like `make dev`. DECISIONS.md 2026-10-17 06:37.
+dev-lan:
+	@if [ "$$SOUNDINGS_LAN" = "1" ]; then \
+		echo "demo network mode: binding 0.0.0.0:8000 (set SOUNDINGS_PUBLIC_BASE_URL for the QR code)"; \
+		SOUNDINGS_LAN=1 uv run uvicorn soundings.api:app --host 0.0.0.0 --port 8000; \
+	else \
+		echo "SOUNDINGS_LAN is not 1: binding 127.0.0.1:8000 (SOUNDINGS_LAN=1 make dev-lan for the venue network)"; \
+		uv run uvicorn soundings.api:app --host 127.0.0.1 --port 8000; \
+	fi
+# --- WO-061 QR end ---
 
 sim:
 	uv run python -m soundings.sim --seed 7 --ticks 60 --scenario smoke

@@ -133,7 +133,17 @@ None directly. An injected contact enters at watch, and the ladder takes it wher
 §2.1 (`test_vocabulary`, denylist grep), §2.2 (`test_inject_rejects`), §2.4 (`test_live_file_replays`, byte-identical YAML), and CLAUDE.md §6 scope (out-of-zone 422 in `test_inject.py`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated:
+PR: see branch `wo/061-judge-panel` · Merged commit: (squash on merge) · Test summary: test_inject 30, test_api_inject 10, test_api_approve 8, test_stepped_source 7, test_api_qr 8 (63 new); e2e with SOUNDINGS_E2E=1: test_ui_approval 1, test_judge_panel 1, test_judge_qr 2, test_ui_smoke updated · STATE.md updated: WO-061 row.
+
+Notes for downstream:
+- `soundings.inject` re-exports `soundings.sim.live_scenario` (the mapping writes `ground_truth`, which only sim/eval may touch).
+- `stepped` = runner v3 with a person approving (`soundings.stream.stepped.SteppedSource`, `UiApprover` = WO-043 `ManualApprover`). The engine's registered factory is `DeferredSteppedSource` (built on a worker thread; `wait_ready()`, `inner`; `stepped_of(src)` returns the `SteppedSource`). Its stream equals the `v3-manual` stream until a person answers.
+- `POST /api/runs/{id}/approve` and `/decline` with `{request_id, approver?}`: 404 unknown run, 409 not a stepped run / no open request / second answer, 422 any extra field. Approve mints the token in `soundings.stream.ladder_adapter.grant` (exact request scope, approver `primary`, channel `ui`, issued at the source's current tick) and delivers through `RunEngine.deliver_approval`. `RunEngine.approve` works for stepped runs too.
+- `POST /api/inject/prepare` (same body as `/api/inject`) builds the judge's run while they choose; Go with the identical request claims it. Out of zone: 422 `outside the declared security zones`; 429 `too many live runs` when `max_live_runs` unclaimed runs are active.
+- `python -m soundings.stream --scenario scenarios/live/L-<stamp>.yaml --seed <n>` replays a judge contact (stepped source by default for `L-` files); `--approve-first` grants each primary request at the tick it is asked.
+- `GET /api/qr?target=/registry` (SVG, `X-QR-Payload`), `GET /api/qr/info` (`url`, `loopback`, `lan`); `SOUNDINGS_PUBLIC_BASE_URL` overrides the host; `SOUNDINGS_LAN=1 make dev-lan` binds 0.0.0.0 and the screen shows "demo network mode".
+- Web: `postApprove/postDecline/postInject/postPrepare/startRunOn/fetchQrInfo/fetchActivePlans/proposeSlot/acceptProposal/declineProposal` in `api.ts`; `usePlans()` polls every `PLAN_POLL_MS = 1000`; `ProposalCard` targets the newest conflicted plan; presenter actions dispatch `soundings:presenter-action` (`file_plan_qr`, `judge_drops_rogue`) and `App.tsx` handles them.
+
 
 ## Coordinator addenda (2026-10-16 23:05 PT, binding; see docs/log/DECISIONS.md)
 - If `soundings/schemas/scenario.py` on main still requires `Expected.terminal_state` for every id, make it optional when the scenario id matches `^L-` (judge-injected live scenarios) with a unit test in tests/test_schemas.py; this one-line schema edit is approved for WO-061.
