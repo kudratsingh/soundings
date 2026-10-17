@@ -2,7 +2,7 @@
 # it on the command line after a paid-run approval (docs/WORKFLOW.md §7).
 export MODEL_MODE ?= replay
 
-.PHONY: setup check lint types test web dev sim sim-plot demo eval denylist clean
+.PHONY: setup check lint types test web dev sim sim-plot pol demo eval denylist clean
 
 setup:
 	uv sync --all-extras
@@ -33,6 +33,9 @@ sim:
 
 sim-plot:
 	uv run python -m soundings.sim.plot --scenario $(scenario) --out artifacts/$(scenario).png
+
+pol:
+	uv run python -m soundings.investigation.pol --seed 42 --days 28 --out data/pol_table.json
 
 demo:
 	uv run python -m soundings.demo --script docs/demo-script.yaml --mode replay
