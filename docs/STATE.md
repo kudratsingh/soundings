@@ -28,7 +28,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 022 | matcher + ask rung | merged | wo/022-matcher-ask-rung | #14 | c2074f2 | see PR #14 |
 | 030 | posterior | merged | wo/030-posterior | #11 | 69bd327 | 1043 passed (test_posterior) |
 | 031 | probes + planner | in review | wo/031-probes-planner | | | 1310 passed (87 probes/planner) |
-| 032 | llm planner guard | part A merged; part B pending | wo/032a-llm-guard-core | #17 | (squash on merge) | 1223 passed (73 test_llm_guard, 6 test_llm_roles) |
+| 032 | llm planner guard | part A merged (#17); part B in review | wo/032-llm-planner-guard | | (squash on merge) | 1336 passed (85 test_llm_guard, 9 test_llm_roles, 11 test_probe_planner_llm) |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
