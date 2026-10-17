@@ -44,7 +44,7 @@ jobs:
             echo "external reference found; see tests/test_no_external_references.py"; exit 1; fi
 
       - name: Tests (replay only)
-        run: uv run pytest -q --maxfail=1
+        run: uv run pytest -q --maxfail=1 -n 4 -p no:cacheprovider
 
       - uses: pnpm/action-setup@v4
         with:

@@ -20,7 +20,7 @@ denylist:
 	bash scripts/denylist-check.sh
 
 test:
-	uv run pytest -q
+	uv run pytest -q -n auto
 
 web:
 	pnpm -C web exec tsc --noEmit && pnpm -C web build
