@@ -7,12 +7,11 @@ comes from a least-squares line fit of local-metre positions over a sliding wind
 
 Window rule (deterministic, documented once here):
 
+* The window length is ``w = min(FIT_WINDOW_S, span / 2)``, so a track shorter than
+  two windows still yields several overlapping fits (3 points give 2 windows).
 * A window starts at every observed point ``i`` and holds the points with
-  ``t_i <= t <= t_i + w``.
-* For a track whose span is at least ``FIT_WINDOW_S``, ``w = FIT_WINDOW_S`` and only
-  full windows are kept (``t_i + w <= t_last``), so no window is a truncated tail.
-* For a shorter track, ``w = span / 2`` and every start ``i <= n - 2`` is kept, so a
-  short track still yields ``n - 1`` overlapping windows (3 points give 2 windows).
+  ``t_i <= t <= t_i + w``. Only full windows are kept (``t_i + w <= t_last``), so no
+  window is a truncated tail.
 * A window needs at least 2 points. If no window qualifies, one window covers the
   whole track.
 
@@ -209,14 +208,12 @@ def fit_windows(track: TrackArrays, window_s: float = FIT_WINDOW_S) -> WindowFit
     rows: list[tuple[float, float, int, float, float, float, float, float, float]] = []
     if n >= MIN_FIT_POINTS:
         t = track.t_s
-        span = track.span_s
-        short = span < window_s
-        w = span / 2.0 if short else window_s
+        w = min(window_s, track.span_s / 2.0)
         t_last = float(t[-1])
         bounds: list[tuple[int, int]] = []
         for i in range(n - 1):
             t_i = float(t[i])
-            if not short and t_i + w > t_last + TIME_EPS_S:
+            if t_i + w > t_last + TIME_EPS_S:
                 break
             j = int(np.searchsorted(t, t_i + w + TIME_EPS_S, side="right"))
             if j - i >= MIN_FIT_POINTS:
