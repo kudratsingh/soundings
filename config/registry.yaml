@@ -19,3 +19,15 @@ conflicts:
     pile_inspection: [0, 20]
     dredge: [5, 25]
     other: [0, 30]
+
+# WO-082: slot proposals. Read by soundings.registry.slots.load_slot_config. A proposal
+# shifts start times (never routes, never vehicles) and changes nothing until an operator
+# accepts it in the registry form. Capacities are demo values, not port rules.
+slots:
+  zone_capacity_default: 2      # concurrent plans a zone takes (owner directive default)
+  zone_capacity: {}             # per-zone overrides, e.g. {fuel_berths: 1}
+  slot_step_min: 15             # start times move on a 15-minute grid
+  latest_start_slack_min: 120   # latest start when a plan gives none: filed start + 2 h
+  horizon_end_local: "24:00"    # every proposed slot ends on the plan's local day
+  random_seed: 7                # CP-SAT seed (single worker; CLAUDE.md 2.4)
+  max_time_in_seconds: 2.0      # wall and deterministic-time limit per solve
