@@ -42,6 +42,12 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.include_router(runs_router)
     # --- WO-060 end ---
 
+    # --- WO-062P begin: presenter mode (shot list JSON, presenter log) ---
+    from soundings.api_routes.presenter import router as presenter_router
+
+    application.include_router(presenter_router)
+    # --- WO-062P end ---
+
     if web_dist.is_dir():
         application.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
 

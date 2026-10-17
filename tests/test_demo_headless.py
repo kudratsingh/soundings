@@ -31,6 +31,9 @@ from soundings.sim.scenario import resolve_scenario
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "docs" / "demo-script.yaml"
+# The Part A pitch sequence, frozen when WO-062P replaced docs/demo-script.yaml with the
+# shot list; the tests that assert that exact sequence read it from here.
+PART_A = REPO / "tests" / "fixtures" / "demo" / "part-a-script.yaml"
 S = LadderState
 
 
@@ -98,7 +101,7 @@ def test_two_step_script_completes_offline(
 
 
 def test_full_script_fast_offline(tmp_path: Path, offline: None) -> None:
-    script = DemoScript.load(SCRIPT)
+    script = DemoScript.load(PART_A)
     seen: list[str] = []
     result = run_demo(script, pace=Pace.FAST, eval_report=tmp_path / "none.json", emit=seen.append)
     assert result.ok
@@ -118,7 +121,7 @@ def test_full_script_fast_offline(tmp_path: Path, offline: None) -> None:
 
 def test_steps_route_to_the_executor() -> None:
     rec = _Recorder()
-    script = DemoScript.load(SCRIPT)
+    script = DemoScript.load(PART_A)
     result = run_demo(script, pace=Pace.FAST, executor=rec, eval_report=Path("/nonexistent"))
     # S01, S02, S05 once (the second S05 continues the run), the twist on S05.
     assert [(c[0], c[1]) for c in rec.calls] == [("S01", 1), ("S02", 3), ("S05", 11), ("S05", 11)]
