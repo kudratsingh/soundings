@@ -155,7 +155,7 @@ watch (six free probes) and ask (five probes, including the one human interrupti
 - §2.5: the denylist grep.
 
 ## Done
-PR: (see `wo/031-probes-planner` PR) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, full suite 1231 passed; WO-031 tests 87 (test_probes 55, test_probe_planner 26, test_probes_catalog 6) · STATE.md updated: yes (WO-031 row)
+PR: (see `wo/031-probes-planner` PR) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, full suite 1310 passed after rebase onto WO-032 part A; WO-031 tests 87 (test_probes 55, test_probe_planner 26, test_probes_catalog 6) · STATE.md updated: yes (WO-031 row)
 
 - Every exit test passes with `MODEL_MODE=replay`; the `soundings.llm` grep and the denylist grep print nothing. Determinism: two separate processes running the S05/S07 sweep plus a planner choice give an empty diff (S05 `table_hash` `3682c432…756dcc`, S07 `26b17259…89c453`).
 - Interface as implemented (differences from the text above):
