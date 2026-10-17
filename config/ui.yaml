@@ -1,0 +1,33 @@
+# Watch-officer screen (WO-060). Display settings only: nothing here is a threshold,
+# a rung, a state or a scope, and nothing here changes a decision.
+
+default_speed: 20.0          # sim-seconds per wall-second for a new run; 0 means unpaced
+awaiting_approval_speed: 1.0 # pacing while a contact is AWAITING_APPROVAL (Part B / WO-061)
+max_live_runs: 4             # the run engine keeps at most this many runs in memory
+
+tiles:
+  base:
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    attribution: "© OpenStreetMap contributors"
+  seamarks:
+    url: "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"
+    attribution: "© OpenSeaMap contributors"
+  map_attribution: "© OpenStreetMap contributors · © OpenSeaMap contributors · Port of Los Angeles, simplified for demonstration"
+
+tile_policy:
+  verified_on: "2026-10-17 05:46 PDT"
+  osm_policy_url: "https://operations.osmfoundation.org/policies/tiles/"
+  osm_summary: >-
+    Visible OpenStreetMap attribution on the map; only the tiles the viewer is looking
+    at (no prefetching, pre-seeding or offline archives); the browser's Referer is kept;
+    light use only, best effort, and access can be withdrawn; caching headers honoured.
+  openseamap_summary: >-
+    The seamark overlay is a transparent layer over the OSM base and carries the
+    OpenSeaMap attribution. Its policy page was not reachable at the date above; the
+    overlay is used lightly under the same rules as the base tiles.
+  offline_note: "Add ?tiles=off to the page URL to draw only the harbor geojson (tests, rehearsal)."
+
+colors:
+  fact: "#1f6feb"
+  assumption: "#b35900"
+  derived: "#6e7781"

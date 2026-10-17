@@ -46,7 +46,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
-| 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
+| 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
 | 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
 | 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |

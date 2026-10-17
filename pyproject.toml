@@ -13,6 +13,7 @@ dependencies = [
     "sqlmodel>=0.0.48",
     "typer>=0.27.3",
     "uvicorn>=0.54.0",
+    "websockets>=17.2",
 ]
 
 [dependency-groups]
