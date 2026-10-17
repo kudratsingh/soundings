@@ -1,6 +1,6 @@
 # Spec — the ladder, the boundary table, standing orders, handoff
 
-The organizers' ladder is watch → ask → slow → hold → hand to a person. Soundings lives on **ask** and **hand to a person**. This spec makes the ladder a typed state machine with deterministic guards, in the same pattern as the owner's Incident Commander (hand-rolled, checkpoint per transition, idempotency key per action, no control derived from model output).
+The organizers' ladder is watch → ask → slow → hold → hand to a person. Soundings lives on **ask** and **hand to a person**. This spec makes the ladder a typed state machine with deterministic guards, in the pattern of a state-machine agent design the owner has used before (hand-rolled, checkpoint per transition, idempotency key per action, no control derived from model output).
 
 ---
 
@@ -116,3 +116,54 @@ An approval is a signed token `{contact_id, action, scope, approver, issued_at, 
 ## 8. Audit log
 
 Append-only SQLite table with a hash chain (`prev_hash, row_hash`). Rows: transitions, probes (with idempotency key), guard decisions (with inputs), approvals, SITREPs, LLM calls (role, fixture key, accepted|rejected, violation reason). `soundings audit verify` recomputes the chain. Retention label: 30 days (demo).
+
+---
+
+## Amendments (2026-10-17)
+
+Appended; the text above is unchanged except the source line in the opening paragraph (no other repository is named; owner directive 2026-10-17). Each item names its source. Where an item differs from the text above, the item wins.
+
+**Events (§2).** `timer(limit)`, `scope_exceeded`, `handoff_complete` were added 2026-10-16 (DECISIONS 23:05); see the note under §2. `HOLDING × timer(limit) ∨ scope exceeded` is two table rows (DECISIONS 23:15, WO-040).
+
+**Table order (§3; DECISIONS 23:05).** When the `slow` and `hold` criteria both pass, the `slow` row fires first (table order; gentlest rung first). "Nothing pre-authorized" is read literally.
+
+**Hold at its limit while AWAITING_APPROVAL (§3; DECISIONS 23:25; WO-043 part A ruling 06:12).**
+- A hold is released at its limit even while AWAITING_APPROVAL; the state stays AWAITING_APPROVAL until the approval resolves. The release is recorded (ledger, listeners, audit) without a transition.
+- `HOLDING × timer(hold_limit)` adds `release_hold` after `request_approval` (`LadderMachine(strict_holds=True)`, always set by the driver).
+- A granted `hold_longer` is the hold in force; `WATCH_AFTER_HANDOFF × contact_departed` releases it. Lifting a restriction is the only non-watch action allowed after HANDED_OFF.
+
+**SITREP timing (§6; DECISIONS 23:05; WO-042 part B 07:30).**
+- A **draft** SITREP is written at AWAITING_APPROVAL; the **final** SITREP at HANDED_OFF.
+- The recommended rung is the investigation's computed rung, else the machine's rung (the S05 draft says hand_to_person while the machine sits at hold). The final SITREP counts as one handoff interruption.
+
+**Citation exemption (§6; WO-042).** Fact lines cite ≥ 1 evidence row id that exists. Lines under "What we don't know" that name a missing feature carry the prefix `missing: <feature>` instead of a row id (an absent feature has no row); this is the only exemption from the row-exists check. Every other line cites ≥ 1 existing row id, or the template fallback renders.
+
+**Default headless approver (§7; DECISIONS 23:05).** In sim and headless runs the approver grants 60 s after the request. Options `denied` and `unreachable` exist for the twist toggle (`approver_unreachable`).
+
+**Signature policy (§5; DECISIONS 23:05; WO-041).** The standing-orders signature is sha256 over the canonical orders, committed for "Watch Commander (demo)". It is tamper-evident, not authenticated, and labeled so in the About text; HMAC/PKI is out of scope. Unparseable or off-shape orders verify as `invalid` (never signed). The `standing_orders_expired` toggle is wired through an expired epoch (DECISIONS 23:25).
+
+**Approval token TTL (§7; DECISIONS 23:25).** The token TTL lives in the additive `approval.token_ttl_s` block of `config/ladder.yaml` (600 s). Not a threshold change. Token `approver` is the approvers key (primary/backup), not the display name.
+
+**Separation advisories (§4 slow row; WO-083; DECISIONS 06:37; CLAUDE.md §8 A9).**
+- A separation advisory is a `slow` (`advisory_one_basin`) and goes through the same standing-orders slow guard in `soundings/ladder/guards.py`.
+- Its criterion replaces the threat_mass/time criteria: CPA < `separation_m` ∧ 0 < TCPA < `advisory_window_s`.
+- Standing-orders slow scope stays one basin (`inner_harbor_west`). Out-of-scope or unsigned/expired-orders advisories are BLOCKED, shown as "advisory blocked: out of standing-orders scope", audited with their geometry, and **not** counted as interruptions.
+- No ladder state is added; no filed contact leaves CLEARED_AT_ASK. The operator accepts or ignores an advisory.
+
+**Responder boundary rows (§4; WO-088; CLAUDE.md §8 A2; DECISIONS 07:51).**
+
+| responder action | platform decides alone | a person must approve | never |
+|---|---|---|---|
+| dispatch to look, inside the geofence, at standoff ≥ 25 m | ✓ (rung ask) | | |
+| leave the geofence | | ✓ | |
+| standoff below 25 m | | ✓ | |
+| a second vehicle | | ✓ | |
+| any responder action after HANDED_OFF | | | ✓ |
+
+- Always: re-stations if the contact moves, never closes faster than the contact, never between the contact and an asset, one dispatch per contact; the planner requests a look, never a position (guard-enforced, logged to VIOLATIONS.md). §2.1 and §2.5 of CLAUDE.md stand.
+
+**Audit commit semantics (§8; WO-042; owner directive 2026-10-17).**
+- One row per transition, probe (with idempotency key), guard decision (with inputs hash and granted scope), approval (token hash only), action (with idempotency key), SITREP, and model call (`llm_call`: role, fixture key, path, accepted|rejected, reason).
+- Every mutation carries an idempotency key (`stable_hash([contact_id, kind, scope, from_state, to_state, event.tick])` for ladder actions, WO-040); a re-delivered event does not re-execute.
+- If the audit write fails, the action does not commit. On `main` today a refused append leaves the log unchanged; tying the action's commit to the append is the owner's rule and is verified by the audit tests that land with it.
+- Hash chain `row_hash = sha256(prev_hash + canonical_json(row))`; `soundings audit verify` recomputes it.
