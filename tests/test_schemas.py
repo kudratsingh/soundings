@@ -172,7 +172,7 @@ def test_other_enum_members_exact() -> None:
     assert [f.value for f in FeatureName][:3] == ["speed_over_ground", "speed_variance", "depth"]
     assert len(ProbeId) == 13 and len(ToggleName) == 9  # WO-088: 11 section 5 + 2 responder
     assert [p.value for p in ProbeId][-2:] == ["responder_look", "responder_search_box"]
-    assert len(BehaviorType) == 7
+    assert len(BehaviorType) == 8  # WO-080: vessel_transit
     assert [t.value for t in TonalBand] == ["none", "low", "mid", "high"]
     assert [u.value for u in Unit] == [
         "m", "m/s", "m/s2", "deg/s", "s", "ratio", "bool", "category", "id", "hour", "dB",

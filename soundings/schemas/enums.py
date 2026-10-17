@@ -198,6 +198,17 @@ class BehaviorType(_VocabEnum):
     ERRATIC = "erratic"
     STATIONARY = "stationary"
     LAWNMOWER_THEN_DRIFT = "lawnmower_then_drift"
+    VESSEL_TRANSIT = "vessel_transit"  # WO-080: a surface vessel, reported only on the AIS feed
+
+
+class JobType(_VocabEnum):
+    """Kinds of filed underwater work (WO-080). ``other`` is never generated (WO-081 default)."""
+
+    SURVEY = "survey"
+    HULL_CLEANING = "hull_cleaning"
+    PILE_INSPECTION = "pile_inspection"
+    DREDGE = "dredge"
+    OTHER = "other"
 
 
 class ToggleName(_VocabEnum):

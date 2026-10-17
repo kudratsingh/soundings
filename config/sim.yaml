@@ -31,3 +31,10 @@ acoustic_defaults:
 # (config/likelihoods.yaml has no tonal_band row). Weights over low, mid, high.
 # Stand-in values; a contact without a propeller tonal gets band none.
 tonal_band_when_tonal: {low: 0.5, mid: 0.3, high: 0.2}
+
+# WO-080: the AIS-style surface feed (SimRun.ais_tracks). Vessel transits report their
+# true position, speed and course every report_interval_s. Stand-in value for a simulated
+# feed (real class A AIS reports every 2-10 s under way), loaded by
+# soundings.sim.ais.load_ais_config.
+ais:
+  report_interval_s: 10.0

@@ -13,7 +13,7 @@ Every float here is already rounded to 6 dp (the ``SimRun`` output boundary).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import StrictBool
 
@@ -99,6 +99,18 @@ class TruthPoint(StrictModel):
     heading_deg: float
 
 
+class AisReport(StrictModel):
+    """WO-080: one AIS-style surface report of a vessel transit (truthful, 6 dp)."""
+
+    ais_id: str
+    tick: NonNegInt
+    t_s: NonNegFloat
+    lat: float
+    lon: float
+    sog_mps: NonNegFloat
+    cog_deg: float
+
+
 @dataclass(frozen=True, slots=True)
 class SimRun:
     """The result of ``soundings.sim.run.run_scenario``.
@@ -118,6 +130,8 @@ class SimRun:
     contact_truth: dict[str, ContactTruth]
     truth_paths: dict[str, list[TruthPoint]]
     toggle_report: ToggleReport
+    ais_tracks: dict[str, tuple[AisReport, ...]] = field(default_factory=dict)
+    """WO-080: surface vessel reports keyed by vessel id (``ais-01``...); never detections."""
 
     def hail_responder(self, contact_id: str) -> HailResponder | None:
         """How the thing behind ``contact_id`` answers a hail; None if nothing can.

@@ -165,6 +165,15 @@ watch (vessel feed, evidence), ask (39 filed jobs clear on hail and registry), h
 ## Done
 PR: · Merged commit: · Test summary: · STATE.md updated:
 
+### Part A done (2026-10-17 07:01 PDT)
+- Schema: `JobType` (enums), `BehaviorType.VESSEL_TRANSIT`, `RegistryPlan.job_type`, `ScenarioContact.start_tick/end_tick/hypothesis`, `Expected.contacts`/`ExpectedContact`, `ScenarioId` accepts `BT-NN`; `VESSEL_SPEED_MIN_MPS/MAX_MPS` (3, 6) in `soundings.schemas.scenario`.
+- Sim: `VesselTransit`/`step_vessel_transit` (behaviors), `AisReport` + `SimRun.ais_tracks` (types), `soundings.sim.ais` (`AisConfig`, `load_ais_config`, `ais_reports`), `config/sim.yaml` `ais.report_interval_s: 10` (stand-in). A vessel's start state is under way (speed and course set), so its first AIS report has a real `sog_mps`/`cog_deg`. `track_hash_payload` adds `ais_tracks` only when non-empty; `truncate_run` truncates it.
+- Generator `soundings.sim.generate` (`JOB_TYPES`, `JOB_SPECS`, `WINDOW_PAD_S`, `generate_busy_day`, `scenario_yaml`, `main`, plus `peak_tick`, `rogue_segment`, `job_clearance_m`); `scenarios/BT-01.yaml` committed (40 plans, 39 jobs, 3 vessels, rogue at the peak tick 1764 with 32 jobs in the water).
+- `soundings.sim.grading` (`lineages`, `lineage_terminal`, `lineage_interruptions`, `check_expected_contacts`); `extract_context(..., ais=None)` (`ais_surface_correlation`, source `sim:ais`).
+- BT-01 through runner v1 as merged (no skipping): all 39 `job-NN` lineages CLEARED_AT_ASK, 0 interruptions; rogue lineage INVESTIGATING (8 cases, never cleared); ~80-93 s headless (part B adds tick skipping for the < 60 s clause).
+- Tests: `test_vessel_transit.py` (28), `test_generate.py` (13), `test_busy_tuesday.py` (6, one shared run), `test_busy_tuesday_rules.py` (9). No dependency added.
+- Geometry findings (see DECISIONS): with 0.6 x range and >= 250 m from the rogue path, hull cleaning lands only in `pier_400_approach` and pile inspection only at `vtb_piling_west`; survey clearance is checked at the start (every lawnmower box in `inner_basin_research` reaches its east edge near `fuel_berth_2`), dredge clearance over every leg. `BEHAVIOR_TYPES` stays the seven subsurface names (test pins it). Deferred to part B: `--plans db` hash equality (needs the fast runner), `-k ais_feature`, `-k reacquire_precision` (v1 shows two job-to-job carry-over links, job-02/job-07 and job-17/job-37, to address there).
+
 ## Notes for downstream
 - WO-033 and WO-043: no obligation. Runner states past ASKING force per-tick stepping, so skipping stays outcome-identical. If BT-01 runtime under v3 misses 60 s because the rogue sits in WATCH_AFTER_HANDOFF for hours, WO-043 returns its update ticks from `next_wake_tick` and extends `tests/test_tick_skipping.py`; skipped must equal unskipped.
 - WO-081: `RegistryPlan.job_type` and `soundings.schemas.enums.JobType` (incl. `other`).

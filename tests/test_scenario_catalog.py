@@ -126,7 +126,7 @@ def test_smoke_file_shape() -> None:
 def test_every_scenario_file_validates_via_resolver(path: Path) -> None:
     by_path = resolve_scenario(path)
     assert isinstance(by_path, Scenario)
-    ref = "smoke" if path == SMOKE_PATH else path.name[:3]
+    ref = "smoke" if path == SMOKE_PATH else by_path.id
     assert resolve_scenario(ref) == by_path
     assert scenario_path(ref) == path
 

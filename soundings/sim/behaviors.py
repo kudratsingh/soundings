@@ -162,7 +162,22 @@ class LawnmowerThenDrift:
     drift: Drift = Drift()
 
 
-BehaviorParams = Transit | Lawnmower | Orbit | Drift | Erratic | Stationary | LawnmowerThenDrift
+@dataclass(frozen=True, slots=True)
+class VesselTransit:
+    """WO-080: a surface vessel at constant speed along its legs, at depth 0.
+
+    It stops at the last waypoint. Not one of the seven subsurface ``BEHAVIOR_TYPES``: the
+    detection model never hears it, and only the AIS feed reports it.
+    """
+
+    type: ClassVar[str] = "vessel_transit"
+    waypoints: tuple[Point, ...]
+    speed_mps: float
+
+
+BehaviorParams = (
+    Transit | Lawnmower | Orbit | Drift | Erratic | Stationary | LawnmowerThenDrift | VesselTransit
+)
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +326,26 @@ def step_stationary(p: Stationary, s: KinState, dt_s: float, rng: np.random.Gene
     return _moved(s, p.anchor_x_m + ox, p.anchor_y_m + oy, dt_s)
 
 
+def _point_on_legs(waypoints: Sequence[Point], s_m: float) -> Point:
+    """Position at distance ``s_m`` along the legs, held at the last waypoint."""
+    s = max(s_m, 0.0)
+    for a, b in zip(waypoints, waypoints[1:], strict=False):
+        seg = math.hypot(b[0] - a[0], b[1] - a[1])
+        if s <= seg:
+            f = s / seg if seg > 0 else 0.0
+            return a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])
+        s -= seg
+    return waypoints[-1]
+
+
+def step_vessel_transit(p: VesselTransit, s: KinState, dt_s: float) -> KinState:
+    """Pure, draws nothing: advance ``speed_mps * dt_s`` along the legs at depth 0."""
+    total = _path_length(p.waypoints)
+    new_s = min(s.path_s_m + p.speed_mps * dt_s, total)
+    x, y = _point_on_legs(p.waypoints, new_s)
+    return _moved(s, x, y, dt_s, path_s_m=new_s, depth_m=0.0)
+
+
 def step(
     params: BehaviorParams,
     state: KinState,
@@ -336,6 +371,8 @@ def step(
             return step_erratic(params, state, dt_s, current, rng)
         case Stationary():
             return step_stationary(params, state, dt_s, rng)
+        case VesselTransit():
+            return step_vessel_transit(params, state, dt_s)
         case LawnmowerThenDrift():
             if tick < params.fault_tick:
                 return step_lawnmower(params.lawnmower, state, dt_s)

@@ -20,6 +20,7 @@ SCENARIO_ROOT = REPO_ROOT / "scenarios"
 CATALOG_GLOB = "S[0-9][0-9]-*.yaml"
 SMOKE_PATH = SCENARIO_ROOT / "smoke.yaml"
 _CATALOG_ID = re.compile(r"^S\d{2}$")
+_BT_ID = re.compile(r"^BT-\d{2}$")  # WO-080: generated busy-day files, outside the catalog
 
 
 class UnknownScenarioError(LookupError):
@@ -32,11 +33,16 @@ def catalog_paths(root: Path | str = SCENARIO_ROOT) -> list[Path]:
 
 
 def scenario_path(ref: str | Path, root: Path | str = SCENARIO_ROOT) -> Path:
-    """The file a reference names: ``smoke``, a catalog id (``S04``), or a path."""
+    """The file a reference names: ``smoke``, a catalog id (``S04``), ``BT-01``, or a path."""
     text = str(ref)
     base = Path(root)
     if text == "smoke":
         return base / "smoke.yaml"
+    if _BT_ID.match(text):
+        bt = base / f"{text}.yaml"
+        if not bt.is_file():
+            raise UnknownScenarioError(f"no file for {text!r}")
+        return bt
     if _CATALOG_ID.match(text):
         matches = sorted(base.glob(f"{text}-*.yaml"))
         if len(matches) != 1:
