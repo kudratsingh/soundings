@@ -53,7 +53,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 081 | conflict detection at filing | WO being written | wo/081-conflict-detection | | | |
 | 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
 | 083 | separation advisories (CPA/TCPA) | WO being written | wo/083-separation-advisories | | | |
-| 084 | projected tracks (Kalman) | WO being written | wo/084-projected-tracks | | | |
+| 084 | projected tracks (Kalman) | PR open (flag flipped to kalman for build_evidence; runner stays window) | wo/084-projected-tracks | see PR | | 1436 passed (24 test_kalman*) |
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
 | 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
 | 087 | bounded live mode (stage) | WO written | wo/087-bounded-live-mode | | | |

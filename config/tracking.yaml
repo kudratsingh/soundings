@@ -1,0 +1,19 @@
+# Track smoothing and 60 s projection (WO-084). STRESS-TEST VALUES, not calibrated
+# against real harbor tracks: q was sized from a 20-seed synthetic straight track
+# (sigma 15 m, 2 s ticks); a larger q follows turns more closely but widens the 60 s
+# projection error past the 30 m bar. Any change needs a docs/log/DECISIONS.md row and
+# must re-pass tests/test_kalman.py and tests/test_kalman_vs_window.py.
+kalman:
+  q_m2_s3: 0.002            # white-noise acceleration spectral density per axis
+  init_speed_sigma_mps: 2.0 # velocity sigma of the at-rest start
+  default_sigma_m: 15.0     # reading sigma when a track reports none (divided by confidence)
+  min_confidence: 0.1       # confidence floor for that division
+  projection_s: 60.0        # projection horizon shown on the scope
+  ellipse_p: 0.95           # probability the projection ellipse encloses
+# Velocity behind closing_rate/time_to_nearest_critical_asset: window (WO-012 fit) or
+# kalman. Kalman only if tests/test_kalman_vs_window.py shows lower error on S05 and S06
+# AND every catalog expected outcome still holds (DECISIONS 2026-10-17 06:37); that test
+# fails if this value disagrees with its numbers (artifacts/wo-084/kalman_vs_window.json).
+# Read by build_evidence(velocity_source=None) only: the runner calls extract_kinematics
+# with its "window" default and does not read this flag.
+closing_velocity_source: kalman
