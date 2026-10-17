@@ -7,6 +7,7 @@ on a full ``SimRun``: a contact forced out of range for longer than
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -351,7 +352,10 @@ def test_timeout_ids_issued_in_order_of_first_detection() -> None:
 
 def test_detection_rows_match_track_points() -> None:
     scenario = scenario_from_data(_orbit_scenario())
-    run = run_scenario(scenario, harbor=_one_short_node(), ticks=400)
+    # WO-089: this checks the WO-011 Gaussian confidence, so it runs that model explicitly
+    # (the sonar_equation twin is in tests/test_detection_model_sonar.py).
+    gaussian = replace(load_detection_params(), model="gaussian")
+    run = run_scenario(scenario, harbor=_one_short_node(), ticks=400, params=gaussian)
     by_key = {(d.observed_contact_id, d.tick): d for d in run.detections}
     assert len(by_key) == sum(len(t.points) for t in run.tracks.values())
     for cid, track in run.tracks.items():

@@ -33,10 +33,25 @@ import numpy as np
 import numpy.typing as npt
 import yaml
 
+# --- WO-089 begin ---
+from soundings.physics import (
+    ACOUSTIC_CLASSES,
+    PhysicsConfig,
+    detection_probability_at,
+    load_physics_config,
+    transmission_loss_db,
+)
+
+# --- WO-089 end ---
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SIM_CONFIG_PATH = REPO_ROOT / "config" / "sim.yaml"
 SECONDS_PER_HOUR = 3600.0
 DECIMALS = 6
+# --- WO-089 begin ---
+DETECTION_MODELS: tuple[str, ...] = ("sonar_equation", "gaussian")
+"""``sonar_equation`` (WO-089, the default) or ``gaussian`` (WO-011, kept for comparison)."""
+# --- WO-089 end ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +70,14 @@ class DetectionParams:
     false_alarm_click_prob: float = 0.7
     false_alarm_mean_ticks: int = 20
     false_alarm_max_depth_m: float = 3.0
+    # --- WO-089 begin: which detection model runs (docs/SPEC-SIM.md section 2a) ---
+    model: str = "sonar_equation"
+    # --- WO-089 end ---
 
     def __post_init__(self) -> None:
+        # --- WO-089 begin ---
+        _check(self.model in DETECTION_MODELS, f"model must be one of {DETECTION_MODELS}")
+        # --- WO-089 end ---
         _check(0.0 < self.p_max <= 1.0, "p_max must be in (0, 1]")
         _check(self.r0_m > 0.0, "r0_m must be > 0")
         _check(self.max_range_factor > 0.0, "max_range_factor must be > 0")
@@ -85,9 +106,16 @@ def detection_params_from_mapping(raw: Mapping[str, Any]) -> DetectionParams:
     unknown = sorted(set(raw) - known)
     if unknown:
         raise ValueError(f"unknown detection keys: {unknown}")
-    values: dict[str, float | int] = {}
+    values: dict[str, float | int | str] = {}
     for key in sorted(raw):
         value = raw[key]
+        # --- WO-089 begin: the one string key ---
+        if key == "model":
+            if not isinstance(value, str) or value not in DETECTION_MODELS:
+                raise ValueError(f"detection.model must be one of {DETECTION_MODELS}")
+            values[key] = value
+            continue
+        # --- WO-089 end ---
         if isinstance(value, bool) or not isinstance(value, int | float):
             raise ValueError(f"detection.{key} must be a number, got {value!r}")
         if key in _INT_FIELDS:
@@ -306,3 +334,110 @@ def fuse_nearest(candidates: Sequence[tuple[str, float]]) -> tuple[str, float] |
     if not candidates:
         return None
     return min(candidates, key=lambda c: (c[1], c[0]))
+
+
+# --- WO-089 begin: passive-sonar-equation detection (docs/SPEC-SIM.md section 2a) ---
+#
+# p_tick = p_max * health * logistic((SL - TL(r) - NL - DT) / k), zero beyond
+# max_range_factor x the effective range at calm NL; reading confidence is
+# round6(health * logistic term). The laws and every number live in soundings.physics and
+# config/physics.yaml; this block only binds them to the per-tick draw.
+
+
+def acoustic_class(propeller_tonal: bool, biologic_signature: bool) -> str:
+    """The source-level class of a contact: tonal present, tonal absent, or biologic."""
+    if propeller_tonal:
+        return "propeller_tonal_present"
+    if biologic_signature:
+        return "biologic"
+    return "propeller_tonal_absent"
+
+
+@dataclass(frozen=True, slots=True)
+class SonarSetup:
+    """What every sonar draw of one run shares: the config, calm NL, SL and cut-off by class."""
+
+    cfg: PhysicsConfig
+    base_nl_db: float
+    sl_db: tuple[tuple[str, float], ...]
+    cutoff_m: tuple[tuple[str, float], ...]
+
+    def sl(self, acoustic: str) -> float:
+        return dict(self.sl_db)[acoustic]
+
+    def cutoff(self, acoustic: str) -> float:
+        return dict(self.cutoff_m)[acoustic]
+
+
+def sonar_setup(cfg: PhysicsConfig | None = None) -> SonarSetup:
+    """Build the run-wide sonar constants from ``config/physics.yaml`` (or ``cfg``)."""
+    conf = cfg if cfg is not None else load_physics_config()
+    levels = tuple((c, conf.sonar.source_level_db.for_class(c)) for c in ACOUSTIC_CLASSES)
+    return SonarSetup(
+        cfg=conf,
+        base_nl_db=conf.base_noise_db(),
+        sl_db=levels,
+        cutoff_m=tuple((c, conf.cutoff_range_m(sl)) for c, sl in levels),
+    )
+
+
+def node_gain_db(node_range_m: float, r0_m: float, setup: SonarSetup) -> float:
+    """A node's sensitivity offset: ``TL(node range_m) - TL(r0)``, so a node whose harbor
+    ``range_m`` differs from the nominal ``r0_m`` keeps that range as its calm-noise
+    effective range (0 exactly for every 400 m node on main)."""
+    if node_range_m == r0_m:
+        return 0.0
+    alpha = setup.cfg.sonar.alpha_db_per_km.value
+    return transmission_loss_db(node_range_m, alpha) - transmission_loss_db(r0_m, alpha)
+
+
+def sonar_term(
+    range_m: float, acoustic: str, nl_db: float, setup: SonarSetup, gain_db: float = 0.0
+) -> float:
+    """The logistic detection term at ``range_m`` for a node with ``gain_db`` sensitivity
+    offset, 0 beyond the cut-off (``max_range_factor`` x its calm-noise effective range)."""
+    if range_m < 0.0:
+        raise ValueError("range_m must be >= 0")
+    sl = setup.sl(acoustic) + gain_db
+    cutoff = setup.cutoff(acoustic) if gain_db == 0.0 else setup.cfg.cutoff_range_m(sl)
+    if range_m > cutoff:
+        return 0.0
+    return detection_probability_at(range_m, sl, nl_db, setup.cfg)
+
+
+def sonar_detection_probability(
+    range_m: float,
+    acoustic: str,
+    nl_db: float,
+    health: float,
+    p_max: float,
+    setup: SonarSetup,
+    gain_db: float = 0.0,
+) -> float:
+    """Per-tick probability ``p_max * health * logistic term`` (0 past the cut-off)."""
+    health = _clamp_health(health)
+    return p_max * health * sonar_term(range_m, acoustic, nl_db, setup, gain_db)
+
+
+def sonar_reading_confidence(term: float, health: float) -> float:
+    """Per-reading confidence ``round(health * logistic term, 6)`` in [0, 1]."""
+    return round(_clamp_health(health) * term, DECIMALS)
+
+
+def sample_detected_sonar(
+    rng: np.random.Generator,
+    range_m: float,
+    acoustic: str,
+    nl_db: float,
+    health: float,
+    params: DetectionParams,
+    setup: SonarSetup,
+    gain_db: float = 0.0,
+) -> bool:
+    """One Bernoulli draw at ``sonar_detection_probability``; always exactly one draw, so the
+    rng streams line up with the Gaussian model's."""
+    p = sonar_detection_probability(range_m, acoustic, nl_db, health, params.p_max, setup, gain_db)
+    return bool(rng.random() < p)
+
+
+# --- WO-089 end ---

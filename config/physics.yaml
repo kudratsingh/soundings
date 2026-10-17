@@ -1,0 +1,137 @@
+# Physics parameters for the simulated sensors (WO-089; docs/SPEC-SIM.md section 2a).
+#
+# EVERY VALUE IN THIS FILE IS A DEMO VALUE. Detection is simulated for this demonstration.
+# The sources name the textbook relation or curve family each number is shaped after; they
+# are not measurements of this harbor, and no value here was calibrated against real
+# hydrophones, modems, cameras or vehicles. The equations are on the About -> Physics cards
+# (soundings.physics.model_cards).
+#
+# Each parameter is {value, unit, source, label: "demo value"}; soundings.physics loads this
+# file strictly (an unknown key or a missing source raises).
+#
+# Tuning (DECISIONS 2026-10-17, WO-089 code half): SL, DT and k are set so the effective
+# range (p = 0.5 of the logistic term) at calm noise is 400 m, the former Gaussian r0, for
+# every acoustic class. Catalog S01..S08 outcomes are unchanged except three runs (S04
+# seeds 7 and 2, S08 seed 1) that now reach their scenario's expected state (listed in
+# DECISIONS and in tests/test_catalog_outcomes_physics.py).
+
+sonar:
+  source_level_db:
+    propeller_tonal_present:
+      value: 130.0
+      unit: dB re 1 uPa at 1 m
+      source: "Urick, Principles of Underwater Sound (3rd ed.), ch. 10 radiated noise of small craft; one broadband number, set equal across classes so every class keeps the former 400 m range"
+      label: demo value
+    propeller_tonal_absent:
+      value: 130.0
+      unit: dB re 1 uPa at 1 m
+      source: "Urick, Principles of Underwater Sound (3rd ed.), ch. 10 radiated noise; set equal to the tonal class so the catalog outcomes stay unchanged (no class-dependent range in this demo)"
+      label: demo value
+    biologic:
+      value: 130.0
+      unit: dB re 1 uPa at 1 m
+      source: "Au and Hastings, Principles of Marine Bioacoustics (2008), pinniped and cetacean sound levels; set equal to the vehicle classes for this demo"
+      label: demo value
+  alpha_db_per_km:
+    value: 1.0
+    unit: dB/km
+    source: "Urick, Principles of Underwater Sound, ch. 5: TL = 20 log10 r + alpha r; alpha near 1 dB/km is typical of seawater absorption at low tens of kHz (Francois and Garrison 1982 curves)"
+    label: demo value
+  ambient_noise_base_db:
+    value: 55.0
+    unit: dB re 1 uPa^2/Hz
+    source: "Wenz (1962), Acoustic ambient noise in the ocean: spectra and sources, J. Acoust. Soc. Am. 34; a busy-harbor broadband floor read off the shipping and industrial band"
+    label: demo value
+  sea_state_default:
+    value: 1
+    unit: Beaufort-style sea state
+    source: "Calm harbor water; the scenarios carry no sea state, so every run uses this one (Wenz 1962 sea-state curves)"
+    label: demo value
+  sea_state_table:
+    0:
+      value: 44.5
+      unit: dB re 1 uPa^2/Hz
+      source: "Wenz (1962) / Knudsen et al. (1948) wind-dependent noise near 1 kHz, sea state 0"
+      label: demo value
+    1:
+      value: 50.0
+      unit: dB re 1 uPa^2/Hz
+      source: "Wenz (1962) / Knudsen et al. (1948) wind-dependent noise near 1 kHz, sea state 1"
+      label: demo value
+    2:
+      value: 55.0
+      unit: dB re 1 uPa^2/Hz
+      source: "Wenz (1962) / Knudsen et al. (1948) wind-dependent noise near 1 kHz, sea state 2"
+      label: demo value
+    3:
+      value: 58.0
+      unit: dB re 1 uPa^2/Hz
+      source: "Wenz (1962) / Knudsen et al. (1948) wind-dependent noise near 1 kHz, sea state 3"
+      label: demo value
+    4:
+      value: 60.0
+      unit: dB re 1 uPa^2/Hz
+      source: "Wenz (1962) / Knudsen et al. (1948) wind-dependent noise near 1 kHz, sea state 4"
+      label: demo value
+  detection_threshold_db:
+    value: 21.36549
+    unit: dB
+    source: "Urick, Principles of Underwater Sound, ch. 12 detection threshold; tuned so SL - NL - DT = TL(400 m) at calm noise (the former Gaussian r0 = 400 m)"
+    label: demo value
+  logistic_k_db:
+    value: 2.0
+    unit: dB
+    source: "Spread of the detection-probability transition around zero signal excess (Urick ch. 12, the transition region of the ROC); tuned to keep the WO-011 per-tick detection statistics"
+    label: demo value
+  max_range_factor:
+    value: 2.0
+    unit: ratio
+    source: "WO-011 cut-off kept (SPEC-SIM section 2): nothing is detected beyond this multiple of the calm-noise effective range"
+    label: demo value
+  vessel_noise:
+    source_level_db:
+      value: 100.0
+      unit: dB re 1 uPa^2/Hz at 1 m
+      source: "Ross, Mechanics of Underwater Noise (1976) and Urick ch. 10, small-craft radiated noise spectrum level near a few kHz"
+      label: demo value
+    falloff_db_per_doubling:
+      value: 6.02
+      unit: dB per doubling of distance
+      source: "Spherical spreading, 20 log10 r (Urick ch. 5): 6.02 dB per doubling of distance"
+      label: demo value
+    reference_distance_m:
+      value: 1.0
+      unit: m
+      source: "Source levels are referred to 1 m (Urick ch. 1 conventions)"
+      label: demo value
+
+hail:
+  sound_speed_mps:
+    value: 1500.0
+    unit: m/s
+    source: "Nominal sound speed in seawater (Urick ch. 5; Mackenzie 1981 equation gives 1450-1550 m/s)"
+    label: demo value
+  modem_turnaround_s:
+    value: 18.9
+    unit: s
+    source: "Simulated modem turnaround, trimmed from the WO-021 20 s so turnaround + 2r/c inside the 800 m cut-off stays within the SPEC-INVESTIGATION section 5 hail latency of 20 s"
+    label: demo value
+
+camera:
+  k_depth_per_m:
+    value: 0.05
+    unit: 1/m
+    source: "Diffuse attenuation coefficient of clear coastal water (Jerlov water types; Mobley, Light and Water, 1994)"
+    label: demo value
+  turbidity_default:
+    value: 0.0
+    unit: optical depth
+    source: "No turbidity sensor; clear-water default (Mobley, Light and Water, 1994); a higher value dims the camera"
+    label: demo value
+
+responder:
+  drain_coeff:
+    value: 0.002
+    unit: min of battery per (m/s)^3 per s
+    source: "Propulsive power grows as speed cubed (drag ~ v^2 times v; Newman, Marine Hydrodynamics, 1977); scaled so a 2 m/s cruise uses about one battery minute per minute"
+    label: demo value

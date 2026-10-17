@@ -6,8 +6,11 @@
 # choice (the SPEC gives none); see docs/log/DECISIONS.md 2026-10-16 22:25.
 
 detection:
+  # --- WO-089 begin ---
+  model: sonar_equation          # sonar_equation (WO-089, config/physics.yaml) | gaussian (WO-011)
+  # --- WO-089 end ---
   p_max: 0.95                    # peak per-tick detection probability
-  r0_m: 400.0                    # falloff range; a sensor node's own range_m overrides it
+  r0_m: 400.0                    # gaussian falloff range; a sensor node's own range_m overrides it
   max_range_factor: 2.0          # nothing is detected beyond max_range_factor * r0
   noise_sigma_base_m: 5.0        # position noise per axis: base + per_m * range
   noise_sigma_per_m: 0.03

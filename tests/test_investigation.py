@@ -233,8 +233,15 @@ def _expected(sid: str) -> Expected:
     return ScenarioRunner(sid).scenario.expected
 
 
+<<<<<<< HEAD
 # WO-094: S04's re-acquired track (c-0009) re-decides its prior C_KNOWN_OPERATOR outcome from
 # the carried rows (modem-confirmed identity), so the two former strict xfails pass.
+=======
+# WO-089: under the passive-sonar-equation detection model (the default) S04 seed 7 keeps
+# one track (no re-acquired c-0009) and its lineage ends RESOLVED_BENIGN as expected, so
+# the strict xfail recorded under the WO-011 Gaussian model is lifted (DECISIONS 2026-10-17,
+# WO-089 code half). Every catalog scenario now runs as a plain, strict test.
+>>>>>>> 009523b (feat(wo-089): passive-sonar-equation detection model, sourced physics config, hail/camera/battery laws)
 CATALOG_PARAMS = list(CATALOG)
 
 

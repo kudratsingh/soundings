@@ -173,7 +173,14 @@ watch: detection and range rings. ask: hail latency. No ladder threshold changes
 - §2.2: physics values feed the evidence table only; nothing sets a rung.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes (row added with this WO)
+PR: #49 (UI half, 4202721) and PR_CODE (code half) · Merged commit: see docs/STATE.md · Test summary (code half, `make check` exit 0): 2023 passed, 8 skipped, 1 xfailed · STATE.md updated: yes
+
+Code half (`wo/089c-physics-core-code`):
+- `config/physics.yaml`: every parameter `{value, unit, source, label: demo value}`; tuned SL 130 dB (all classes), alpha 1 dB/km, DT 21.36549 dB, k 2.0 dB, calm NL 56.19331 dB, so the effective range is 400.000008 m and the cut-off 800.000016 m for every class.
+- `soundings/physics.py`: the Interfaces contract plus `model_cards()` (5 cards: passive sonar detection, ambient noise, hail latency, camera visibility, responder battery drain).
+- Sim swap: `config/sim.yaml` `detection.model: sonar_equation` (default) | `gaussian` (byte-identical to main: all 32 S01..S08 x {catalog, 1, 2, 3} track hashes match); `run_scenario(ais_tracks=...)` feeds per-node, per-tick NL.
+- Catalog: lineage-end terminal states equal the Gaussian baseline except S04 seeds 7 and 2 and S08 seed 1, which now reach their expected state (DECISIONS); S07 and S08 at their catalog seeds unchanged.
+- Hail: turnaround 18.9 s + 2r/1500 (always 10 ticks at tick_s 2); camera: hour default x exp(-k depth) x exp(-turbidity).
 
 ## Notes for downstream
 - On main the About text lives in `soundings/api_routes/meta.py` (`DETECTION_HEADING`, `DETECTION_ASSUMPTIONS`). The `DETECTION_ASSUMPTIONS` lines name the Gaussian parameters, so P2 updates them inside a WO-089 block once P1's model is the default.

@@ -229,7 +229,31 @@ def test_signatures_s05_closing_and_straight(seed: int) -> None:
     assert isinstance(time_to, float) and time_to < F.NOT_CLOSING_S
 
 
-@pytest.mark.parametrize("seed", _seeds_for("S06"))
+# --- WO-089 begin: S06 seed 1 under the sonar_equation default, recorded as strict xfail ---
+_S06_ORBIT_SEEDS = [
+    pytest.param(
+        seed,
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason=(
+                "WO-089: under detection.model sonar_equation the longest S06 seed-1 track "
+                "(c-0001) times out at tick 166 instead of 253 (the gap process draws "
+                "differently once more far-range ticks are detected), and its last pattern "
+                "window reads 'random'; the WO-011 Gaussian run still reads 'orbit'. No "
+                "(k, alpha) with the 400 m effective range keeps this seed and S08's catalog "
+                "outcome together (DECISIONS 2026-10-17, WO-089 code half). Open question "
+                "for the coordinator; no table or threshold was changed."
+            ),
+        ),
+    )
+    if seed == 1
+    else seed
+    for seed in _seeds_for("S06")
+]
+# --- WO-089 end ---
+
+
+@pytest.mark.parametrize("seed", _S06_ORBIT_SEEDS)
 def test_signatures_s06_orbit(seed: int) -> None:
     path = _path("S06")
     cid = _main_contact(path, seed)

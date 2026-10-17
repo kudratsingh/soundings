@@ -6,6 +6,7 @@ The integration twin over real WO-011 runs is ``tests/test_evidence.py``.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,6 +29,7 @@ from synthetic_tracks import (
 
 from soundings.investigation import features as F
 from soundings.investigation.evidence import EvidenceError, EvidenceTable, carry_over_reacquired
+from soundings.physics import load_physics_config
 from soundings.schemas.enums import EvidenceKind, FeatureName, TonalBand, Unit
 from soundings.schemas.evidence import UNKNOWN, EvidenceRow, EvidenceValue
 from soundings.schemas.harbor import load_harbor
@@ -409,7 +411,8 @@ def test_acoustic_passthrough_per_reading() -> None:
 
 
 def test_context_rows() -> None:
-    table = build(_synthetic_fleet(), hour=22)
+    fleet = _synthetic_fleet()
+    table = build(fleet, hour=22)
     for contact_id in table.contacts():
         ais = table.latest(contact_id, FeatureName.AIS_SURFACE_CORRELATION)
         assert ais is not None and ais.value == UNKNOWN and ais.source == F.NO_AIS_FEED
@@ -419,7 +422,13 @@ def test_context_rows() -> None:
             assert row.kind is EvidenceKind.FACT
         visibility = table.latest(contact_id, FeatureName.VISIBILITY_FOR_CAMERA)
         assert visibility is not None and visibility.kind is EvidenceKind.ASSUMPTION
-        assert visibility.value == F.VISIBILITY_DARK
+        # WO-089: the dark default times exp(-k depth) exp(-turbidity) at the last depth
+        cam = load_physics_config().camera
+        depth = max(fleet[contact_id].points[-1].depth_m, 0.0)
+        attenuation = math.exp(-cam.k_depth_per_m.value * depth)
+        attenuation *= math.exp(-cam.turbidity_default.value)
+        assert visibility.value == round(F.VISIBILITY_DARK * attenuation, 6)
+        assert isinstance(visibility.value, float) and 0.0 < visibility.value <= F.VISIBILITY_DARK
         weekday = table.latest(contact_id, FeatureName.WEEKDAY)
         assert weekday is not None and weekday.value == F.DEFAULT_WEEKDAY in F.WEEKDAYS
     # c-0002 orbits fuel_berth_1, reported by hyd_1 (also in range)

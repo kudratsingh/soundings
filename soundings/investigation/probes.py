@@ -75,6 +75,7 @@ from soundings.investigation.features import (
     CurrentAt,
     PolBaseline,
     TrackArrays,
+    camera_visibility_at,  # WO-089
     classify_transit_pattern,
     contact_evidence,
     current_at_from_field,
@@ -83,7 +84,6 @@ from soundings.investigation.features import (
     speed_over_ground,
     track_arrays,
     track_segments,
-    visibility_default,
 )
 from soundings.matcher import (
     MatchConfig,
@@ -542,7 +542,13 @@ def camera_visibility(ctx: ProbeContext, tick: int) -> float:
     """Camera visibility at ``tick``: 0 under fog, else the hour-of-day default."""
     if fog_active(ctx.scenario, tick):
         return 0.0
-    return visibility_default(hour_at(ctx.scenario.hour_of_day, tick * ctx.tick_s))
+    # --- WO-089 begin: the physics attenuation at the contact's latest observed depth ---
+    track = ctx.run.tracks.get(ctx.contact_id)
+    seen = [p.depth_m for p in track.points if p.tick <= tick] if track is not None else []
+    return camera_visibility_at(
+        hour_at(ctx.scenario.hour_of_day, tick * ctx.tick_s), seen[-1] if seen else 0.0
+    )
+    # --- WO-089 end ---
 
 
 # --- executors ----------------------------------------------------------------------------
