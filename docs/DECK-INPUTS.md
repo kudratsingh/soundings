@@ -49,3 +49,10 @@ Misuse: surveilling swimmers or divers outside designated security zones, or usi
 
 ## Tools used (Devpost)
 Python/FastAPI/SQLModel; React/Vite/Leaflet with OpenSeaMap tiles; Anthropic API (probe planner, hypothesis writer, SITREP writer, twist parser — all replayed from recorded fixtures by default, deterministic fallbacks for every role); the owner's open-source agent state-machine pattern (Incident Commander) reused as the design, with new code written this weekend; IBM Bob if used (say how).
+
+## Twists (Devpost writeup; scored at final submission)
+**Twist 1 — funding pathway (written response, no build change).** What changed: nothing in the build; we answered where Soundings gets funded and placed it upstream of the Navy 25.2 UUV topics (the determination that a contact is unauthorized is what we build; everything after the handoff is a person's call). Why: the primary path is Navy SBIR/STTR (N152-113, N252-116/117) with Phase III naming commercial port protection; alternatives DHS S&T Maritime Safety and Security, DIU open solicitations, NSF SBIR. Proof: `twists/01/response.md` (sources inline), `twists/01/delta.json`, merge commit `1dded8e`.
+
+**Twist 2 — (pending notice).** Must produce a toggle, scenario, or feature with a test. What changed / why / proof: TBD.
+
+**Twist 3 — (pending notice).** Must produce a toggle, scenario, or feature with a test. What changed / why / proof: TBD.
