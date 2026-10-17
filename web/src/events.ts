@@ -1,6 +1,7 @@
 // Hand-written mirror of soundings/stream/events.py (SCHEMA_VERSION 1).
 // web/src/generated/stream-events.schema.json is the machine copy; a pytest keeps it equal
-// to the Pydantic models. Part B adds emitters for posterior and approval events.
+// to the Pydantic models. Part B (runner v3 source "v3") emits posterior, approval,
+// investigation_step, recommendation and ladder_action events.
 
 export const SCHEMA_VERSION = 1
 
@@ -52,6 +53,10 @@ export interface RunStartedPayload {
   toggles: string[]
   source: 'batch' | 'stepped'
   runner: string
+  // --- WO-060B begin ---
+  model_path?: 'off' | 'replay' | 'live'
+  orders?: 'signed' | 'unsigned'
+  // --- WO-060B end ---
 }
 
 export interface TickContact {
@@ -123,7 +128,7 @@ export interface ApprovalRequestPayload {
 
 export interface ApprovalResultPayload {
   request_id: string
-  outcome: 'granted' | 'timeout' | 'backup_paged'
+  outcome: 'granted' | 'denied' | 'timeout' | 'backup_paged' // WO-060B: denied
   token_hash: string | null
 }
 
@@ -173,7 +178,53 @@ export interface SitrepPayload {
   kind: 'lost_vehicle' | 'sitrep'
   notice: LostVehicleNotice | null
   sitrep: Record<string, unknown> | null
+  // --- WO-060B begin: runner v3 SITREP packets ---
+  status?: 'draft' | 'final' | 'update' | null
+  markdown?: string | null
+  path?: string | null
+  // --- WO-060B end ---
 }
+
+// --- WO-060B begin: investigation, recommendation and ladder actions (runner v3) ---
+export interface InvestigationStepPayload {
+  contact_id: string
+  case_id: string
+  probe_id: string | null
+  source: 'deterministic' | 'llm' | 'fallback'
+  fallback_reason: string | null
+  why: string | null
+  reason: string
+  sent_tick: number
+  landed_tick: number
+  row_ids: string[]
+}
+
+export interface RecommendationPayload {
+  contact_id: string
+  case_id: string
+  outcome: string
+  recommended_rung: Rung
+  stop_clause: string
+  threat_mass: number
+  benign_mass: number
+  top: string
+  uncertain: boolean
+  question_for_human: string | null
+  evidence_row_ids: string[]
+  label: 'stress-test estimate'
+}
+
+export interface LadderActionPayload {
+  contact_id: string
+  state: LadderState
+  action: string
+  scope: Record<string, unknown> | null
+  clause: string | null
+  signed_by: string | null
+  timeout_s: number | null
+  expires_t_s: number | null
+}
+// --- WO-060B end ---
 
 export interface RunFinishedPayload {
   terminal: Record<string, LadderState>
@@ -287,6 +338,11 @@ export type StreamEvent =
   | Envelope<'run_finished', RunFinishedPayload>
   | Envelope<'error', { message: string }>
   | Envelope<'sensor_ranges', SensorRangesPayload> // WO-089
+  // --- WO-060B begin ---
+  | Envelope<'investigation_step', InvestigationStepPayload>
+  | Envelope<'recommendation', RecommendationPayload>
+  | Envelope<'ladder_action', LadderActionPayload>
+  // --- WO-060B end ---
   // --- WO-088 begin ---
   | Envelope<'responder', ResponderPayload>
   // --- WO-088 end ---

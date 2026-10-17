@@ -10,7 +10,12 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from soundings.stream.engine import UnsupportedOption, stream_events
+from soundings.schemas.enums import ToggleName  # WO-060B
+from soundings.stream.engine import (
+    UnsupportedOption,
+    stream_events,
+    v3_stream_events,  # WO-060B
+)
 from soundings.stream.events import event_json
 
 
@@ -25,11 +30,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="for the stepped source (WO-061); the batch source has nothing to approve",
     )
     parser.add_argument("--toggles", default="", help="comma list; runner v1 takes none")
+    # --- WO-060B begin: --source v3 (runner v3 stepped per tick) ---
+    parser.add_argument("--source", default="batch", choices=["batch", "v3"])
     args = parser.parse_args(argv)
-    if args.toggles:
+    if args.source == "v3":
+        events = v3_stream_events(
+            args.scenario,
+            args.seed,
+            run_id=args.run_id,
+            toggles=[ToggleName(t) for t in args.toggles.split(",") if t],
+        )
+    elif args.toggles:
         raise SystemExit(str(UnsupportedOption("the batch source on runner v1 takes no toggles")))
+    else:
+        events = stream_events(args.scenario, args.seed, run_id=args.run_id)
+    # --- WO-060B end ---
     out = sys.stdout
-    for event in stream_events(args.scenario, args.seed, run_id=args.run_id):
+    for event in events:
         out.write(event_json(event))
         out.write("\n")
     return 0

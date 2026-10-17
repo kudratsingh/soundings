@@ -971,6 +971,38 @@ button.link:hover {
   background: var(--benign);
 }
 
+/* --- WO-060B begin: ladder action lines and the SITREP markdown --- */
+.ladder-lines {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ladder-line {
+  border-left: 2px solid var(--line);
+  padding-left: 6px;
+}
+
+.ladder-line.tone-threat {
+  border-left-color: var(--threat);
+}
+
+.ladder-line.tone-approval {
+  border-left-color: var(--evidence);
+}
+
+.sitrep-md {
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+/* --- WO-060B end --- */
+
 .drawer-block {
   margin-top: 12px;
   border-top: 1px solid var(--line);

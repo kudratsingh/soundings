@@ -150,6 +150,7 @@
         "outcome": {
           "enum": [
             "granted",
+            "denied",
             "timeout",
             "backup_paged"
           ],
@@ -548,6 +549,277 @@
       ],
       "title": "Hypothesis",
       "type": "string"
+    },
+    "InvestigationStepEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/InvestigationStepPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "investigation_step",
+          "default": "investigation_step",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "InvestigationStepEvent",
+      "type": "object"
+    },
+    "InvestigationStepPayload": {
+      "additionalProperties": false,
+      "description": "One planner choice of an investigation (runner v2 inside runner v3).\n\n``source`` is where the choice came from: ``deterministic`` (no model), ``llm`` (a\nmodel reply that passed the guard) or ``fallback`` (the model path was refused or\nmissed, so the deterministic choice stands; ``fallback_reason`` says why). The event is\nsent at ``landed_tick``, after the rows the probe produced (``row_ids``).",
+      "properties": {
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "contact_id": {
+          "title": "Contact Id",
+          "type": "string"
+        },
+        "fallback_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Reason"
+        },
+        "landed_tick": {
+          "minimum": 0,
+          "title": "Landed Tick",
+          "type": "integer"
+        },
+        "probe_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Probe Id"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "row_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Row Ids",
+          "type": "array"
+        },
+        "sent_tick": {
+          "minimum": 0,
+          "title": "Sent Tick",
+          "type": "integer"
+        },
+        "source": {
+          "enum": [
+            "deterministic",
+            "llm",
+            "fallback"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why"
+        }
+      },
+      "required": [
+        "contact_id",
+        "case_id",
+        "probe_id",
+        "source",
+        "reason",
+        "sent_tick",
+        "landed_tick"
+      ],
+      "title": "InvestigationStepPayload",
+      "type": "object"
+    },
+    "LadderActionEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/LadderActionPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ladder_action",
+          "default": "ladder_action",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "LadderActionEvent",
+      "type": "object"
+    },
+    "LadderActionPayload": {
+      "additionalProperties": false,
+      "description": "One action the ladder executed (WO-043 driver), with the clause it rests on.\n\n``clause`` is ``standing_orders.<rung>.<action>`` for an advisory or a hold (the\nstanding orders' signer in ``signed_by``), ``approval.<action>`` for an approved action.\n``timeout_s``/``expires_t_s`` are set for an approval request or a backup page.",
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "clause": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clause"
+        },
+        "contact_id": {
+          "title": "Contact Id",
+          "type": "string"
+        },
+        "expires_t_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires T S"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope"
+        },
+        "signed_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signed By"
+        },
+        "state": {
+          "$ref": "#/$defs/LadderState"
+        },
+        "timeout_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout S"
+        }
+      },
+      "required": [
+        "contact_id",
+        "state",
+        "action"
+      ],
+      "title": "LadderActionPayload",
+      "type": "object"
     },
     "LadderState": {
       "description": "SPEC-LADDER section 1. After HANDED_OFF only watching and departure exist.",
@@ -1034,6 +1306,132 @@
       "title": "ProjectionView",
       "type": "object"
     },
+    "RecommendationEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/RecommendationPayload"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "t_s": {
+          "minimum": 0.0,
+          "title": "T S",
+          "type": "number"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "type": {
+          "const": "recommendation",
+          "default": "recommendation",
+          "title": "Type",
+          "type": "string"
+        },
+        "v": {
+          "const": 1,
+          "default": 1,
+          "title": "V",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "tick",
+        "t_s",
+        "payload"
+      ],
+      "title": "RecommendationEvent",
+      "type": "object"
+    },
+    "RecommendationPayload": {
+      "additionalProperties": false,
+      "description": "The frozen end of an investigation (WO-033 ``Recommendation``). The rung is computed\nfrom the outcome by the investigation machine; nothing downstream can edit it.",
+      "properties": {
+        "benign_mass": {
+          "title": "Benign Mass",
+          "type": "number"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "contact_id": {
+          "title": "Contact Id",
+          "type": "string"
+        },
+        "evidence_row_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Row Ids",
+          "type": "array"
+        },
+        "label": {
+          "const": "stress-test estimate",
+          "default": "stress-test estimate",
+          "title": "Label",
+          "type": "string"
+        },
+        "outcome": {
+          "title": "Outcome",
+          "type": "string"
+        },
+        "question_for_human": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Question For Human"
+        },
+        "recommended_rung": {
+          "$ref": "#/$defs/Rung"
+        },
+        "stop_clause": {
+          "title": "Stop Clause",
+          "type": "string"
+        },
+        "threat_mass": {
+          "title": "Threat Mass",
+          "type": "number"
+        },
+        "top": {
+          "$ref": "#/$defs/Hypothesis"
+        },
+        "uncertain": {
+          "title": "Uncertain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contact_id",
+        "case_id",
+        "outcome",
+        "recommended_rung",
+        "stop_clause",
+        "threat_mass",
+        "benign_mass",
+        "top",
+        "uncertain"
+      ],
+      "title": "RecommendationPayload",
+      "type": "object"
+    },
     "ResponderEvent": {
       "additionalProperties": false,
       "properties": {
@@ -1336,9 +1734,28 @@
     "RunStartedPayload": {
       "additionalProperties": false,
       "properties": {
+        "model_path": {
+          "default": "off",
+          "enum": [
+            "off",
+            "replay",
+            "live"
+          ],
+          "title": "Model Path",
+          "type": "string"
+        },
         "n_ticks": {
           "title": "N Ticks",
           "type": "integer"
+        },
+        "orders": {
+          "default": "signed",
+          "enum": [
+            "signed",
+            "unsigned"
+          ],
+          "title": "Orders",
+          "type": "string"
         },
         "runner": {
           "title": "Runner",
@@ -1693,6 +2110,18 @@
           "title": "Kind",
           "type": "string"
         },
+        "markdown": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Markdown"
+        },
         "notice": {
           "anyOf": [
             {
@@ -1703,6 +2132,18 @@
             }
           ],
           "default": null
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
         },
         "sitrep": {
           "anyOf": [
@@ -1716,6 +2157,23 @@
           ],
           "default": null,
           "title": "Sitrep"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "draft",
+                "final",
+                "update"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
         },
         "version": {
           "title": "Version",
@@ -2010,8 +2468,11 @@
       "approval_result": "#/$defs/ApprovalResultEvent",
       "error": "#/$defs/ErrorEvent",
       "evidence_row": "#/$defs/EvidenceRowEvent",
+      "investigation_step": "#/$defs/InvestigationStepEvent",
+      "ladder_action": "#/$defs/LadderActionEvent",
       "ledger": "#/$defs/LedgerEvent",
       "posterior": "#/$defs/PosteriorEvent",
+      "recommendation": "#/$defs/RecommendationEvent",
       "responder": "#/$defs/ResponderEvent",
       "run_finished": "#/$defs/RunFinished",
       "run_started": "#/$defs/RunStarted",
@@ -2059,6 +2520,15 @@
     },
     {
       "$ref": "#/$defs/SensorRangesEvent"
+    },
+    {
+      "$ref": "#/$defs/InvestigationStepEvent"
+    },
+    {
+      "$ref": "#/$defs/RecommendationEvent"
+    },
+    {
+      "$ref": "#/$defs/LadderActionEvent"
     },
     {
       "$ref": "#/$defs/ResponderEvent"

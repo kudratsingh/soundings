@@ -8,6 +8,11 @@ import type {
   ApprovalRequestPayload,
   ApprovalResultPayload,
   EvidenceRow,
+  // --- WO-060B begin ---
+  InvestigationStepPayload,
+  LadderActionPayload,
+  RecommendationPayload,
+  // --- WO-060B end ---
   LadderState,
   PosteriorPayload,
   Rung,
@@ -35,6 +40,7 @@ export interface CaseSitrep {
   version: number
   kind: SitrepPayload['kind']
   writer: SitrepPayload['writer']
+  status: SitrepPayload['status'] // WO-060B: draft | final | update (null for a notice)
 }
 
 export interface CaseApproval {
@@ -58,6 +64,13 @@ export interface ContactTrack {
   lastEventTick: number
   /** Tick the contact entered its current state. */
   stateTick: number
+  // --- WO-060B begin: runner v3 streams ---
+  /** Planner choices, in order (sent when the probe's rows landed). */
+  invSteps: (InvestigationStepPayload & { tick: number })[]
+  recommendation: (RecommendationPayload & { tick: number }) | null
+  /** Ladder actions (advisory, hold, approval request, release, SITREP, watch). */
+  actions: (LadderActionPayload & { tick: number })[]
+  // --- WO-060B end ---
 }
 
 export type MomentKind = 'threat' | 'benign' | 'info'
@@ -98,6 +111,15 @@ const MOMENT_OF_STATE: Partial<Record<LadderState, [string, MomentKind]>> = {
   HAZARD_NOTICE: ['hazard notice', 'threat'],
 }
 
+// --- WO-060B begin ---
+const RESULT_MOMENT: Record<ApprovalResultPayload['outcome'], string> = {
+  granted: 'approved',
+  denied: 'approval denied',
+  timeout: 'approval timed out',
+  backup_paged: 'backup paged',
+}
+// --- WO-060B end ---
+
 /** Moments kept in memory (the strip shows the last five). */
 export const MOMENTS_KEPT = 200
 
@@ -123,6 +145,9 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
         approvals: [],
         lastEventTick: tick,
         stateTick: tick,
+        invSteps: [], // WO-060B
+        recommendation: null, // WO-060B
+        actions: [], // WO-060B
       }
       next.tracks[cid] = t
       copied.add(cid)
@@ -134,7 +159,15 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
       return t
     }
     if (!copied.has(cid)) {
-      t = { ...t, rows: t.rows.slice(), transitions: t.transitions.slice(), sitreps: t.sitreps.slice(), approvals: t.approvals.slice() }
+      t = {
+        ...t,
+        rows: t.rows.slice(),
+        transitions: t.transitions.slice(),
+        sitreps: t.sitreps.slice(),
+        approvals: t.approvals.slice(),
+        invSteps: t.invSteps.slice(), // WO-060B
+        actions: t.actions.slice(), // WO-060B
+      }
       next.tracks[cid] = t
       copied.add(cid)
     }
@@ -204,7 +237,7 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
       case 'sitrep': {
         const p = e.payload
         const t = track(p.contact_id, e.tick)
-        t.sitreps.push({ seq: e.seq, tick: e.tick, version: p.version, kind: p.kind, writer: p.writer })
+        t.sitreps.push({ seq: e.seq, tick: e.tick, version: p.version, kind: p.kind, writer: p.writer, status: p.status ?? null })
         t.lastEventTick = e.tick
         break
       }
@@ -223,8 +256,40 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
         t.approvals = t.approvals.map((a) => (a.request.request_id === e.payload.request_id ? { ...a, result: { ...e.payload, tick: e.tick } } : a))
         t.lastEventTick = e.tick
         if (e.payload.outcome === 'granted') moment({ seq: e.seq, tick: e.tick, contact_id: cid, label: 'approved', kind: 'threat' })
+        // --- WO-060B begin ---
+        else moment({ seq: e.seq, tick: e.tick, contact_id: cid, label: RESULT_MOMENT[e.payload.outcome], kind: 'threat' })
+        // --- WO-060B end ---
         break
       }
+      // --- WO-060B begin: investigation, recommendation and ladder actions ---
+      case 'investigation_step': {
+        const p = e.payload
+        const t = track(p.contact_id, e.tick)
+        t.invSteps.push({ ...p, tick: e.tick })
+        t.lastEventTick = e.tick
+        if (p.probe_id === 'request_watch_officer_look') {
+          moment({ seq: e.seq, tick: e.tick, contact_id: p.contact_id, label: 'look requested', kind: 'info' })
+        }
+        break
+      }
+      case 'recommendation': {
+        const p = e.payload
+        const t = track(p.contact_id, e.tick)
+        t.recommendation = { ...p, tick: e.tick }
+        t.lastEventTick = e.tick
+        const benign = p.recommended_rung === 'ask' || p.recommended_rung === 'watch'
+        moment({ seq: e.seq, tick: e.tick, contact_id: p.contact_id, label: `recommends ${RUNG_LABEL[p.recommended_rung]}`, kind: benign ? 'benign' : 'threat' })
+        break
+      }
+      case 'ladder_action': {
+        const p = e.payload
+        if (p.action === 'open_evidence_table') break
+        const t = track(p.contact_id, e.tick)
+        t.actions.push({ ...p, tick: e.tick })
+        t.lastEventTick = e.tick
+        break
+      }
+      // --- WO-060B end ---
       default:
         break
     }
@@ -305,6 +370,7 @@ export interface ProbeCard {
   tick: number
   why: string
   rows: EvidenceRow[]
+  source?: InvestigationStepPayload['source'] // WO-060B: deterministic | llm | fallback
 }
 
 export interface CaseStep {
@@ -325,6 +391,11 @@ export interface CaseStep {
   posterior?: PosteriorPayload
   sitrep?: CaseSitrep
   approval?: CaseApproval
+  // --- WO-060B begin ---
+  recommendation?: RecommendationPayload & { tick: number }
+  /** One line per ladder action (advisory, hold, request, result, SITREP), oldest first. */
+  ladderLines?: { text: string; tick: number; tone: 'threat' | 'approval' | 'info' }[]
+  // --- WO-060B end ---
 }
 
 export interface ReacquiredMark {
@@ -540,14 +611,29 @@ export function stepsForTrack(
   {
     const s = base('investigate')
     const invRows = rows.filter((r) => r.probe_id && !ASK_PROBES.has(r.probe_id))
-    const byProbe = new Map<string, ProbeCard>()
-    for (const r of invRows) {
-      const key = `${r.probe_id}@${r.t}`
-      const card = byProbe.get(key) ?? { probe_id: r.probe_id ?? '', tick: r.t, why: r.source, rows: [] }
-      card.rows.push(r)
-      byProbe.set(key, card)
+    // --- WO-060B begin: planner choices from the runner v3 stream when present ---
+    if (t.invSteps.length) {
+      const byId = new Map(rows.map((r) => [r.row_id, r]))
+      s.probes = t.invSteps
+        .filter((st) => st.probe_id !== null)
+        .map((st) => ({
+          probe_id: st.probe_id ?? '',
+          tick: st.landed_tick,
+          why: `${st.source}${st.fallback_reason ? ` (${st.fallback_reason})` : ''}${st.why ? ` · ${st.why}` : ''}`,
+          rows: st.row_ids.map((id) => opts.rowIndex?.get(id) ?? byId.get(id)).filter((r): r is EvidenceRow => !!r),
+          source: st.source,
+        }))
+    } else {
+      const byProbe = new Map<string, ProbeCard>()
+      for (const r of invRows) {
+        const key = `${r.probe_id}@${r.t}`
+        const card = byProbe.get(key) ?? { probe_id: r.probe_id ?? '', tick: r.t, why: r.source, rows: [] }
+        card.rows.push(r)
+        byProbe.set(key, card)
+      }
+      s.probes = [...byProbe.values()]
     }
-    s.probes = [...byProbe.values()]
+    // --- WO-060B end ---
     s.groups = group(invRows)
     s.rowCount = invRows.length
     s.posterior = opts.posterior
@@ -555,16 +641,33 @@ export function stepsForTrack(
       s.tick = tInv
       s.status = state === 'INVESTIGATING' ? 'current' : 'done'
       const p = opts.posterior
+      // --- WO-060B begin ---
+      const llm = s.probes.filter((x) => x.source === 'llm').length
+      const fb = s.probes.filter((x) => x.source === 'fallback').length
+      const by = llm || fb ? ` (${llm} by the model, ${fb} by fallback)` : ''
       s.sentence = s.probes.length
-        ? `${s.probes.length} planner probe${s.probes.length === 1 ? '' : 's'} run${p ? `; threat mass ${p.threat_mass.toFixed(2)} (stress-test estimate)` : ''}.`
-        : 'Investigation open; planner probe choices and posterior updates stream with WO-060 part B.'
+        ? `${s.probes.length} planner probe${s.probes.length === 1 ? '' : 's'} run${by}${p ? `; threat mass ${p.threat_mass.toFixed(2)} (stress-test estimate)` : ''}.`
+        : 'Investigation open; the planner is choosing its first probe.'
+      // --- WO-060B end ---
     }
     steps.push(s)
   }
   // RECOMMENDATION
   {
     const s = base('recommendation')
-    if (recT) {
+    // --- WO-060B begin: the investigation's frozen recommendation ---
+    const rec = t.recommendation
+    if (rec) {
+      s.recommendation = rec
+      s.tick = rec.tick
+      s.status = 'done'
+      const q = rec.question_for_human ? ` Question for a person: ${rec.question_for_human}` : ''
+      s.sentence = `Stop clause ${rec.stop_clause} fired: ${rec.outcome.replaceAll('_', ' ').toLowerCase()}, recommends ${RUNG_LABEL[rec.recommended_rung]} (computed; threat mass ${rec.threat_mass.toFixed(2)}, stress-test estimate).${q}`
+      const ids = rec.evidence_row_ids
+      s.groups = group(ids.map((id) => opts.rowIndex?.get(id) ?? rows.find((r) => r.row_id === id)).filter((r): r is EvidenceRow => !!r))
+      s.rowCount = s.groups.length
+    } else if (recT) {
+      // --- WO-060B end ---
       s.tick = recT.tick
       s.status = 'done'
       s.sentence = `Stop clause ${recT.reason_code} fired: ${stateWords(recT.to_state)}.`
@@ -573,7 +676,7 @@ export function stepsForTrack(
     }
     steps.push(s)
   }
-  if (recT && INVESTIGATION_TERMINAL.has(recT.to_state) && !handT) {
+  if (recT && INVESTIGATION_TERMINAL.has(recT.to_state) && !handT && !ladderT.length) {
     for (const k of ['ladder', 'handoff', 'after'] as StepKind[]) {
       const s = base(k)
       s.status = 'skipped'
@@ -601,6 +704,7 @@ export function stepsForTrack(
       if (appr) parts.push(appr.result ? `approval ${appr.result.outcome.replace('_', ' ')}` : `waiting on ${appr.request.approver}`)
       s.sentence = `${capital([...new Set(parts)].join('; '))}.`
       if (last?.guard) s.sentence += ` Guard ${last.guard}.`
+      s.ladderLines = ladderLines(t) // WO-060B
     } else if (handT) {
       s.status = 'skipped'
       s.sentence = 'not needed: straight to a person'
@@ -616,7 +720,7 @@ export function stepsForTrack(
       s.sitrep = t.sitreps[t.sitreps.length - 1]
       s.sentence =
         handT.to_state === 'HANDED_OFF'
-          ? `Handed to a person${s.sitrep ? ` with SITREP v${s.sitrep.version} (${s.sitrep.writer})` : ''}. The work stops here.`
+          ? `Handed to a person${s.sitrep ? ` with SITREP v${s.sitrep.version}${s.sitrep.status ? ` ${s.sitrep.status}` : ''} (${s.sitrep.writer})` : ''}. The work stops here.`
           : `${capital(stateWords(handT.to_state))}.`
     }
     steps.push(s)
@@ -628,6 +732,13 @@ export function stepsForTrack(
       s.tick = afterT[0].tick
       s.status = AFTER_STATES.has(state) && state !== 'RESOLVED_DEPARTED' ? 'current' : 'done'
       s.sentence = afterT.some((x) => x.to_state === 'RESOLVED_DEPARTED') ? 'The contact departed the zone.' : 'Watching after the handoff.'
+      // --- WO-060B begin ---
+      const updates = t.sitreps.filter((x) => x.status === 'update')
+      if (updates.length) {
+        s.sitrep = updates[updates.length - 1]
+        s.sentence += ` ${updates.length} SITREP update${updates.length === 1 ? '' : 's'} sent; nothing is steered.`
+      }
+      // --- WO-060B end ---
     }
     steps.push(s)
   }
@@ -635,6 +746,53 @@ export function stepsForTrack(
 }
 
 const capital = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s)
+
+// --- WO-060B begin: one plain line per ladder action ---
+const scopeText = (scope: Record<string, unknown> | null): string => {
+  if (!scope) return ''
+  const where = scope.asset_id ?? scope.basin
+  const mins = scope.max_minutes
+  return `${where ? ` on ${String(where)}` : ''}${mins ? ` (up to ${String(mins)} min)` : ''}`
+}
+
+export function ladderLines(t: ContactTrack): NonNullable<CaseStep['ladderLines']> {
+  const out: NonNullable<CaseStep['ladderLines']> = []
+  for (const a of t.actions) {
+    const signer = a.signed_by ? `, signed by ${a.signed_by}` : ''
+    switch (a.action) {
+      case 'issue_slow_advisory':
+        out.push({ tick: a.tick, tone: 'threat', text: `Slow advisory${scopeText(a.scope)} under standing orders (${a.clause}${signer})` })
+        break
+      case 'start_hold':
+        out.push({ tick: a.tick, tone: 'threat', text: `Hold${scopeText(a.scope)} under standing orders (${a.clause}${signer})` })
+        break
+      case 'release_hold':
+        out.push({ tick: a.tick, tone: 'info', text: `Hold released at its standing-orders limit${scopeText(a.scope)}` })
+        break
+      case 'request_approval':
+        out.push({ tick: a.tick, tone: 'approval', text: `Approval requested: ${String(a.scope?.action ?? '').replaceAll('_', ' ')}${scopeText(a.scope)}; timeout ${a.timeout_s ?? '?'} s` })
+        break
+      case 'page_backup':
+        out.push({ tick: a.tick, tone: 'approval', text: `No answer: backup approver paged; timeout ${a.timeout_s ?? '?'} s` })
+        break
+      case 'record_approved_action':
+        out.push({ tick: a.tick, tone: 'approval', text: `A person approved ${String(a.scope?.action ?? '').replaceAll('_', ' ')} (${a.clause})` })
+        break
+      case 'deliver_sitrep':
+        out.push({ tick: a.tick, tone: 'info', text: 'SITREP delivered to the watch officer' })
+        break
+      default:
+        break
+    }
+  }
+  for (const ap of t.approvals) {
+    if (ap.result && ap.result.outcome !== 'granted' && ap.result.outcome !== 'backup_paged') {
+      out.push({ tick: ap.result.tick, tone: 'approval', text: `Approval ${ap.result.outcome}: ${ap.request.action_label}` })
+    }
+  }
+  return out.sort((a, b) => a.tick - b.tick)
+}
+// --- WO-060B end ---
 
 // ---------------------------------------------------------------- case summaries
 
@@ -681,7 +839,14 @@ const RUNG_OF: Partial<Record<LadderState, Rung>> = {
 export function summarize(index: CaseIndex, rungOf: Record<string, { rung: Rung }>): CaseSummary[] {
   const out: CaseSummary[] = []
   for (const [root, members] of caseGroups(index)) {
-    const latest = members[members.length - 1]
+    // --- WO-060B begin: a member waiting on a person shows the case as needing approval ---
+    const stateOfMember = (m: string): LadderState => {
+      const tr = index.tracks[m].transitions
+      return tr.length ? tr[tr.length - 1].to_state : 'DETECTED'
+    }
+    const waiting = members.find((m) => stateOfMember(m) === 'AWAITING_APPROVAL')
+    const latest = waiting ?? members[members.length - 1]
+    // --- WO-060B end ---
     const t = index.tracks[latest]
     const state: LadderState = t.transitions.length ? t.transitions[t.transitions.length - 1].to_state : 'DETECTED'
     const steps = stepsForTrack(t, { latest: true })
@@ -763,6 +928,12 @@ export function nowLine(c: CaseSummary | undefined, items: CaseItem[], tickS: nu
   const since = cur?.tick != null ? ` since t ${Math.round(cur.tick * tickS)} s` : ''
   const what = cur ? ` — ${cur.sentence.replace(/\.$/, '')}` : ''
   const tail = next ? ` · next: ${next.title.toLowerCase()}` : ''
+  // --- WO-060B begin: what the person is asked, and until when ---
+  const ask = c.state === 'AWAITING_APPROVAL' ? steps.find((s) => s.kind === 'ladder')?.approval : undefined
+  if (ask && !ask.result) {
+    return `${who} · awaiting approval: ${ask.request.action_label} · ${ask.request.approver} · expires t ${Math.round(ask.request.expires_t_s)} s`
+  }
+  // --- WO-060B end ---
   return `${who} · ${stateWords(c.state)}${since}${what}${tail}`
 }
 

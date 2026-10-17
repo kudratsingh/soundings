@@ -24,11 +24,24 @@ export default function SitrepDrawer({ open, sitreps, onClose, onCite }: Props) 
           .slice()
           .reverse()
           .map((s) => (
-            <article key={`${s.contact_id}-${s.version}`} className="sitrep">
+            <article key={`${s.contact_id}-${s.version}`} className="sitrep" data-testid="sitrep-entry" data-kind={s.kind}>
               <h4>
                 {s.kind === 'lost_vehicle' ? 'LOST_VEHICLE notice' : 'SITREP'} · {s.contact_id} · v{s.version} · tick {s.tick}{' '}
                 <span className="muted small">writer: {s.writer}</span>
               </h4>
+              {/* --- WO-060B begin: the WO-042 SITREP (draft / final / update) --- */}
+              {s.kind === 'sitrep' && s.markdown && (
+                <>
+                  <p className="small" data-testid="sitrep-status">
+                    {s.status ?? 'final'} · recommended rung {String(s.sitrep?.recommended_rung ?? '').replaceAll('_', ' ')} (computed; not editable) · writer {s.writer}
+                    {s.path ? ` · ${s.path}` : ''}
+                  </p>
+                  <pre className="sitrep-md" data-testid="sitrep-markdown">
+                    {s.markdown}
+                  </pre>
+                </>
+              )}
+              {/* --- WO-060B end --- */}
               {s.notice && (
                 <>
                   <p className="small">
