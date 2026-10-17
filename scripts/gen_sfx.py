@@ -1,6 +1,6 @@
 """Generate the presenter sound effects (WO-062P) with numpy: no samples, no licences.
 
-Writes five mono 16-bit WAVs to ``web/public/sfx`` (or ``--out``), each under one second
+Writes six mono 16-bit WAVs to ``web/public/sfx`` (or ``--out``), each under one second
 and peak-normalised to -18 dBFS:
 
 - ``hail_ping.wav``          a short sonar-style ping with one faint echo (hail sent)
@@ -8,6 +8,7 @@ and peak-normalised to -18 dBFS:
 - ``hold_tone.wav``          a low 0.5 s tone (hold placed)
 - ``handoff_chime.wav``      a warm major arpeggio that resolves (handed to a person)
 - ``twist_klaxon_lite.wav``  a brief, soft two-tone (a twist toggled)
+- ``responder_dispatch.wav`` two short rising notes (the responder dispatched to look, WO-088)
 
 Deterministic: no randomness, fixed sample rate, and the stdlib ``wave`` writer, so two
 runs give identical bytes (``tests/test_sfx.py`` regenerates and compares).
@@ -121,6 +122,21 @@ SOUNDS: dict[str, Callable[[], Signal]] = {
     "handoff_chime": handoff_chime,
     "twist_klaxon_lite": twist_klaxon_lite,
 }
+
+
+# --- WO-088 begin ---
+def responder_dispatch() -> Signal:
+    """Two short notes, a fourth apart and rising: the platform goes to look."""
+
+    def note(freq: float) -> Signal:
+        sig = _tone(freq, 0.2, (1.0, 0.3, 0.08))
+        return sig * np.exp(-_t(0.2) / 0.1) * _env(len(sig), 0.006, 0.05)
+
+    return _place(0.42, [(0.0, note(659.25)), (0.2, note(880.0))])
+
+
+SOUNDS["responder_dispatch"] = responder_dispatch
+# --- WO-088 end ---
 
 
 def to_pcm16(sig: Signal, peak_dbfs: float = PEAK_DBFS) -> bytes:

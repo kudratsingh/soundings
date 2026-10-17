@@ -91,7 +91,8 @@ class EvidenceKind(_VocabEnum):
 
 
 class FeatureName(_VocabEnum):
-    """The 32 SPEC-INVESTIGATION section 2 features in section 2 order, then 5 support names."""
+    """The 32 SPEC-INVESTIGATION section 2 features in section 2 order, then 5 support names
+    and 3 WO-088 responder outputs."""
 
     # Kinematic
     SPEED_OVER_GROUND = "speed_over_ground"
@@ -135,6 +136,11 @@ class FeatureName(_VocabEnum):
     POL_BASELINE = "pol_baseline"
     WEEKDAY = "weekday"
     REACQUIRED_FROM = "reacquired_from"
+    # --- WO-088 begin --- (responder probe outputs; no likelihood row yet, never scored)
+    VISUAL_CLASS = "visual_class"
+    SEARCH_RESULT = "search_result"
+    SEARCH_POSITION = "search_position"
+    # --- WO-088 end ---
 
 
 class ProbeId(_VocabEnum):
@@ -149,6 +155,10 @@ class ProbeId(_VocabEnum):
     SECOND_SENSOR_DWELL = "second_sensor_dwell"
     ASK_OPERATOR_BY_PHONE = "ask_operator_by_phone"
     REQUEST_WATCH_OFFICER_LOOK = "request_watch_officer_look"
+    # --- WO-088 begin --- (responder platform probes, rung ask; CLAUDE.md section 8 A2)
+    RESPONDER_LOOK = "responder_look"
+    RESPONDER_SEARCH_BOX = "responder_search_box"
+    # --- WO-088 end ---
 
 
 class TransitPattern(_VocabEnum):

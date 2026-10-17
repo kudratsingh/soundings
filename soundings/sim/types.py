@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from pydantic import StrictBool
 
-from soundings.ports import EyesOnPoint, HailResponder
+from soundings.ports import CloseLook, EyesOnPoint, HailResponder
 from soundings.schemas._base import (
     HarborId,
     Lat,
@@ -57,6 +57,20 @@ class Detection(StrictModel):
 
 
 FALSE_ALARM_PREFIX = "fa-"
+
+# --- WO-088 begin ---
+VISUAL_CLASS: dict[Hypothesis, str] = {
+    Hypothesis.FILED_ON_PLAN: "uuv",
+    Hypothesis.FILED_OFF_PLAN: "uuv",
+    Hypothesis.UNFILED_KNOWN_OPERATOR: "uuv",
+    Hypothesis.UNAUTHORIZED_UUV: "uuv",
+    Hypothesis.BIOLOGIC: "marine_life",
+    Hypothesis.DEBRIS_OR_DRIFT: "debris",
+    Hypothesis.SURFACE_VESSEL_AIS_OFF: "surface_vessel",
+    Hypothesis.UNAUTHORIZED_DIVER: "diver",
+}
+"""What a close look sees of each simulated contact: a class label, never a hypothesis."""
+# --- WO-088 end ---
 """Ground-truth id prefix of a sensor false alarm (nothing physical is there)."""
 
 
@@ -133,6 +147,35 @@ class SimRun:
             replies_to_hail=truth.replies_to_hail,
             silent_after_tick=truth.silent_after_tick,
         )
+
+    # --- WO-088 begin ---
+    def close_look(self, contact_id: str, tick: int) -> CloseLook | None:
+        """What the responder at standoff sees and hears of ``contact_id`` at ``tick``.
+
+        The class label comes from the simulated contact (never a hypothesis id); the
+        acoustics are its latest real detection at or before ``tick``. None for an id with
+        no source or a sensor false alarm (nothing there to look at).
+        """
+        truth = self.contact_truth.get(contact_id)
+        if truth is None or truth.gt_id.startswith(FALSE_ALARM_PREFIX):
+            return None
+        dets = [
+            d
+            for d in self.detections
+            if d.observed_contact_id == contact_id and d.tick <= tick and not d.is_false_alarm
+        ]
+        acoustics: dict[str, bool | str | float] = {}
+        if dets:
+            d = max(dets, key=lambda x: (x.tick, x.node_id))
+            acoustics = {
+                "propeller_tonal_present": bool(d.propeller_tonal_present),
+                "tonal_band": d.tonal_band.value,
+                "cavitation_index": float(d.cavitation_index),
+                "breathing_or_click_present": bool(d.breathing_or_click_present),
+            }
+        return CloseLook(visual_class=VISUAL_CLASS[truth.hypothesis], acoustics=acoustics)
+
+    # --- WO-088 end ---
 
     def eyes_on_path(self, contact_id: str) -> list[EyesOnPoint]:
         """``(tick, lat, lon, depth_m)`` of the simulated contact behind ``contact_id``."""

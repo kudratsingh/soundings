@@ -489,3 +489,70 @@ button {
   margin: 6px 0 0;
 }
 /* --- WO-089 end --- */
+/* --- WO-088 begin --- */
+/* The responder (a probe dispatched to look): icon, battery bar, 'looking' ring, label. */
+.responder-icon {
+  position: relative;
+  background: none;
+  border: none;
+}
+.responder-arrow {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  fill: #0f766e;
+  stroke: #ffffff;
+  stroke-width: 1.2;
+}
+.responder-ring {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+.responder-icon.looking .responder-ring {
+  border-color: #0f766e;
+  animation: responder-look 1.6s ease-out infinite;
+}
+@keyframes responder-look {
+  from {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+.responder-battery {
+  position: absolute;
+  left: 0;
+  top: 25px;
+  width: 24px;
+  height: 4px;
+  background: #e5e7eb;
+  border: 1px solid #6b7280;
+  border-radius: 1px;
+  overflow: hidden;
+}
+.responder-battery > span {
+  display: block;
+  height: 100%;
+  background: #16a34a;
+}
+.responder-battery.low > span {
+  background: #d97706;
+}
+.responder-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f766e;
+}
+.responder-battery-text {
+  font-weight: 400;
+  color: #374151;
+}
+/* --- WO-088 end --- */

@@ -155,8 +155,14 @@ def test_enum_members_exact() -> None:
 
 def test_other_enum_members_exact() -> None:
     assert [e.value for e in EvidenceKind] == ["fact", "assumption", "derived"]
-    assert len(FeatureName) == 37
-    assert [f.value for f in FeatureName][-5:] == [
+    # WO-088 appends three responder outputs after the five support names.
+    assert len(FeatureName) == 40
+    assert [f.value for f in FeatureName][-3:] == [
+        "visual_class",
+        "search_result",
+        "search_position",
+    ]
+    assert [f.value for f in FeatureName][-8:-3] == [
         "track_segment",
         "current_field",
         "pol_baseline",
@@ -164,7 +170,9 @@ def test_other_enum_members_exact() -> None:
         "reacquired_from",
     ]
     assert [f.value for f in FeatureName][:3] == ["speed_over_ground", "speed_variance", "depth"]
-    assert len(ProbeId) == 11 and len(ToggleName) == 9 and len(BehaviorType) == 8
+    assert len(ProbeId) == 13 and len(ToggleName) == 9  # WO-088: 11 section 5 + 2 responder
+    assert [p.value for p in ProbeId][-2:] == ["responder_look", "responder_search_box"]
+    assert len(BehaviorType) == 8  # WO-080: vessel_transit
     assert [t.value for t in TonalBand] == ["none", "low", "mid", "high"]
     assert [u.value for u in Unit] == [
         "m", "m/s", "m/s2", "deg/s", "s", "ratio", "bool", "category", "id", "hour", "dB",
