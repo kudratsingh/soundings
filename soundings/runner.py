@@ -640,6 +640,8 @@ class _V1Run:
                 continue
             if not o.last_tick + self.r.timeout_ticks < first.tick:
                 continue
+            if _beyond_reacquire_gap(self, o.last_tick, first.tick):  # WO-080 (same filter)
+                continue
             if not self.table.for_contact(oid):
                 continue
             lost.append(self.lost_track(o))
@@ -1090,6 +1092,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 # --- WO-022 end ---
+
+# --- WO-080 begin: re-acquisition gap pre-filter ---
+
+
+def _beyond_reacquire_gap(run: _V1Run, last_tick: int, first_tick: int) -> bool:
+    """``match_reacquisition``'s own gap test, applied before building a ``LostTrack``.
+
+    Outcome-identical (the matcher rejects these candidates by the same test); it saves
+    building a LostTrack for every long-lost track, which dominated BT-01's runtime.
+    """
+    return (first_tick - last_tick) * run.tick_s > run.cfg.reacquire.max_gap_s
+
+
+# --- WO-080 end ---
 
 # --- WO-033 begin: runner v2 ---
 # Runner v2: the matcher's ESCALATE enters the investigation (ASKING -> INVESTIGATING, as in
