@@ -1,15 +1,25 @@
 # STATE — read this first after CLAUDE.md
 
-Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; Phase 4 half; Phase 5 half)
+Last updated: 2026-10-17 06:38 PDT (truth-first rewrite; Phase 7 'ATC at scale' + eval/model-run directives accepted)
 
-## Where we are
-- **Phase 0 complete** (scaffold `25e7dbb`). **Phase 1 complete**: WO-010 `6d7fd6c` (#1), WO-011 `32db5a7` (#3), WO-012 `26cea7d` (#7).
-- **Phase 2 complete**: WO-020 registry `ff04e56` (#4), WO-021 challenge-response `fcb8761` (#5), WO-022 matcher + drift search box + re-acquisition + runner v1 `c2074f2` (#14). S01/S03 clear at ask with zero interruptions; S02 ends LOST_VEHICLE with a search box containing the true position.
-- **Phase 3**: WO-030 posterior `69bd327` (#11) merged; WO-031 probes + planner starting; WO-032 → WO-033 queued.
-- **Phase 4**: WO-040 ladder machine `76edbcc` (#6) and WO-041 guards + signed standing orders `1848d92` (#9) merged; WO-042 SITREP + audit and WO-043 driver + runner v3 queued.
-- **Phase 5**: WO-050 baselines `f2e8bc3` (#13) merged; WO-051 eval harness queued. **Phase 6**: WO-060/061/062 queued.
-- `main` CI green; full suite ≈ 1,050 tests, `make check` clean. Zero paid runs.
+## Where we are (2026-10-17 06:38 PDT)
+- **Merged on `main`** (CI green, ≈1,200 tests, zero paid runs): Phase 0 scaffold `25e7dbb`; Phase 1 WO-010 `6d7fd6c`, WO-011 `32db5a7`, WO-012 `26cea7d`; Phase 2 WO-020 `ff04e56`, WO-021 `fcb8761`, WO-022 `c2074f2`; Phase 3 WO-030 `69bd327`, WO-031 `5f10629`, WO-032 part A `51fcc2d`; Phase 4 WO-040 `76edbcc`, WO-041 `1848d92`, WO-043 part A (ladder driver, watch-after-handoff) `8fee1bb`; Phase 5 WO-050 `f2e8bc3`; Phase 6 WO-062 part A (demo runner skeleton) `39c22eb`; Twist 1 proof trail `1dded8e`.
+- **PRs open, CI/rebase cycling:** WO-042 part A audit log + SITREP template (#18), WO-060 part A UI core over runner v1 (#20), WO-033 part A investigation machine core (#23), WO-051 part A eval metrics/report/CLI (#24), WO-062 video/sound addenda (#25).
+- **Running:** WO-032 part B (LlmPlanner wiring) in the dependency-driven workflow; the Phase 7 work-order writers (WO-080..WO-086, WO-061 QR addendum). Part B of every split is completed by the dependency-driven workflow once upstream merges.
+- **Not started:** WO-061 judge panel (waits for the UI core), WO-062P presenter mode (starts when WO-060 part A merges), WO-080..WO-087 (as their WOs land), Twist 2 and 3 (notices not yet received).
+- **Incident:** the Mac slept 01:52–05:37 PDT (lid closed on battery); one agent died and was restarted; nothing on `main` was affected. Caffeinate runs until 13:39 PDT; keep the lid open and plug in.
 - Lens declared at submission: Crisis Mitigation (Track 01 Marine, NULL Labs).
+
+## Phase 7 directives (owner, 2026-10-17 06:05 and 06:35 PDT)
+Product line unchanged: Soundings proposes slots and advisories, operators accept, it never steers anything, the work stops at the handoff. No route planning, no vehicle commands. New work orders (written from the template with exit tests before coding): WO-080 Busy Tuesday scenario (BT-01), WO-081 conflict detection at filing (shapely STRtree), WO-082 slot proposal (OR-Tools CP-SAT), WO-083 separation advisories (CPA/TCPA through guards), WO-084 projected tracks (Kalman), WO-085 surge triage queue, WO-086 rung ledger + blunt-policy counter + radar styling, WO-087 bounded live mode (build now, enable Sunday only), WO-061 addendum (QR code to the registry form). WO-062 addenda: presenter mode, 3:00 shot list, recording, voiceover prep, sound design (`docs/work-orders/WO-062-ADDENDUM-video-sound.md`). WO-051 addendum: mis-specified sim ±20%, toggle sweep, threshold sensitivity curve, BT-01 scale 40/100/200, seeds 1–20 with mean and min–max, planner ablation (`docs/work-orders/WO-051-ADDENDUM-eval-directive.md`).
+Waves: **A** (now) WO-060, WO-031, WO-080 · **B** WO-032, WO-033, WO-081, WO-083 · **C** WO-042, WO-043, WO-082, WO-084, WO-087, WO-061(+QR) · **D** WO-051, WO-085, WO-086, WO-062 (demo runner + ≤3 min video). If Wave C is not merged by 3:00 PM, drop WO-082 and WO-084 and report hours saved; never drop exit tests.
+Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; final video render 8:00 PM; Devpost 9:30 PM.
+**Fixture run (the one paid step before Sunday):** at ~12:30, after BT-01, WO-033 and WO-042 merge: probe_planner + hypothesis_writer over S04–S08 and the BT-01 rogue, sitrep_writer over every handoff scenario (~60 calls). Print the real count and dollar estimate via `scripts/paid-run-gate.py`, wait for the owner's approval phrase, record once, return to replay. If the owner is not there within 15 min, keep building and re-raise. Planner ablation (LLM vs deterministic vs random) runs after it. Stage live mode (WO-087) is enabled only by `approve paid run stage live budget 40` on Sunday.
+**Paid-run budget (owner, 06:40 PDT): $15 total for now; every paid run still requires the owner's explicit approval phrase before it starts.**
+**Twists:** scored at final submission only; no per-twist deadline. Twists 2 and 3 must each produce a toggle, scenario, or feature with a test; the Devpost writeup paragraphs live in `docs/DECK-INPUTS.md` → Twists.
+
+## Sunday 9:00 AM tech check
+- HDMI audio out confirmed; laptop volume 80%; play the hail ping in the room before the pitch; presenter mode (`/?presenter=1`) reset to step 0 (< 2 s); `MODEL_MODE=replay` unless the owner enables stage live mode; lid open, plugged in.
 
 ## Owner directives in force (2026-10-16 ~22:00 PT)
 - Build Phases 0–6 autonomously; coordinator (Claude) plans and verifies, Opus subagents implement, one WO per worktree under `../soundings-worktrees/`.
@@ -27,8 +37,8 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 021 | challenge-response | merged | wo/021-challenge-response | #5 | fcb8761 | 395 passed (65 hail) |
 | 022 | matcher + ask rung | merged | wo/022-matcher-ask-rung | #14 | c2074f2 | see PR #14 |
 | 030 | posterior | merged | wo/030-posterior | #11 | 69bd327 | 1043 passed (test_posterior) |
-| 031 | probes + planner | in review | wo/031-probes-planner | | | 1310 passed (87 probes/planner) |
-| 032 | llm planner guard | part A merged (#17); part B in review | wo/032-llm-planner-guard | | (squash on merge) | 1336 passed (85 test_llm_guard, 9 test_llm_roles, 11 test_probe_planner_llm) |
+| 031 | probes + planner | merged | wo/031-probes-planner | #19 | 5f10629 | see PR #19 |
+| 032 | llm planner guard | part A merged (#17, 51fcc2d); part B in progress | wo/032-llm-planner-guard | #17 | 51fcc2d | guard/fallback/fixture tests |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
@@ -39,6 +49,14 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 060 | watch-officer UI | part A merged; part B pending | wo/060a-ui-core | #20 | | 1343 passed after rebase (part A: 32 + 1 e2e smoke) |
 | 061 | judge panel | pending | wo/061-judge-panel | | | |
 | 062 | demo runner | part A merged; part B pending | wo/062a-demo-runner-core | see branch PR | | 53 passed (test_demo_script/schedule/headless) |
+| 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |
+| 081 | conflict detection at filing | WO being written | wo/081-conflict-detection | | | |
+| 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
+| 083 | separation advisories (CPA/TCPA) | WO being written | wo/083-separation-advisories | | | |
+| 084 | projected tracks (Kalman) | WO being written | wo/084-projected-tracks | | | |
+| 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
+| 086 | rung ledger + blunt counter UI | WO being written | wo/086-rung-ledger | | | |
+| 087 | bounded live mode (stage) | WO written | wo/087-bounded-live-mode | | | |
 
 ## Team
 | role | name | github | owns |
@@ -49,17 +67,18 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | domain / eval / deck | (unassigned; coordinator Kudrat) | | Phase 5, 7, 8, mentor liaison, Devpost |
 
 ## Next
-1. Phase 3: WO-031 → WO-032 → WO-033 (critical path to the CLI demo).
-2. Phase 4: WO-042 (after WO-032) → WO-043 runner v3 (after WO-033). Then Phase 6 WO-060/061, Phase 5 WO-051, WO-062 demo.
-3. Twist 1 landed by the clock at Fri 11:30 PM: when the owner pastes the notice, switch to `docs/TWIST-PLAYBOOK.md` on `twist/1-<slug>`.
+1. Wave A: land WO-060 part A (#20); start WO-080 as soon as its WO is written; WO-062P presenter mode after #20.
+2. Wave B: WO-032 part B (running), WO-033 part B, WO-081, WO-083. Then Waves C and D per the directive.
+3. Fixture recording gate at ~12:30 after BT-01, WO-033, WO-042 (owner approval phrase required); planner ablation after it.
+4. Twist 2 and Twist 3: when the owner pastes each notice, produce a toggle, scenario, or feature with a test (scored at final submission).
 
 ## Blocked
 - Nothing. (Twist notices and Devpost steps need the owner.)
 
 ## Twist log
-| twist | landed | submitted | branch | commit | toggle/scenario |
+| twist | notice received | in Devpost writeup | branch | commit | toggle/scenario/feature + test |
 |---|---|---|---|---|---|
-| 1 | Fri 11:30 PM (scheduled); response received 2026-10-17 05:43 PDT | pending (owner submits via portal) | twist/1-funding-pathways | see PR | none — written response (funding pathway) |
+| 1 | Fri 11:30 PM (scheduled); response received 2026-10-17 05:43 PDT | pending (DECK-INPUTS → Twists) | twist/1-funding-pathways | see PR | none — written response (funding pathway) |
 | 2 | | | | | |
 | 3 | | | | | |
 
