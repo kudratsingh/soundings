@@ -26,7 +26,7 @@ Last updated: 2026-10-16 23:35 PDT (Phases 0–1 complete; Phase 2 two-thirds; W
 | 020 | registry | merged | wo/020-registry | #4 | ff04e56 | 330 passed (57 registry) |
 | 021 | challenge-response | merged | wo/021-challenge-response | #5 | fcb8761 | 395 passed (65 hail) |
 | 022 | matcher + ask rung | pending | wo/022-matcher-ask-rung | | | |
-| 030 | posterior | PR open, auto-merge on green CI | wo/030-posterior | (see PR) | squash commit on main (see PR) | 873 passed (posterior 43, likelihood tables 8, catalog 13) |
+| 030 | posterior | PR open, auto-merge on green CI | wo/030-posterior | (see PR) | squash commit on main (see PR) | 1014 passed after rebase on WO-041 (posterior 43, likelihood tables 8, catalog 13) |
 | 031 | probes + planner | pending | wo/031-probes-planner | | | |
 | 032 | llm planner guard | pending | wo/032-llm-planner-guard | | | |
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
