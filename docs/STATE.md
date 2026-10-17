@@ -32,12 +32,8 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 | 033 | investigation machine | pending | wo/033-investigation-machine | | | |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
-| 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
+| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | #18 | | 45 part A tests (test_audit 21, test_sitrep 24); full suite green on main at rebase |
 | 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
-| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | | | 1189 passed (45 part A: test_audit 21, test_sitrep 24) |
-| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | | | 1268 passed after rebase on WO-032 part A (45 part A: test_audit 21, test_sitrep 24) |
-| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | | | 1408 passed on main incl. WO-031, WO-032A, WO-062A (45 part A: test_audit 21, test_sitrep 24) |
-| 043 | watch after handoff | pending | wo/043-watch-after-handoff | | | |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | pending | wo/051-eval-harness | | | |
 | 060 | watch-officer UI | pending | wo/060-watch-officer-ui | | | |
