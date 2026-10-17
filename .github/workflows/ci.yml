@@ -6,34 +6,47 @@ on:
     branches: [main]
 
 # CI never calls a hosted model. MODEL_MODE is pinned to replay and no API key
-# is exposed to the job. A replay miss fails the job (see soundings/llm/client.py).
+# is exposed to any job. A replay miss fails the job (see soundings/llm/client.py).
+#
+# Layout (2026-10-17 15:45 PDT, DECISIONS): the suite grew to ~2,700 tests with the
+# BT-01-era integration runs, and one 4-core runner needed 29 minutes. The work is
+# split across parallel runners; the single required status is still the `check`
+# job, which only passes when every job before it passed.
 env:
   MODEL_MODE: replay
   SOUNDINGS_CI: "1"
+  # Full-scenario integration modules (each runs BT-01 or the whole catalog end to end).
+  # `tests-core` ignores them; the two heavy jobs split them. Keep the three lists in sync.
+  HEAVY_A: >-
+    tests/test_busy_tuesday.py tests/test_tick_skipping.py tests/test_conflicts_integration.py
+    tests/test_slots_integration.py tests/test_separation_bt01.py tests/test_bt01_window_flex.py
+    tests/test_vessel_transit.py tests/test_generate.py tests/test_busy_tuesday_rules.py
+    tests/test_ledger_integration.py tests/test_sensor_ranges.py tests/test_triage_integration.py
+  HEAVY_B: >-
+    tests/test_catalog_expected.py tests/test_catalog_outcomes_physics.py tests/test_eval.py
+    tests/test_soundings_policy.py tests/test_policies.py tests/test_runner_v3.py
+    tests/test_reacquisition_carryover.py tests/test_responder_integration.py
+    tests/test_responder_catalog.py tests/test_investigation.py tests/test_pol.py
+    tests/test_sim_catalog_integration.py tests/test_stepped_source.py tests/test_fixture_harness.py
+    tests/test_ablation.py tests/test_demo_headless.py tests/test_stream_v3.py tests/test_run_engine.py
 
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
-
       - name: Python deps
         run: uv sync --all-extras
-
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
-
       - name: Types
         run: uv run mypy soundings
-
       - name: Denylist (no out-of-scope vocabulary outside its definitions)
         run: bash scripts/denylist-check.sh
-
       - name: No external references (names of the owner's other projects must not appear)
         run: |
           # The pattern is assembled from pieces so this file never contains the names.
@@ -42,27 +55,87 @@ jobs:
           if grep -rniE "$pat" . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=.mypy_cache \
                --exclude-dir=.pytest_cache --exclude-dir=.ruff_cache --exclude-dir=dist; then
             echo "external reference found; see tests/test_no_external_references.py"; exit 1; fi
+      - name: Assert no live-mode leak
+        run: |
+          if grep -rn "MODEL_MODE *= *['\"]live" .github soundings scripts Makefile 2>/dev/null; then
+            echo "live mode must never be set in repo config"; exit 1; fi
 
-      - name: Tests (replay only)
-        run: uv run pytest -q --maxfail=1 -n 4 -p no:cacheprovider
+  tests-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Python deps
+        run: uv sync --all-extras
+      - name: Tests (replay only), everything but the heavy integration modules
+        run: |
+          ignores=""
+          for f in $HEAVY_A $HEAVY_B; do ignores="$ignores --ignore=$f"; done
+          uv run pytest -q --maxfail=1 -n 4 -p no:cacheprovider $ignores
 
+  tests-heavy-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Python deps
+        run: uv sync --all-extras
+      - name: Heavy integration tests A (BT-01 family), replay only
+        run: |
+          files=""; for f in $HEAVY_A; do [ -f "$f" ] && files="$files $f"; done
+          uv run pytest -q --maxfail=1 -n 4 -p no:cacheprovider $files
+
+  tests-heavy-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Python deps
+        run: uv sync --all-extras
+      - name: Heavy integration tests B (catalog, eval, engine), replay only
+        run: |
+          files=""; for f in $HEAVY_B; do [ -f "$f" ] && files="$files $f"; done
+          uv run pytest -q --maxfail=1 -n 4 -p no:cacheprovider $files
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-
       - name: Web deps
         run: pnpm -C web install --frozen-lockfile
-
       - name: Web typecheck + build
         run: pnpm -C web exec tsc --noEmit && pnpm -C web build
 
-      - name: Assert no live-mode leak
+  # The one required status. It passes only when every job above passed.
+  check:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [static, tests-core, tests-heavy-a, tests-heavy-b, web]
+    steps:
+      - name: Every job green
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
         run: |
-          if grep -rn "MODEL_MODE *= *['\"]live" .github soundings scripts Makefile 2>/dev/null; then
-            echo "live mode must never be set in repo config"; exit 1; fi
+          echo "job results: $RESULTS"
+          case "$RESULTS" in
+            *failure*|*cancelled*|*skipped*) echo "a job did not pass"; exit 1;;
+          esac
+          echo "all jobs passed"
