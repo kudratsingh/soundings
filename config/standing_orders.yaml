@@ -22,4 +22,4 @@ orders:
     allowed_rungs: [watch, ask, slow, hold]   # within scope above; never beyond
     never: [harbor_closure, external_call]
 
-signature: "REPLACE_WITH_SHA256_AT_PHASE_4"
+signature: "0df7260fc980e37276e88803c5513d1ee66bba2a1518bc905ef22e3d27458a70"
