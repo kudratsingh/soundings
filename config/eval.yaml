@@ -1,0 +1,36 @@
+# Eval settings (WO-050 owns this file). Nothing here is a ladder threshold:
+# config/ladder.yaml keeps those. Every number under `baselines:` is a labeled
+# modeling assumption for the counterfactual baselines, not an operational figure
+# (docs/log/DECISIONS.md 2026-10-16 23:05).
+
+baselines:
+  human_review_s: 120          # assumption: one person reviews one request in 2 min, serially
+  berth_reopen_after_s: 600    # assumption: a closed berth reopens 10 min after its last contact was seen
+  assumption_note: >-
+    The bang and human_queue baselines are counterfactual logs replayed on the same
+    seeded sim output as Soundings. They do not run through the ladder machine. Their
+    timing numbers are labeled assumptions with no mentor-validated figure behind them.
+  assumptions:
+    approval_assumed: >-
+      bang assumes the person approves every closure request; the approval is modeled,
+      not observed.
+    serial_review_queue: >-
+      One person serves every request in a single serial queue, human_review_s per
+      request; a request still waiting when the run ends is never handled.
+    berth_reopen: >-
+      A closure lasts from approval until the last contact on that berth was seen plus
+      berth_reopen_after_s, capped at the end of the run; reopening needs the person.
+    closure_merge: >-
+      A contact whose berth already has a pending or active closure adds no new request;
+      it is logged under that closure.
+    human_queue_shutdown: >-
+      human_queue shutdown-minutes are reported as 0 because the person's decisions are
+      not simulated.
+    human_queue_recheck: >-
+      In human_queue the person is the only watch, so each re-check of a handed-off
+      contact is the person looking again and counts as an interruption.
+
+eval:
+  seeds: [1, 2, 3, 4, 5]
+  perturb_magnitude: 0.5
+  perturb_seed: 17
