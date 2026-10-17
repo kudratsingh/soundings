@@ -155,7 +155,7 @@ watch (free probes, `registry_lookup`) and ask (`acoustic_hail`, the matcher, pl
 - §2.6: the citation test (every outcome and notice line cites existing rows; the assumption is labelled).
 
 ## Done
-PR: (branch `wo/022-matcher-ask-rung`; link in STATE.md) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, full suite 1080 passed after rebase; WO-022 tests 91 (matcher 31, search box 6, re-acquire 9, ask rung 10, runner v1 27, rules 18) · STATE.md updated: yes (WO-022 row)
+PR: [#14](https://github.com/kudratsingh/soundings/pull/14) (branch `wo/022-matcher-ask-rung`) · Merged commit: squash commit on main (see PR) · Test summary: `make check` exit 0, full suite 1080 passed after rebase; WO-022 tests 91 (matcher 31, search box 6, re-acquire 9, ask rung 10, runner v1 27, rules 18) · STATE.md updated: yes (WO-022 row)
 
 - Every exit test passes with `MODEL_MODE=replay`; the denylist grep prints nothing. Determinism: `PYTHONHASHSEED` 0 vs 1 on `--scenario S02 --seed 3` gives an empty diff (sha256 `27555550…d477a`, `transition_log_hash=b4793710…ba67b`); `-k deterministic` checks S01, S02, S05 in process.
 - Manual: S01's plan filed through `/registry` with `scripts/registry_form_shot.py --plan-from S01` (cached headless shell via `--executable-path`), then `python -m soundings.runner --scenario S01 --seed 1 --plans db`: both ground-truth cases end `CLEARED_AT_ASK`, and the hash equals the scenario-plans run (`f799c460…0653`).
