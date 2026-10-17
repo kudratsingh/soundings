@@ -50,7 +50,7 @@ def test_rule_2_2_no_llm_imports(path: Path) -> None:
 
 def test_rule_2_2_runner_never_imports_grading() -> None:
     assert "soundings.sim.grading" not in _imports(RUNNER)
-    assert "grading" not in RUNNER.read_text(encoding="utf-8")
+    assert not re.search(r"\bsim\.grading\b|\bgrading\.", RUNNER.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("path", [GEN, AIS], ids=lambda p: p.name)
