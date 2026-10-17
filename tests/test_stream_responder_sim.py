@@ -23,7 +23,10 @@ def _trail() -> list[object]:
     result = responder.dispatch_to_look("c-0001", CONTACT[0], CONTACT[1], 0)
     assert result.accepted, result.reason
     snaps = []
-    for tick in range(1, 900):
+    # Run past the arrival (the route stays inside the geofence, so it can be longer than
+    # the straight line) and hold station for a while.
+    n_ticks = int(result.eta_s / TICK_S) + 120
+    for tick in range(1, n_ticks):
         snaps.append(
             responder.step(
                 tick, contact_lat=CONTACT[0], contact_lon=CONTACT[1], contact_speed_mps=0.0
