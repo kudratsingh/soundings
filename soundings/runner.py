@@ -1569,6 +1569,827 @@ def main_v2(argv: Sequence[str] | None = None) -> int:
 # --- WO-033 end: runner v2 ---
 
 # --- v3 (WO-043) ---
+# --- WO-043 begin: runner v3 ---
+# Runner v3: sim -> evidence -> ask (v1) -> investigation (v2) -> the WO-043 ladder driver
+# (BoundaryGuards under signed standing orders, or NoStandingOrdersGuards when unsigned),
+# the simulated approver (or any ``ApproverPort``), WO-042's ``HandoffService`` as SITREP
+# writer and listener (template by default; replay through a caller's client in ``auto``),
+# the hash-chained audit log, then watch-after-handoff. Runner v2 runs unchanged on the
+# scenario's own ``duration_ticks`` (every v1/v2 field is identical); the ladder observes an
+# extended sim of ``duration_ticks + tail`` ticks (tail from config, capped at 2x, WO-011
+# prefix stability), so timers that come due after the scenario's end still fire.
+# ``ScenarioRunnerV3.start()`` precomputes v1/v2 and the feeds; each ``RunSession.step()``
+# advances the ladder one tick (the UI run engine steps it; approvals arrive through the
+# ``ApproverPort``, e.g. ``ManualApprover.reply``). ``run()`` is ``start()`` stepped to the
+# end. CLAUDE.md 2.1: after HANDED_OFF only watching happens. 2.2: the driver passes only
+# guard decisions to the machine; runner.py still imports nothing from ``soundings.llm``.
+
+from collections import Counter  # noqa: E402
+
+from soundings.investigation.posterior import score_contact  # noqa: E402
+from soundings.ladder.approver_sim import ApproverScript  # noqa: E402
+from soundings.ladder.audit import AuditKind, AuditLog  # noqa: E402
+from soundings.ladder.driver import (  # noqa: E402
+    INVESTIGATION_OUTCOMES,
+    ContactFeed,
+    DriverSession,
+    LadderDriver,
+    LadderRun,
+    Snapshot,
+)
+from soundings.ladder.guards import BoundaryGuards  # noqa: E402
+from soundings.ladder.handoff import HandoffPacket, HandoffService  # noqa: E402
+from soundings.ladder.machine import StepResult  # noqa: E402
+from soundings.ladder.ports import ApprovalReply, ApproverPort  # noqa: E402
+from soundings.ladder.sitrep import Sitrep, SitrepStatus  # noqa: E402
+from soundings.ladder.sitrep import SitrepInputs as WriterInputs  # noqa: E402
+from soundings.ladder.sitrep_port import SitrepInputs as PortInputs  # noqa: E402
+from soundings.ladder.types import ActionKind, ActionScope  # noqa: E402
+from soundings.ladder.watch import DepartureDetector, WatchSummary  # noqa: E402
+from soundings.schemas import TrackPoint  # noqa: E402
+from soundings.schemas.config import STANDING_ORDERS_PATH  # noqa: E402
+from soundings.schemas.enums import EvidenceKind, FeatureName, Rung, ToggleName  # noqa: E402
+from soundings.schemas.scenario import Toggle  # noqa: E402
+
+MONITOR_SOURCE = "ladder_monitor"
+"""Source of the rows the ladder re-extracts from the track prefix (guards read evidence)."""
+MONITOR_FEATURES: tuple[FeatureName, ...] = (
+    FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET,
+    FeatureName.ZONE_CRITICALITY,
+    FeatureName.NEAREST_ASSET_ID,
+    FeatureName.ZONE_ID,
+)
+ApproverChoice = Literal["default", "denied", "unreachable"]
+WriterModeV3 = Literal["template", "auto"]
+INTERRUPTION_ACTIONS = frozenset({ActionKind.REQUEST_APPROVAL, ActionKind.PAGE_BACKUP})
+
+
+class ManualApprover:
+    """An ``ApproverPort`` a person answers (the WO-061 live approval path).
+
+    ``request`` records what the ladder asked; ``reply(contact_id, decision, at_s, token=)``
+    queues the person's answer, and the driver polls it on the next tick. A grant must carry
+    the WO-041 token the approval UI issued (``issue_token`` is called only from the approver
+    paths, ``tests/test_approval.py``); the ladder's guard checks it against the requested
+    scope, so a grant without a valid token for exactly that scope changes nothing.
+    """
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, ActionScope, str, float]] = []
+        self._queue: list[ApprovalReply] = []
+        self._answered: set[int] = set()
+
+    def request(self, contact_id: str, scope: ActionScope, channel: str, now_s: float) -> None:
+        self.requests.append((contact_id, scope, channel, round6(now_s)))
+
+    def open_requests(self) -> list[tuple[str, ActionScope, str, float]]:
+        return [r for i, r in enumerate(self.requests) if i not in self._answered]
+
+    def reply(
+        self,
+        contact_id: str,
+        decision: Literal["granted", "denied"],
+        at_s: float,
+        token: Mapping[str, Any] | None = None,
+    ) -> ApprovalReply:
+        """Answer the oldest open request for ``contact_id``."""
+        for i, (cid, _scope, channel, _) in enumerate(self.requests):
+            if cid != contact_id or i in self._answered:
+                continue
+            self._answered.add(i)
+            reply = ApprovalReply(
+                contact_id=cid,
+                decision=decision,
+                token=None if token is None else dict(token),
+                channel=channel,
+                at_s=round6(at_s),
+            )
+            self._queue.append(reply)
+            return reply
+        raise KeyError(f"no open approval request for {contact_id}")
+
+    def poll(self, now_s: float) -> list[ApprovalReply]:
+        out, self._queue = self._queue, []
+        return out
+
+
+@dataclass(frozen=True)
+class StepRecord:
+    """One ladder step of one ``RunSession.step()`` (UI run engine, WO-060 part B)."""
+
+    tick: int
+    t_s: float
+    contact_id: str | None
+    from_state: LadderState
+    to_state: LadderState
+    event: str
+    arg: str | None
+    transitioned: bool
+    reason: str
+    actions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LadderTransition:
+    """One ladder checkpoint as the eval reads it (WO-050 ``Transition`` field names)."""
+
+    seq: int
+    contact_id: str
+    case_id: str | None
+    tick: int
+    t_s: float
+    from_state: LadderState
+    to_state: LadderState
+    event: str
+    arg: str | None
+    action: str | None
+    asset_id: str | None
+    probe_id: str | None
+    rung: Rung
+    hash: str
+
+
+@dataclass(frozen=True)
+class RunResultV3(RunResultV2):
+    """``RunResultV2`` plus the ladder. ``interruptions``/``probes_used`` count approvals.
+
+    ``sim`` stays the scenario-length run (v2); ``sim_extended`` is what the ladder watched.
+    """
+
+    ladder: Mapping[str, LadderRun] = field(default_factory=lambda: MappingProxyType({}))
+    handling_outcome: Mapping[str, LadderState] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    sitreps: Mapping[str, tuple[Sitrep, ...]] = field(default_factory=lambda: MappingProxyType({}))
+    sitrep_packets: tuple[HandoffPacket, ...] = ()
+    watch: Mapping[str, WatchSummary] = field(default_factory=lambda: MappingProxyType({}))
+    audit_run_id: str = ""
+    audit_db: str = ""
+    audit_head: str = ""
+    audit_ok: bool = False
+    audit_counts: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    ladder_transitions: tuple[LadderTransition, ...] = ()
+    ladder_log_hash: str = ""
+    contact_interruptions: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    contact_cases: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    planner_stats: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    degraded_reasons: tuple[str, ...] = ()
+    orders: str = "unsigned"
+    sim_extended: SimRun | None = None
+    tail_ticks: int = 0
+    audit: AuditLog | None = None
+
+
+def ladder_log_text(transitions: Iterable[LadderTransition]) -> str:
+    """Canonical JSONL of the ladder transitions (the v3 determinism log)."""
+    return "".join(f"{canonical_json(dataclasses.asdict(t))}\n" for t in transitions)
+
+
+def _prefix(track: Track, upto_tick: int) -> Track | None:
+    points = tuple(p for p in track.points if p.tick <= upto_tick)
+    if not points:
+        return None
+    gaps = tuple(g for g in track.gaps if g.end_tick < points[-1].tick)
+    return track.model_copy(update={"points": points, "gaps": gaps})
+
+
+def monitor_rows(
+    track: Track, harbor: Harbor, current_at: Any, hour_of_day: int
+) -> tuple[EvidenceRow, ...]:
+    """WO-012 kinematic and context rows over ``track`` re-labelled ``ladder_monitor``."""
+    current_row = current_field_row(track, current_at)
+    segments = track_segments(track)
+    rows = extract_kinematics(track, harbor, current_at, segments=segments, current_row=current_row)
+    rows += extract_context(track, harbor, hour_of_day=hour_of_day)
+    out: list[EvidenceRow] = []
+    for r in rows:
+        if r.feature not in MONITOR_FEATURES:
+            continue
+        kind = EvidenceKind.FACT if r.kind is EvidenceKind.DERIVED else r.kind
+        out.append(
+            EvidenceRow(
+                contact_id=r.contact_id,
+                t=r.t,
+                feature=r.feature,
+                value=r.value,
+                unit=r.unit,
+                source=MONITOR_SOURCE,
+                confidence=r.confidence,
+                kind=kind,
+                probe_id=None,
+                assumes=r.assumes if kind is EvidenceKind.ASSUMPTION else "",
+            )
+        )
+    return tuple(sorted(out, key=lambda r: (r.feature.value, r.row_id)))
+
+
+def _number(rows: Iterable[EvidenceRow], feature: FeatureName) -> float | None:
+    for r in rows:
+        if r.feature is feature and isinstance(r.value, (int, float)):
+            if not isinstance(r.value, bool):
+                return round6(float(r.value))
+    return None
+
+
+def _text(rows: Iterable[EvidenceRow], feature: FeatureName) -> str | None:
+    for r in rows:
+        if r.feature is feature and isinstance(r.value, str) and r.value != "unknown":
+            return r.value
+    return None
+
+
+def _basin(harbor: Harbor, track: Track, asset_id: str | None) -> str | None:
+    """The basin a slow advisory would cover: the one holding the critical asset the contact
+    is nearest to (the asset the advisory protects), else the contact's own basin."""
+    ids = {a.asset_id for a in harbor.assets}
+    if asset_id is not None and asset_id in ids:
+        asset = harbor.asset(asset_id)
+        zone = harbor.zone_at(asset.lat, asset.lon)
+        if zone is not None:
+            return str(zone.basin)
+    last = track.points[-1]
+    own = harbor.zone_at(last.lat, last.lon)
+    return None if own is None else str(own.basin)
+
+
+class _RunnerHandoff(HandoffService):
+    """``HandoffService`` plus what runner v3 knows: the LOST_VEHICLE notice's search box
+    (over the whole evidence table, so carried-over rows resolve) and the recommendation's
+    ``question_for_human`` / ``uncertain``."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.notices: dict[str, LostVehicleNotice] = {}
+        self.recs: dict[str, Recommendation] = {}
+        self.table: EvidenceTable | None = None
+
+    def adapt(self, port: PortInputs, rows: Sequence[EvidenceRow]) -> WriterInputs:
+        cid = port.contact_id
+        notice = self.notices.get(cid)
+        if notice is not None and self.table is not None and port.kind == "final":
+            report = score_contact(self.table, cid, load_likelihood_tables(), load_prior_config())
+            rung = port.recommended_rung if port.recommended_rung is not None else port.rung
+            inputs = WriterInputs.from_report(
+                self.table,
+                report,
+                recommended_rung=rung,
+                search_box=notice.search_box,
+                decision_row_ids=notice.evidence_row_ids,
+                status=SitrepStatus.FINAL,
+            )
+        else:
+            inputs = super().adapt(port, rows)
+        rec = self.recs.get(cid)
+        if rec is not None:
+            inputs = dataclasses.replace(
+                inputs, question_for_human=rec.question_for_human, uncertain=rec.uncertain
+            )
+        return inputs
+
+
+class RunSession:
+    """One runner v3 execution, stepped one ladder tick at a time.
+
+    ``step() -> list[StepRecord]``; ``done``; ``tick``; ``pending_approvals()`` (contacts in
+    AWAITING_APPROVAL); ``open_requests()`` (what the approver was asked);
+    ``result() -> RunResultV3`` (valid at any time; final once ``done``).
+    """
+
+    def __init__(
+        self,
+        runner: ScenarioRunnerV3,
+        *,
+        llm_roles: bool = False,
+        violations_path: Path = DEFAULT_VIOLATIONS_PATH,
+        fixture_store: Any = None,
+        responder: ResponderPort | None = None,
+        orders_path: str | Path | None = STANDING_ORDERS_PATH,
+        unsigned: bool = False,
+        approver: ApproverPort | None = None,
+        approver_script: ApproverChoice | None = None,
+        toggles: Iterable[ToggleName | str] = (),
+        db_url: str | Path | None = None,
+        writer_mode: WriterModeV3 = "template",
+        sitrep_client: Any = None,
+        run_id: str | None = None,
+    ) -> None:
+        self.runner = runner
+        sc = runner.scenario
+        self.v2 = ScenarioRunnerV2.run(
+            runner,
+            llm_roles=llm_roles,
+            violations_path=violations_path,
+            fixture_store=fixture_store,
+            responder=responder,
+        )
+        names = sorted({ToggleName(t.name) for t in sc.toggles} | {ToggleName(t) for t in toggles})
+        self.toggles = tuple(names)
+        self.unsigned = bool(unsigned or orders_path is None)
+        self.orders = "unsigned" if self.unsigned else "signed"
+        self.run_id = run_id or f"{sc.id}-seed{runner.seed}-{self.orders}"
+        self.audit_db = ":memory:" if db_url is None else str(db_url)
+        self.audit = AuditLog(self.audit_db)
+        self.service = _RunnerHandoff(
+            sitrep_client,
+            self.audit,
+            run_id=self.run_id,
+            violations_path=violations_path,
+            writer_mode=writer_mode,
+        )
+        tick_s = float(self.v2.sim.tick_s)
+        self.detector = DepartureDetector.from_config(runner.harbor, tick_s)
+        script = None
+        if approver_script == "denied":
+            script = ApproverScript.denied()
+        elif approver_script == "unreachable":
+            script = ApproverScript.unreachable()
+        elif approver_script == "default":
+            script = ApproverScript.default()
+        self.driver = LadderDriver.from_config(
+            tick_s=tick_s,
+            hour_of_day=sc.hour_of_day,
+            orders_path=None if self.unsigned else orders_path,
+            unsigned=self.unsigned,
+            toggles=self.toggles,
+            approver=approver,
+            script=script,
+            departure=self.detector,
+            listeners=(self.service,),
+            sitrep_writer=self.service,
+        )
+        if self.service.sink is not None:
+            self.service.sink.clock = self.driver.clock
+        guards = self.driver.guards
+        reasons: tuple[ToggleName, ...] = ()
+        if isinstance(guards, BoundaryGuards):
+            reasons = guards.approver_status.degraded_reasons()
+        else:
+            degrading = {ToggleName.NETWORK_DOWN, ToggleName.APPROVER_UNREACHABLE}
+            reasons = tuple(t for t in self.toggles if t in degrading)
+        self.degraded_reasons = tuple(str(r.value) for r in reasons)
+        # The tail: config-sized, capped at the scenario's own length (2x in all).
+        self.tail_ticks = min(self.driver.max_tail_ticks, sc.duration_ticks)
+        self.driver.max_tail_ticks = 0
+        self.sim_ext = run_scenario(
+            sc,
+            seed=runner.seed,
+            ticks=sc.duration_ticks + self.tail_ticks,
+            harbor=runner.harbor,
+        )
+        cf = runner.current_field
+        self.current_at = current_at_from_field(
+            cf.vector_at, cf.phase_for_hour, hour_of_day=sc.hour_of_day
+        )
+        self.case_of: dict[str, str] = {}
+        self.feeds = self._feeds()
+        self.service.table = self.v2.evidence
+        for n in self.v2.notices:
+            if self.case_of.get(n.contact_id) == n.case_id:
+                self.service.notices[n.contact_id] = n
+        for case_id, rec in self.v2.recommendations.items():
+            cid = case_id.partition("#")[0]
+            if self.case_of.get(cid) == case_id:
+                self.service.recs[cid] = rec
+        self.session: DriverSession = self.driver.start(self.feeds)
+
+    # --- feeds ------------------------------------------------------------------------------
+
+    def _rows(self, ids: Iterable[str]) -> tuple[EvidenceRow, ...]:
+        table = self.v2.evidence
+        return tuple(table.get(i) for i in sorted(set(ids)) if i in table)
+
+    def _feeds(self) -> list[ContactFeed]:
+        v2 = self.v2
+        by_case: dict[str, list[Transition]] = {}
+        for t in v2.transitions:
+            by_case.setdefault(t.case_id, []).append(t)
+        calls: dict[str, list[dict[str, Any]]] = {}
+        for call in v2.probe_calls:
+            calls.setdefault(call.case_id, []).append(
+                {
+                    "probe_id": call.probe_id.value,
+                    "idempotency_key": call.idempotency_key,
+                    "cost_usd": call.cost_usd,
+                }
+            )
+        feeds: list[ContactFeed] = []
+        for case in v2.cases:  # sorted by case id; one ladder per contact (its first case)
+            cid = case.contact_id
+            if cid in self.case_of or case.case_id not in by_case:
+                continue
+            feed = self._feed(case, by_case[case.case_id], tuple(calls.get(case.case_id, ())))
+            if feed is not None:
+                self.case_of[cid] = case.case_id
+                feeds.append(feed)
+        return feeds
+
+    def _feed(
+        self, case: CaseResult, ts: list[Transition], calls: tuple[Mapping[str, Any], ...]
+    ) -> ContactFeed | None:
+        cid = case.contact_id
+        detected = next((t for t in ts if t.event is RunnerEvent.CONTACT_DETECTED), None)
+        if detected is None:
+            return None
+        watch = next((t for t in ts if t.from_state is S.WATCHING), None)
+        ask = next((t for t in ts if t.from_state is S.ASKING), None)
+        ask_outcome: str | None = None
+        ask_ids: list[str] = []
+        if ask is not None:
+            ask_ids = list(ask.evidence_row_ids)
+            if ask.to_state in (S.CLEARED_AT_ASK, S.LOST_VEHICLE):
+                ask_outcome = ask.to_state.value
+        track = self.sim_ext.tracks.get(cid)
+        points: tuple[TrackPoint, ...] = () if track is None else tuple(track.points)
+        snaps: list[Snapshot] = []
+        rec = self.v2.recommendations.get(case.case_id)
+        stop = next((t for t in ts if t.from_state is S.INVESTIGATING), None)
+        if rec is not None and stop is not None and rec.outcome.value in INVESTIGATION_OUTCOMES:
+            snaps.append(self._snapshot(cid, track, stop.tick, rec, rec.outcome.value, stop))
+            if rec.outcome is StopOutcome.HANDOFF and track is not None:
+                every = self.runner.match_cfg.evidence_every_ticks
+                for p in track.points:
+                    if p.tick > stop.tick and (p.tick - stop.tick) % every == 0:
+                        snaps.append(self._snapshot(cid, track, p.tick, rec, None, None))
+        return ContactFeed(
+            contact_id=cid,
+            detected_tick=detected.tick,
+            detection_rows=self._rows(detected.evidence_row_ids),
+            watch_tick=None if watch is None else watch.tick,
+            watch_rows=() if watch is None else self._rows(watch.evidence_row_ids),
+            ask_tick=None if ask is None else ask.tick,
+            ask_outcome=ask_outcome,
+            ask_rows=self._rows(ask_ids),
+            recommendations=tuple(snaps),
+            points=points,
+            probe_calls=calls,
+        )
+
+    def _snapshot(
+        self,
+        cid: str,
+        track: Track | None,
+        tick: int,
+        rec: Recommendation,
+        outcome: str | None,
+        stop: Transition | None,
+    ) -> Snapshot:
+        monitor: tuple[EvidenceRow, ...] = ()
+        prefix = None if track is None else _prefix(track, tick)
+        if prefix is not None:
+            monitor = monitor_rows(
+                prefix, self.runner.harbor, self.current_at, self.runner.scenario.hour_of_day
+            )
+        asset_id = _text(monitor, FeatureName.NEAREST_ASSET_ID)
+        basin = None if prefix is None else _basin(self.runner.harbor, prefix, asset_id)
+        cited: tuple[EvidenceRow, ...] = ()
+        if stop is not None:
+            cited = self._rows([*rec.evidence_row_ids, *stop.evidence_row_ids])
+        return Snapshot(
+            tick=tick,
+            rows=cited + monitor,
+            outcome=outcome,
+            recommended_rung=rec.recommended_rung,
+            threat_mass=round6(rec.threat_mass),
+            benign_mass=round6(rec.benign_mass),
+            basin=basin,
+            nearest_asset_id=asset_id,
+            time_to_nearest_critical_asset=_number(
+                monitor, FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET
+            ),
+        )
+
+    # --- stepping ---------------------------------------------------------------------------
+
+    @property
+    def done(self) -> bool:
+        return self.session.done
+
+    @property
+    def tick(self) -> int:
+        return self.session.tick
+
+    def step(self) -> list[StepRecord]:
+        """Advance the ladder (and the watch) one tick."""
+        t_s = 0.0
+        out: list[StepRecord] = []
+        for r in self.session.step():
+            t_s = round6(self.driver.clock.now_s())
+            out.append(_step_record(r, t_s))
+        return out
+
+    def pending_approvals(self) -> list[str]:
+        return self.session.pending_approvals()
+
+    def open_requests(self) -> list[tuple[str, ActionScope, str, float]]:
+        approver = self.driver.approver
+        if isinstance(approver, ManualApprover):
+            return approver.open_requests()
+        reqs = getattr(approver, "requests", [])
+        return [
+            (r.contact_id, r.scope, r.channel, r.requested_at)
+            for r in reqs
+            if hasattr(r, "contact_id")
+        ]
+
+    def approve(
+        self,
+        contact_id: str,
+        decision: Literal["granted", "denied"] = "granted",
+        token: Mapping[str, Any] | None = None,
+    ) -> None:
+        """A person's answer through a ``ManualApprover`` (delivered on the next step)."""
+        approver = self.driver.approver
+        if not isinstance(approver, ManualApprover):
+            raise TypeError("approve() needs ScenarioRunnerV3.start(approver=ManualApprover())")
+        approver.reply(contact_id, decision, self.driver.clock.now_s(), token=token)
+
+    def run_to_end(self) -> RunResultV3:
+        while not self.done:
+            self.step()
+        return self.result()
+
+    # --- result -----------------------------------------------------------------------------
+
+    def result(self) -> RunResultV3:
+        v2 = self.v2
+        runs = self.session.results()
+        tick_s = float(v2.sim.tick_s)
+        recs_by_contact = {
+            cid: v2.recommendations[case_id]
+            for cid, case_id in self.case_of.items()
+            if case_id in v2.recommendations
+        }
+        per_contact: dict[str, int] = {}
+        for cid in sorted(runs):
+            run = runs[cid]
+            rec = recs_by_contact.get(cid)
+            eyes = rec.interruptions if rec is not None else 0
+            asked = any(a.kind is ActionKind.REQUEST_APPROVAL for a in run.actions)
+            handoff = 1 if run.handling_outcome is S.HANDED_OFF and not asked else 0
+            per_contact[cid] = eyes + run.interruptions + handoff
+        for case_id, rec in v2.recommendations.items():  # contacts without a ladder run
+            cid = case_id.partition("#")[0]
+            if cid not in runs:
+                per_contact[cid] = per_contact.get(cid, 0) + rec.interruptions
+        probes = dict(v2.probes_used)
+        counts = Counter(
+            a.kind.value
+            for cid in sorted(runs)
+            for a in runs[cid].actions
+            if a.kind in INTERRUPTION_ACTIONS
+        )
+        for kind in sorted(INTERRUPTION_ACTIONS, key=lambda k: k.value):
+            probes[kind.value] = counts.get(kind.value, 0)
+        trans = _ladder_transitions(runs, self.case_of, tick_s)
+        packets = tuple(self.service.packets)
+        sitreps = {
+            cid: tuple(p.sitrep for p in packets if p.contact_id == cid)
+            for cid in sorted({p.contact_id for p in packets})
+        }
+        verify = self.audit.verify()
+        audit_counts = {
+            kind.value: len(self.audit.rows(run_id=self.run_id, kind=kind)) for kind in AuditKind
+        }
+        stats = Counter(c.source for c in v2.planner_choices)
+        watch = {cid: r.watch for cid, r in sorted(runs.items()) if r.watch is not None}
+        handling = {
+            cid: r.handling_outcome
+            for cid, r in sorted(runs.items())
+            if r.handling_outcome is not None
+        }
+        log_text = ladder_log_text(trans)
+        return dataclasses.replace(
+            _as_v3(v2),
+            interruptions=sum(per_contact.values()),
+            probes_used=dict(sorted(probes.items())),
+            ladder=MappingProxyType(dict(sorted(runs.items()))),
+            handling_outcome=MappingProxyType(handling),
+            sitreps=MappingProxyType(sitreps),
+            sitrep_packets=packets,
+            watch=MappingProxyType(watch),
+            audit_run_id=self.run_id,
+            audit_db=self.audit_db,
+            audit_head=verify.head,
+            audit_ok=verify.ok,
+            audit_counts=MappingProxyType(audit_counts),
+            ladder_transitions=trans,
+            ladder_log_hash=hashlib.sha256(log_text.encode("utf-8")).hexdigest(),
+            contact_interruptions=MappingProxyType(dict(sorted(per_contact.items()))),
+            contact_cases=MappingProxyType(dict(sorted(self.case_of.items()))),
+            planner_stats=MappingProxyType(dict(sorted(stats.items()))),
+            degraded_reasons=self.degraded_reasons,
+            orders=self.orders,
+            sim_extended=self.sim_ext,
+            tail_ticks=self.tail_ticks,
+            audit=self.audit,
+        )
+
+
+def _as_v3(v2: RunResultV2) -> RunResultV3:
+    return RunResultV3(**{f.name: getattr(v2, f.name) for f in dataclasses.fields(RunResultV2)})
+
+
+def _step_record(r: StepResult, t_s: float) -> StepRecord:
+    cid = None
+    if r.checkpoint is not None:
+        cid = r.checkpoint.contact_id
+    elif r.actions:
+        cid = r.actions[0].contact_id
+    return StepRecord(
+        tick=r.event.tick,
+        t_s=t_s,
+        contact_id=cid,
+        from_state=r.from_state,
+        to_state=r.to_state,
+        event=r.event.kind.value,
+        arg=r.event.arg,
+        transitioned=r.transitioned,
+        reason=r.reason,
+        actions=tuple(a.kind.value for a in r.actions),
+    )
+
+
+def _ladder_transitions(
+    runs: Mapping[str, LadderRun], case_of: Mapping[str, str], tick_s: float
+) -> tuple[LadderTransition, ...]:
+    rows: list[tuple[int, str, int, LadderTransition]] = []
+    for cid in sorted(runs):
+        run = runs[cid]
+        by_key = {a.idempotency_key: a for a in run.actions}
+        for cp in run.checkpoints:
+            acts = [by_key[k] for k in cp.action_keys if k in by_key]
+            first = acts[0] if acts else None
+            asset = next(
+                (a.scope.asset_id for a in acts if a.scope is not None and a.scope.asset_id),
+                None,
+            )
+            rows.append(
+                (
+                    cp.tick,
+                    cid,
+                    cp.seq,
+                    LadderTransition(
+                        seq=0,
+                        contact_id=cid,
+                        case_id=case_of.get(cid),
+                        tick=cp.tick,
+                        t_s=round6(cp.tick * tick_s),
+                        from_state=cp.from_state,
+                        to_state=cp.to_state,
+                        event=cp.event.kind.value,
+                        arg=cp.event.arg,
+                        action=None if first is None else first.kind.value,
+                        asset_id=asset,
+                        probe_id=None,
+                        rung=cp.rung,
+                        hash=cp.hash,
+                    ),
+                )
+            )
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    return tuple(dataclasses.replace(t, seq=i) for i, (_, _, _, t) in enumerate(rows))
+
+
+class ScenarioRunnerV3(ScenarioRunnerV2):
+    """Runner v3. ``run(**kw)`` equals ``start(**kw)`` stepped to the end."""
+
+    def start(
+        self,
+        *,
+        llm_roles: bool = False,
+        violations_path: Path = DEFAULT_VIOLATIONS_PATH,
+        fixture_store: Any = None,
+        responder: ResponderPort | None = None,
+        orders_path: str | Path | None = STANDING_ORDERS_PATH,
+        unsigned: bool = False,
+        approver: ApproverPort | None = None,
+        approver_script: ApproverChoice | None = None,
+        toggles: Iterable[ToggleName | str] = (),
+        db_url: str | Path | None = None,
+        writer_mode: WriterModeV3 = "template",
+        sitrep_client: Any = None,
+        run_id: str | None = None,
+    ) -> RunSession:
+        return RunSession(
+            self,
+            llm_roles=llm_roles,
+            violations_path=violations_path,
+            fixture_store=fixture_store,
+            responder=responder,
+            orders_path=orders_path,
+            unsigned=unsigned,
+            approver=approver,
+            approver_script=approver_script,
+            toggles=toggles,
+            db_url=db_url,
+            writer_mode=writer_mode,
+            sitrep_client=sitrep_client,
+            run_id=run_id,
+        )
+
+    def run(
+        self,
+        *,
+        llm_roles: bool = False,
+        violations_path: Path = DEFAULT_VIOLATIONS_PATH,
+        fixture_store: Any = None,
+        responder: ResponderPort | None = None,
+        orders_path: str | Path | None = STANDING_ORDERS_PATH,
+        unsigned: bool = False,
+        approver: ApproverPort | None = None,
+        approver_script: ApproverChoice | None = None,
+        toggles: Iterable[ToggleName | str] = (),
+        db_url: str | Path | None = None,
+        writer_mode: WriterModeV3 = "template",
+        sitrep_client: Any = None,
+        run_id: str | None = None,
+    ) -> RunResultV3:
+        return self.start(
+            llm_roles=llm_roles,
+            violations_path=violations_path,
+            fixture_store=fixture_store,
+            responder=responder,
+            orders_path=orders_path,
+            unsigned=unsigned,
+            approver=approver,
+            approver_script=approver_script,
+            toggles=toggles,
+            db_url=db_url,
+            writer_mode=writer_mode,
+            sitrep_client=sitrep_client,
+            run_id=run_id,
+        ).run_to_end()
+
+
+def with_toggles(scenario: Scenario, *names: ToggleName | str) -> Scenario:
+    """A copy of ``scenario`` with ``names`` added to its toggles."""
+    have = {t.name for t in scenario.toggles}
+    extra = tuple(Toggle(name=ToggleName(n)) for n in names if ToggleName(n) not in have)
+    return scenario.model_copy(update={"toggles": scenario.toggles + extra})
+
+
+def ladder_main(argv: Sequence[str] | None = None) -> int:
+    """``python -m soundings.runner ladder --scenario S05 --seed 11 [--orders PATH]
+    [--unsigned] [--toggle NAME] [--sitrep-out PATH] [--audit-db PATH]``: runner v3, then
+    canonical JSON of every ``LadderRun`` (no ``--orders``: the unsigned guard set).
+    ``--audit-db`` is WO-042's hash-chained log (replaced if present); ``--sitrep-out``
+    writes every delivered SITREP's markdown. ``python -m soundings.ladder`` stays part A's
+    synthetic stream: the ladder package may not reach the sim (tests/test_boundary.py)."""
+    ap = argparse.ArgumentParser(prog="python -m soundings.runner ladder")
+    ap.add_argument("--scenario", default="S05", help="catalog id (S05), smoke, or a path")
+    ap.add_argument("--seed", type=int, default=None, help="default: the scenario's seed")
+    ap.add_argument("--orders", type=Path, default=None, help="standing orders YAML")
+    ap.add_argument("--unsigned", action="store_true", help="ignore the standing orders")
+    ap.add_argument("--toggle", action="append", default=[], choices=[t.value for t in ToggleName])
+    ap.add_argument("--sitrep-out", type=Path, default=None)
+    ap.add_argument("--audit-db", type=Path, default=None)
+    args = ap.parse_args(argv)
+    if args.audit_db is not None and args.audit_db.exists():
+        args.audit_db.unlink()
+    runner = ScenarioRunnerV3(args.scenario, seed=args.seed)
+    unsigned = args.unsigned or args.orders is None
+    result = runner.run(
+        orders_path=args.orders, unsigned=unsigned, toggles=args.toggle, db_url=args.audit_db
+    )
+    runs = result.ladder
+    doc = {
+        "scenario": runner.scenario.id,
+        "seed": runner.seed,
+        "orders": "unsigned" if unsigned else "signed_file",
+        "toggles": sorted(args.toggle),
+        "audit_head": result.audit_head,
+        "audit_ok": result.audit_ok,
+        "ladder_log_hash": result.ladder_log_hash,
+        "runs": [runs[cid].canonical() for cid in sorted(runs)],
+    }
+    sys.stdout.write(canonical_json(doc) + "\n")
+    if args.sitrep_out is not None:
+        args.sitrep_out.write_text(
+            "\n".join(p.markdown for p in result.sitrep_packets), encoding="utf-8"
+        )
+    if result.audit is not None:
+        result.audit.close()
+    return 0
+
+
+_main_v1 = main
+
+
+def main(argv: Sequence[str] | None = None) -> int:  # type: ignore[no-redef]
+    """``python -m soundings.runner verify [...]`` runs the catalog verifier and
+    ``python -m soundings.runner ladder [...]`` runner v3 (WO-043); every other invocation
+    is the unchanged runner v1 CLI."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "verify":
+        from soundings.eval.catalog_verify import main as verify_main
+
+        return verify_main(args[1:])
+    if args and args[0] == "ladder":
+        return ladder_main(args[1:])
+    return _main_v1(args)
+
+
+# --- WO-043 end: runner v3 ---
 # --- end v3 (WO-043) ---
 
 # --- sim_likelihoods (WO-051) ---
