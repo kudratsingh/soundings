@@ -116,7 +116,14 @@ watch (kinematic evidence). Indirectly slow and hold, through `time_to_nearest_c
 - §3: no threshold changes. A flip of the flag can move contacts across the `config/ladder.yaml` 600 s and 300 s edges, so a flip also needs the WO-043 catalog verify (`python -m soundings.ladder.verify --suite catalog`) green before merge.
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see STATE.md row · Merged commit: see STATE.md · Test summary: 1436 passed (tests/test_kalman.py 12, tests/test_kalman_vs_window.py 12) · STATE.md updated: yes
+
+- Dependency adds: none (pure numpy; `filterpy` not added).
+- Straight track (seed 7, sigma 15 m): raw RMSE 19.770 m, smoothed 7.004 m, 60 s projection error 14.2 m; over seeds 1-20 the worst smoothed/raw ratio is 0.417 and the worst 60 s error 26.9 m (matches the prototype).
+- S05/S06 comparison (`artifacts/wo-084/kalman_vs_window.json`, q 0.002): closing-rate RMSE S05 kalman 0.367343 vs window 2.623047 m/s (269 ticks); S06 kalman 0.374161 vs window 0.951129 m/s (369 ticks); S05 time-to-asset MAE kalman 201.52 vs window 316.00 s (109 ticks with truth time in (0, 1200] s); S06 has no closing tick under 1200 s. Kalman lowers error on both, the full suite (every existing catalog outcome test) passes with the flag on, so `closing_velocity_source: kalman`.
+- Scope of the flip: only `build_evidence(velocity_source=None)` reads the flag. `soundings/runner.py` calls `extract_kinematics` with its `window` default (runner.py is not a WO-084 file), so ladder and runner outcomes are unchanged; `soundings.ladder.verify` is not on main.
+- With `velocity_source="window"` the evidence table hash equals main's (abe8dae) for S01-S08 at catalog seeds (checked against main's `features.py` loaded side by side).
+- Cut items: none dropped (hypothesis SPD check, ProjectionView lat/lon and the 8-scenario flag-on test all shipped).
 
 ## Notes for downstream
 - WO-086: the radar scope draws `ProjectionView.proj_lat/proj_lon` and an ellipse with `semi_major_m`, `semi_minor_m` and `orientation_deg` (compass, major axis). Label it "60 s projection (95%, stress-test estimate)".
