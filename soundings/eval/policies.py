@@ -1055,3 +1055,102 @@ def make_policy(name: str | PolicyName, **kw: Any) -> Policy:
     module = importlib.import_module(SOUNDINGS_POLICY_MODULE)
     policy: Policy = module.SoundingsPolicy(**kw)
     return policy
+
+
+# --- WO-086 begin: shared ledger counting helpers ---
+# The rung ledger on the watch screen and the eval report count with these, so the two
+# agree on the same run by construction. Nothing here changes an existing count.
+
+
+@runtime_checkable
+class StateStep(Protocol):
+    """One step of one contact: eval ``Transition`` and stream ``TransitionPayload`` fit."""
+
+    @property
+    def contact_id(self) -> str: ...
+
+    @property
+    def to_state(self) -> LadderState: ...
+
+
+class LedgerBucket(StrEnum):
+    """Where a contact sits on the rung ledger: the bucket of its max rung so far."""
+
+    RESOLVED_AT_WATCH = "resolved_at_watch"
+    CLEARED_AT_ASK = "cleared_at_ask"
+    ADVISORIES = "advisories"
+    HOLDS = "holds"
+    HANDED_OFF = "handed_off"
+
+
+LEDGER_BUCKET_OF_RUNG: dict[Rung, LedgerBucket] = {
+    Rung.WATCH: LedgerBucket.RESOLVED_AT_WATCH,
+    Rung.ASK: LedgerBucket.CLEARED_AT_ASK,
+    Rung.SLOW: LedgerBucket.ADVISORIES,
+    Rung.HOLD: LedgerBucket.HOLDS,
+    Rung.HAND_TO_PERSON: LedgerBucket.HANDED_OFF,
+}
+"""One to one, in rung order."""
+
+
+def contact_max_rung(steps: Iterable[StateStep]) -> Rung:
+    """``max_rung`` over one contact's steps; a contact with no rung yet is at watch (as
+    ``ContactOutcome.max_rung`` for a span with no transitions)."""
+    # max_rung reads only ``to_state``, which every StateStep carries.
+    return max_rung(steps) or Rung.WATCH  # type: ignore[arg-type]
+
+
+def _empty_ledger() -> dict[LedgerBucket, int]:
+    return {b: 0 for b in LedgerBucket}
+
+
+def rung_ledger(steps: Iterable[StateStep], *, seen: Iterable[str] = ()) -> dict[LedgerBucket, int]:
+    """Contacts per bucket: each contact in ``seen`` or in ``steps`` counts once, in the
+    bucket of its max rung (built on ``max_rung``)."""
+    by_contact: dict[str, list[StateStep]] = {cid: [] for cid in seen}
+    for step in steps:
+        by_contact.setdefault(step.contact_id, []).append(step)
+    out = _empty_ledger()
+    for cid in sorted(by_contact):
+        out[LEDGER_BUCKET_OF_RUNG[contact_max_rung(by_contact[cid])]] += 1
+    return out
+
+
+def ledger_from_run(run: PolicyRun) -> dict[LedgerBucket, int]:
+    """The ledger of a finished run: ``ContactOutcome.max_rung`` per observed contact."""
+    out = _empty_ledger()
+    for c in run.contacts:
+        out[LEDGER_BUCKET_OF_RUNG[c.max_rung]] += 1
+    return out
+
+
+def _is_closure_step(t: Transition) -> bool:
+    if t.event is PolicyEvent.COVERED_BY_CLOSURE:
+        return True
+    return t.event is PolicyEvent.APPROVAL_REQUESTED and t.action == CLOSURE_ACTION
+
+
+def closure_contacts(transitions: Iterable[Transition]) -> tuple[str, ...]:
+    """Contacts a closure covers (its own request or an open closure), first step order."""
+    out: dict[str, None] = {}
+    for t in transitions:
+        if _is_closure_step(t):
+            out.setdefault(t.contact_id, None)
+    return tuple(out)
+
+
+def closure_count(transitions: Iterable[Transition]) -> int:
+    """Berth closures under the blunt policy: one per covered contact (DECISIONS 06:37)."""
+    return len(closure_contacts(transitions))
+
+
+def closure_episodes(transitions: Iterable[Transition]) -> int:
+    """Distinct closure episodes (one per closure request); the secondary number."""
+    return sum(
+        1
+        for t in transitions
+        if t.event is PolicyEvent.APPROVAL_REQUESTED and t.action == CLOSURE_ACTION
+    )
+
+
+# --- WO-086 end ---
