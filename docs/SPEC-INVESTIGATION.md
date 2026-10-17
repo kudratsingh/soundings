@@ -134,3 +134,62 @@ Every outcome produces a SITREP whose "recommended rung" is computed here, deter
 8. Stretch items from `BUILD-PLAN.md`.
 9. Re-acquisition: when a track drops and returns, match to the prior contact by position, speed, and drift box; carry the evidence table over. Tested on S02.
 10. Confidence per reading scales with range and sensor_health; the posterior weights each row by its confidence.
+
+---
+
+## Amendments (2026-10-17)
+
+Appended; the text above is unchanged. Each item names its source. Where an item differs from the text above, the item wins.
+
+**§7 stopping rule: `C_KNOWN_OPERATOR` clause (DECISIONS 2026-10-16 23:05; WO-033).**
+- Clause precedence: `C_CLEARED`, `C_LOST`, `C_THREAT`, `C_KNOWN_OPERATOR`, `C_BENIGN`, `C_BUDGET`.
+- `C_KNOWN_OPERATOR`: top hypothesis `UNFILED_KNOWN_OPERATOR` ∧ `P(UNFILED_KNOWN_OPERATOR) ≥ benign_mass_resolve` ∧ `hail_reply = valid` ∧ `operator_known` ∧ not (`time_to_nearest_critical_asset < benign_time_guard_s`) → `RESOLVED_BENIGN`. No new threshold: it reuses `benign_mass_resolve` and `benign_time_guard_s`.
+- Why: §3 leaves `UNFILED_KNOWN_OPERATOR` out of `benign_mass`, so S04 could never resolve benign. `C_THREAT` still wins over it.
+- A refused planner choice (over budget, above rung, past the last tick) counts as budget exhausted (`C_BUDGET`, `uncertain`; DECISIONS 06:09).
+
+**§6 budget scope (DECISIONS 2026-10-16 23:05).**
+- `probes_per_contact` counts planner-chosen probes only; the fixed watch sweep is not counted.
+- The ask-rung `acoustic_hail` counts as a paid probe against `paid_probes_per_contact`.
+
+**One interruption definition (DECISIONS 2026-10-16 23:05 and 23:38; CLAUDE.md §8 A5).**
+- An interruption is any event that requires the watch officer or backup approver to look or act: an approval request (incl. berth reopen), a backup page, the handoff SITREP to the officer, `request_watch_officer_look`.
+- Not interruptions: operator notices (e.g. LOST_VEHICLE to the plan's operator), watch-after-handoff updates, blocked out-of-scope separation advisories (DECISIONS 06:37).
+- Catalog `max_human_interruptions`, the eval, the baselines and the rung ledger use this one definition.
+
+**§5 probe table: responder rows (WO-088; CLAUDE.md §8 A2, A3).**
+
+| probe | rung | cost | latency | returns |
+|---|---|---|---|---|
+| `responder_look` | ask | responder battery minutes (drain ∝ v³) | transit time to station at standoff | a look at the contact from standoff (visual class, visibility) |
+| `responder_search_box` | ask | responder battery minutes (drain ∝ v³) | transit time to the box | a look over a LOST_VEHICLE search box |
+
+- One dispatch per contact; standoff ≥ 25 m; inside the geofence only. Leaving the geofence, standoff < 25 m or a second vehicle needs a person (SPEC-LADDER amendments).
+- The planner may request a look, never a position; a reply naming a position or waypoint is rejected by the guard and logged to VIOLATIONS.md.
+- §5's "No probe exists at or above `slow`" stands. Names, units and costing details are fixed by the WO-088 file (not yet on `main`).
+
+**Kalman smoothing flag (WO-084; DECISIONS 06:37 and 06:59).**
+- `config/tracking.yaml` holds the filter noise (q 0.002 m²/s³) and `closing_velocity_source`.
+- Ruling: the flag stays `window` unless the Kalman variant lowers closing-rate error on S05/S06 **and** every catalog outcome still holds; the comparison is reported either way.
+- Outcome: `artifacts/wo-084/kalman_vs_window.json` met both conditions, so the flag is `kalman`, read only by `build_evidence(velocity_source=None)`; the runner still calls `extract_kinematics` with `window`, so ladder outcomes did not move.
+- Kalman closing rows derive from the full track segment; `soundings/investigation/kalman.py` reads no ground truth.
+
+**Surge triage queue (WO-085; DECISIONS 06:37).**
+- Under `contact_surge(n)` investigations are admitted to a fixed number of slots (4) by a deterministic priority from evidence rows and the posterior; ties break by `contact_id`, then `case_id`.
+- One serial officer channel (120 s per item, `config/eval.yaml`) grants interruptions by triage priority; eyes-on capped at 2/h; values labeled stress-test.
+- Handoffs and approvals are ordered, never refused: triage may delay a handoff, never drop it.
+- Exit: BT-01 + `contact_surge(25)`: the rogue is handed off within its budget; interruptions/hour ≤ the no-surge run + 1; order deterministic.
+
+**Planner ablation and "Where the LLM layer added nothing" (WO-051 addendum item 3).**
+- After the fixture run: LLM planner vs deterministic vs random probe order on S04–S08 and BT-01; report probes used, seconds seen→handled, missed threats, interruptions.
+- The section is auto-populated from the diff. If the LLM layer added nothing, the report says so plainly. Until fixtures exist the section states that both planner paths are the fallback.
+
+**§6 bounded live mode (WO-087; CLAUDE.md §8 A4).**
+- `MODEL_MODE=live` honors `LIVE_CALL_BUDGET` (persisted counter; a corrupt counter file counts as exhausted), a 6 s per-call timeout, and falls back to the deterministic planner on any error, timeout or exhausted budget.
+- Every call writes an `llm_call` audit row with its path (live | replay | fallback) and reason; the UI badge shows "model: live" or "model: fallback".
+- The guard is unchanged: a live reply naming a rung or a tool call is rejected exactly as a fixture would be. CI refuses `live` before any transport call.
+- Off by default; enabled only Sunday by `approve paid run stage live budget 40`. Paid-run budget for now: $15 total (DECISIONS 06:40).
+
+**Boundary claim: "the investigator cannot peek" (owner directive 2026-10-17).**
+- `soundings/investigation` (and `soundings/ladder`) import nothing from `soundings/sim`.
+- No code path outside `soundings/eval` reads a scenario's ground truth (`ground_truth`); the sim's truth tables (`truth_paths`, `contact_truth`) stay out of decision paths (WO-012, WO-080, WO-084 rules).
+- Enforced by `tests/test_boundary.py`, wired into CI (to be added by the boundary-test change; not yet on `main` at the time of writing).
