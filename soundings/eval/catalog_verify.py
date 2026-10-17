@@ -65,6 +65,12 @@ class Graded:
     box_contains_truth: bool | None = None
     lineage: tuple[str, ...] = ()
     detail: dict[str, Any] = field(default_factory=dict)
+    # --- WO-094 begin ---
+    lineage_interruptions: int = 0
+    """The lineage roll-up: the per-id counts summed, less a re-acquired id's handoff
+    SITREP when an earlier id of the lineage was already handed off (a watch-after-handoff
+    update, not an interruption; runner ``lineage_interruption_view``)."""
+    # --- WO-094 end ---
 
 
 def _gt_contacts(result: Any) -> list[str]:
@@ -117,6 +123,10 @@ def grade(result: Any) -> Graded:
         has_search_box=bool(boxes),
         box_contains_truth=contains,
         lineage=tuple(lineage),
+        # --- WO-094 begin ---
+        lineage_interruptions=sum(int(result.contact_interruptions.get(c, 0)) for c in lineage)
+        - sum(1 for c in lineage if c in getattr(result, "repeat_handoffs", ())),
+        # --- WO-094 end ---
     )
 
 
@@ -214,6 +224,7 @@ def verify_scenario(
         "visited": [s.value for s in g.visited],
         "threat_mass": g.threat_mass,
         "interruptions": list(g.interruptions),
+        "lineage_interruptions": g.lineage_interruptions,  # WO-094
         "probes": list(g.probes),
         "failures": [asdict(f) for f in failures],
     }
@@ -242,7 +253,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             mark = "ok  " if r["ok"] else "FAIL"
             sys.stdout.write(
                 f"{mark} {r['scenario']} seed={r['seed']} terminal={r['terminal_state']} "
-                f"interruptions={r['interruptions']} audit={'ok' if r['audit_ok'] else 'broken'}"
+                f"interruptions={r['interruptions']} lineage={r['lineage_interruptions']} "
+                f"audit={'ok' if r['audit_ok'] else 'broken'}"
                 f"{'' if r['ok'] else ' ' + json.dumps(r['failures'])}\n"
             )
     return 0 if ok else 1
