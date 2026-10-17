@@ -108,7 +108,7 @@ watch, ask (the evidence guards), slow and hold (states and rows exist; nothing 
 - §2.5: `test_vocabulary_clean` and the grep.
 
 ## Done
-PR: see the PR for branch `wo/040-ladder-machine` · Merged commit: squash commit on main (see PR) · Test summary: `385 passed` (full suite; ladder/clock files 55 tests incl. 2,000-example property test) · STATE.md updated: yes
+PR: [#6](https://github.com/kudratsingh/soundings/pull/6) · Merged commit: squash commit on main (see PR #6) · Test summary: `450 passed` after merging main (385 before) (full suite; ladder/clock files 55 tests incl. 2,000-example property test) · STATE.md updated: yes
 
 - Events `timer(hold_limit|slow_limit)`, `scope_exceeded`, `handoff_complete` are in `EventKind` (SPEC-LADDER §2 already carries the 23:05 addition line on main, so no spec edit was needed).
 - Exit tests: all pass, including `-k pythonhashseed` (subprocess hashes under PYTHONHASHSEED 0 and 1 identical; in-process chain heads equal) and the denylist grep (empty). Nothing from the cut line was dropped.
