@@ -1,21 +1,29 @@
 // The watch-officer screen (WO-060): one screen, no routing. WO-061 and WO-062 each add one
 // marked block here; nothing else changes. Nothing on this screen can set a rung.
+//
+// Design pass B1 (2026-10-17): a case-centric command center. A case is one contact lineage
+// (re-acquired ids merged). The top bar holds one line; under it the NOW line for the
+// selected case and the last five KEY MOMENTS across cases; the map fills the left; the right
+// rail holds the CASES list, the CASE VIEW (one column of steps) and the ladder.
 
-import { useEffect, useMemo, useState } from 'react'
-import type { AboutInfo, BoundaryInfo, HarborGeoJson, ScenarioInfo } from './api'
-import { fetchAbout, fetchBoundary, fetchHarbor, fetchScenarios, startRun } from './api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { AboutInfo, BoundaryInfo, HarborGeoJson, ModelModeInfo, ScenarioInfo } from './api'
+import { fetchAbout, fetchBoundary, fetchHarbor, fetchModelMode, fetchScenarios, modelBadge, startRun } from './api'
+import type { CaseSummary, Tone } from './cases'
+import { caseItems, caseOf, mostSevere, nowLine, summarize } from './cases'
 import AboutPanel from './components/AboutPanel'
 import ApprovalButton from './components/ApprovalButton'
-import ContactCard from './components/ContactCard'
-import ContactList from './components/ContactList'
-import EvidenceLedger from './components/EvidenceLedger'
+import CaseList from './components/CaseList'
+import CaseView from './components/CaseView'
+import { KeyMoments, NowLine } from './components/GlobalStrip'
+import type { MapStyle } from './components/HarborMap'
 import HarborMap from './components/HarborMap'
 import RungIndicator from './components/RungIndicator'
 import ScenarioPicker from './components/ScenarioPicker'
 import SitrepDrawer from './components/SitrepDrawer'
-import StateTimeline from './components/StateTimeline'
-import type { Rung } from './events'
-import { autoSelect, useRun } from './useRun'
+import type { EvidenceRow, Rung } from './events'
+import { RUNG_LABEL } from './events'
+import { useRun } from './useRun'
 // --- WO-062P begin ---
 import PresenterMode from './components/PresenterMode'
 // --- WO-062P end ---
@@ -30,6 +38,8 @@ import ResponderLayer from './components/ResponderLayer'
 export const TAGLINE = 'Resolve every unknown underwater contact at the gentlest rung that works.'
 
 const RECENT_TICKS = 30
+/** A key moment flashes its case's card border while it is this fresh (ticks). */
+const FLASH_TICKS = 3
 
 // --- WO-088 begin ---
 /** Where the contact the responder is looking at was last seen (null when not seen). */
@@ -40,6 +50,17 @@ function responderTarget(run: ReturnType<typeof useRun>): [number, number] | nul
 }
 // --- WO-088 end ---
 
+/** A counter that moves only when some element of `list` changes identity (copy-on-write). */
+function useIdentityVersion(list: readonly unknown[]): number {
+  const prev = useRef<readonly unknown[]>([])
+  const version = useRef(0)
+  if (list.length !== prev.current.length || list.some((x, i) => x !== prev.current[i])) {
+    prev.current = list
+    version.current += 1
+  }
+  return version.current
+}
+
 function useParams() {
   return useMemo(() => {
     const p = new URLSearchParams(window.location.search)
@@ -48,8 +69,20 @@ function useParams() {
       seed: p.get('seed') ?? '',
       speed: p.get('speed') ?? '',
       tilesOn: p.get('tiles') !== 'off',
+      mapStyle: (p.get('style') === 'chart' ? 'chart' : 'radar') as MapStyle,
     }
   }, [])
+}
+
+/** The boundary-table line for the active rung: who decides what there. */
+function boundaryReason(boundary: BoundaryInfo | null, rung: Rung): string {
+  if (!boundary) return ''
+  const rows = boundary.rows.filter((r) => r.rung === rung)
+  if (!rows.length) return `${RUNG_LABEL[rung]}: nothing is decided here`
+  const byCell = new Map<string, string[]>()
+  for (const r of rows) byCell.set(r.cell, [...(byCell.get(r.cell) ?? []), r.action.replaceAll('_', ' ')])
+  const parts = [...byCell].map(([cell, actions]) => `${cell.replaceAll('_', ' ')}: ${actions.join(', ')}`)
+  return `${RUNG_LABEL[rung]} · ${parts.join(' · ')}`
 }
 
 function App() {
@@ -58,6 +91,7 @@ function App() {
   const [about, setAbout] = useState<AboutInfo | null>(null)
   const [boundary, setBoundary] = useState<BoundaryInfo | null>(null)
   const [harbor, setHarbor] = useState<HarborGeoJson | null>(null)
+  const [model, setModel] = useState<ModelModeInfo | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
@@ -77,6 +111,7 @@ function App() {
 
   const begin = (scenario: string, seed: number | null, speed: number | null) => {
     setPicked(null)
+    setHighlight(null)
     startRun(scenario, seed, speed)
       .then((r) => {
         setRunId(r.run_id)
@@ -94,49 +129,91 @@ function App() {
     fetchAbout().then(setAbout).catch((e: unknown) => setProblem(String(e)))
     fetchBoundary().then(setBoundary).catch((e: unknown) => setProblem(String(e)))
     fetchHarbor().then(setHarbor).catch((e: unknown) => setProblem(String(e)))
+    fetchModelMode()
+      .then(setModel)
+      .catch(() => setModel(null)) // the badge falls back to "model: replay"
     if (params.scenario) {
       begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
     }
   }, [])
 
-  const selected = picked ?? autoSelect(run)
-  const visible = Object.values(run.contacts).filter((c) => run.tick - c.lastTick <= RECENT_TICKS || c.contact_id === selected)
-  const caseIds = Object.keys(run.rungOf).sort()
-  const activeRung: Rung = selected && run.rungOf[selected] ? run.rungOf[selected].rung : 'watch'
-  const selectedState = selected ? run.stateOf[selected] : undefined
-  const colors = about?.colors
-  const styleVars = colors
-    ? ({ '--fact': colors.fact, '--assumption': colors.assumption, '--derived': colors.derived } as React.CSSProperties)
-    : undefined
+  const tickS = run.started?.tick_s ?? 2
+  const cases = useMemo(() => summarize(run.cases, run.rungOf), [run.cases, run.rungOf])
+  const selectedCase = picked !== null ? caseOf(run.cases, picked) : mostSevere(cases)
+  const summary: CaseSummary | undefined = cases.find((c) => c.id === selectedCase)
+  const memberKey = summary?.members.join(',') ?? ''
+  const memberTracks = summary ? summary.members.map((m) => run.cases.tracks[m]) : []
+  // The member tracks are copy-on-write: the case view recomputes only when its own case moved.
+  const tracksVersion = useIdentityVersion(memberTracks)
+  const caseRows = useMemo(() => {
+    const out: EvidenceRow[] = []
+    for (const t of memberTracks) if (t) out.push(...t.rows)
+    return out.sort((a, b) => a.t - b.t)
+  }, [memberKey, tracksVersion])
+  const items = useMemo(() => {
+    if (!summary) return []
+    const index = new Map(caseRows.map((r) => [r.row_id, r] as const))
+    return caseItems(run.cases, summary.members, run.posteriorOf, index)
+  }, [memberKey, caseRows, run.posteriorOf, summary?.state])
+  const now = nowLine(summary, items, tickS)
+
+  // Map: case colour per contact id, the selected lineage, and labels.
+  const { toneOf, caseLabel } = useMemo(() => {
+    const tone: Record<string, Tone> = {}
+    const label: Record<string, string> = {}
+    for (const c of cases)
+      for (const m of c.members) {
+        tone[m] = c.tone
+        label[m] = c.id
+      }
+    return { toneOf: tone, caseLabel: label }
+  }, [cases])
+  const selectedIds = useMemo(() => new Set(summary?.members ?? []), [memberKey])
+  const visible = Object.values(run.contacts).filter((c) => run.tick - c.lastTick <= RECENT_TICKS || selectedIds.has(c.contact_id))
+
+  // Key moments that are fresh flash their case's border.
+  const flashOf = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const m of run.cases.moments) if (run.tick - m.tick <= FLASH_TICKS) out[caseOf(run.cases, m.contact_id)] = m.seq
+    return out
+  }, [run.cases, run.tick])
+
+  const activeRung: Rung = summary?.rung ?? 'watch'
+  const speed = run.started ? run.started.speed : null
 
   return (
-    <div className="app" style={styleVars}>
-      <header className="top">
-        <div className="title">
-          <strong>Soundings</strong>
-          <span className="muted small">{TAGLINE}</span>
-        </div>
-        <div className="status">
-          <span data-testid="scenario-label">
-            {run.started ? `${run.started.scenario_id} · ${run.started.scenario_name} · seed ${run.started.seed}` : 'no run'}
-          </span>
-          <span className="clock">
-            t = {run.t_s.toFixed(0)} s · tick {run.tick}
-          </span>
-          <span className="badge">model: replay</span>
-          <span className="badge state" data-testid="state-badge">
-            {selected ? `${selected}: ${selectedState ?? 'DETECTED'}` : 'no contact'}
-          </span>
-          {run.finished && <span className="badge">run finished</span>}
-          <button type="button" data-testid="sitrep-open" onClick={() => setSitrepOpen((o) => !o)}>
-            SITREP{run.sitreps.length ? ` (${run.sitreps.length})` : ''}
-          </button>
-          <button type="button" data-testid="about-open" onClick={() => setAboutOpen(true)}>
-            About
-          </button>
-        </div>
-        <ScenarioPicker scenarios={scenarios} initial={params} onStart={begin} />
+    <div className={`app style-${params.mapStyle}`}>
+      <header className="topbar">
+        <strong className="mark" title={TAGLINE}>
+          Soundings
+        </strong>
+        <span className="scn" data-testid="scenario-label">
+          {run.started ? `${run.started.scenario_id} · ${run.started.scenario_name} · seed ${run.started.seed}` : 'no run'}
+        </span>
+        {speed !== null && <span className="tb-item num">{speed === 0 ? 'unpaced' : `${speed}×`}</span>}
+        <span className="clock num" data-testid="clock">
+          t {run.t_s.toFixed(0)} s · tick {run.tick}
+        </span>
+        <span className="badge" data-testid="model-badge">
+          {model ? modelBadge(model) : 'model: replay'}
+        </span>
+        {run.finished && <span className="badge">run finished</span>}
+        <span className="spacer" />
+        <ScenarioPicker scenarios={scenarios} initial={params} onStart={begin} running={run.started !== null} />
+        <button type="button" data-testid="sitrep-open" onClick={() => setSitrepOpen((o) => !o)}>
+          SITREP{run.sitreps.length ? ` (${run.sitreps.length})` : ''}
+        </button>
+        <button type="button" data-testid="about-open" onClick={() => setAboutOpen(true)}>
+          About
+        </button>
       </header>
+      <div className="strip">
+        <NowLine text={now} tone={summary?.tone ?? 'unknown'} />
+        <KeyMoments moments={run.cases.moments} caseOf={(cid) => caseOf(run.cases, cid)} tickS={tickS} onSelect={setPicked} />
+        <span className="rows-total label num" data-testid="rows-total" data-rows={run.cases.totalRows}>
+          {run.cases.totalRows.toLocaleString('en-US')} evidence rows · {cases.length} case{cases.length === 1 ? '' : 's'}
+        </span>
+      </div>
       {problem && <div className="problem">{problem}</div>}
       <main className="body">
         <HarborMap
@@ -144,27 +221,38 @@ function App() {
           about={about}
           tilesOn={params.tilesOn}
           contacts={visible}
-          selected={selected}
+          selected={summary?.latest ?? null}
           onSelect={(id) => setPicked(id)}
           ranges={ranges} // WO-089
+          toneOf={toneOf}
+          selectedIds={selectedIds}
+          caseLabel={caseLabel}
+          mapStyle={params.mapStyle}
+          tickS={tickS}
           // --- WO-088 begin ---
           overlay={<ResponderLayer responder={run.responder} target={responderTarget(run)} />}
           // --- WO-088 end ---
         />
-        <div className="side">
-          <RungIndicator active={activeRung} livesOn={boundary?.lives_on ?? ['ask', 'hand_to_person']} />
-          <ContactList ids={caseIds} stateOf={run.stateOf} rungOf={run.rungOf} selected={selected} onSelect={setPicked} auto={picked === null} />
-          <ContactCard
-            contact={selected ? (run.contacts[selected] ?? null) : null}
-            state={selectedState}
-            rung={selected ? run.rungOf[selected] : undefined}
-            rows={selected ? (run.rowsByContact[selected] ?? []) : []}
-            posterior={selected ? run.posteriorOf[selected] : undefined}
+        <aside className="rail">
+          <CaseList cases={cases} selected={selectedCase} auto={picked === null} tick={run.tick} tickS={tickS} flashOf={flashOf} onSelect={setPicked} />
+          <CaseView
+            summary={summary}
+            items={items}
+            rows={caseRows}
+            timeline={run.timeline}
+            tickS={tickS}
+            highlight={highlight}
+            flash={summary ? flashOf[summary.id] : undefined}
+            onOpenSitrep={() => setSitrepOpen(true)}
           />
-          <ApprovalButton pending={run.pendingApproval} />
-          <EvidenceLedger rows={selected ? (run.rowsByContact[selected] ?? []) : []} highlight={highlight} />
-          <StateTimeline entries={run.timeline} selected={selected} />
-        </div>
+          <section className="ladder-rail" aria-label="ladder">
+            <RungIndicator active={activeRung} livesOn={boundary?.lives_on ?? ['ask', 'hand_to_person']} />
+            <p className="boundary-reason label" data-testid="boundary-reason">
+              {boundaryReason(boundary, activeRung)}
+            </p>
+            <ApprovalButton pending={run.pendingApproval} />
+          </section>
+        </aside>
       </main>
       <SitrepDrawer
         open={sitrepOpen}

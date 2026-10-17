@@ -82,7 +82,7 @@ export async function startStepRun(
 export const SPOTLIGHT_SELECTORS: Record<string, string> = {
   'harbor-map': '.map-wrap',
   ladder: '.rungs',
-  'evidence-ledger': '.ledger',
+  'evidence-ledger': '[data-testid="case-view"]', // design pass: the case view holds the evidence
   'state-timeline': '[data-testid="state-timeline"]',
   'contact-card': '[data-testid="contact-card"]',
   sitrep: '[data-testid="sitrep-open"]',

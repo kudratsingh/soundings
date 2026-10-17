@@ -1,5 +1,7 @@
 // The run stream: a WebSocket feeding a pure reducer. Events are buffered and folded in
 // batches so a 13k-event replay stays smooth; a dropped socket reconnects with ?after=<seq>.
+// Design pass B1: batches are coalesced over FLUSH_MS and applied on an animation frame, and
+// the reducer also folds the per-case index (cases.ts) with copy-on-write tracks.
 
 import { useEffect, useRef, useState } from 'react'
 import { runSocketUrl } from './api'
@@ -21,8 +23,14 @@ import type {
 import type { ResponderPayload } from './events'
 // --- WO-088 end ---
 import { RUNGS } from './events'
+// --- WO-060 design pass begin ---
+import type { CaseIndex } from './cases'
+import { emptyCaseIndex, foldCases } from './cases'
+// --- WO-060 design pass end ---
 
 export const TRACK_POINTS = 400
+/** Coalescing window for incoming events; the fold then runs on the next animation frame. */
+export const FLUSH_MS = 150
 
 export interface ContactView {
   contact_id: string
@@ -62,6 +70,10 @@ export interface RunState {
   // --- WO-089 begin ---
   sensorRanges: Record<string, SensorRangeRow>
   // --- WO-089 end ---
+  // --- WO-060 design pass begin ---
+  /** Everything grouped by case (contact lineage): tracks, moments, row count. */
+  cases: CaseIndex
+  // --- WO-060 design pass end ---
   // --- WO-088 begin ---
   /** The responder at the latest tick (null when the run has none). */
   responder: ResponderPayload | null
@@ -90,6 +102,9 @@ export const initialRunState = (runId: string | null): RunState => ({
   // --- WO-089 begin ---
   sensorRanges: {},
   // --- WO-089 end ---
+  // --- WO-060 design pass begin ---
+  cases: emptyCaseIndex(),
+  // --- WO-060 design pass end ---
   // --- WO-088 begin ---
   responder: null,
   responderDispatches: 0,
@@ -111,8 +126,10 @@ export function reduceEvents(prev: RunState, events: StreamEvent[]): RunState {
     sitreps: prev.sitreps.slice(),
   }
   const touchedRows = new Set<string>()
+  const fresh: StreamEvent[] = []
   for (const e of events) {
     if (e.seq <= s.lastSeq) continue // a resumed socket may repeat nothing; be safe anyway
+    fresh.push(e)
     s.lastSeq = e.seq
     s.tick = e.tick
     s.t_s = e.t_s
@@ -180,6 +197,7 @@ export function reduceEvents(prev: RunState, events: StreamEvent[]): RunState {
       // --- WO-088 end ---
     }
   }
+  s.cases = foldCases(prev.cases, fresh) // WO-060 design pass
   return s
 }
 
@@ -230,15 +248,21 @@ export function useRun(runId: string | null): RunState {
       }
     }
     connect()
+    // Coalesce for FLUSH_MS, then fold once on the next animation frame.
+    let frame = 0
     const flush = window.setInterval(() => {
-      if (buffer.current.length === 0) return
-      const batch = buffer.current
-      buffer.current = []
-      setState((prev) => reduceEvents(prev, batch))
-    }, 100)
+      if (buffer.current.length === 0 || frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        const batch = buffer.current
+        buffer.current = []
+        if (batch.length) setState((prev) => reduceEvents(prev, batch))
+      })
+    }, FLUSH_MS)
     return () => {
       closed = true
       window.clearInterval(flush)
+      if (frame) window.cancelAnimationFrame(frame)
       if (retry !== undefined) window.clearTimeout(retry)
       socket?.close()
     }
