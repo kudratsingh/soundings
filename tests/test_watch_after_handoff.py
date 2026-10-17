@@ -248,3 +248,59 @@ def test_random_watch_sequences_never_change_rung(seq: list[str]) -> None:
         assert m.state in (S.WATCH_AFTER_HANDOFF, S.RESOLVED_DEPARTED)
     later = [r.action.kind for r in m.ledger.records()][before:]
     assert set(later) <= WATCH_ACTIONS
+
+
+# --- WO-043 part B: the watch through runner v3 ----------------------------------------------
+
+from soundings.ladder.sitrep import validate_sitrep  # noqa: E402
+from soundings.runner import RunResultV3, ScenarioRunnerV3  # noqa: E402
+
+CLIMB_OR_WAIT = {S.ADVISING_SLOW, S.HOLDING, S.AWAITING_APPROVAL}
+
+
+@cache
+def _v3(sid: str) -> RunResultV3:
+    return ScenarioRunnerV3(sid).run(orders_path=REPO_ORDERS)
+
+
+REPO_ORDERS = Path(__file__).resolve().parents[1] / "config" / "standing_orders.yaml"
+
+
+def test_persisting_updates() -> None:
+    """S06 seed 13: updates every ``sitrep_update_interval_s`` after HANDED_OFF, each citing
+    fresher evidence, rung constant, template only, and no climb after the handoff."""
+    result = _v3("S06")
+    cfg = yaml.safe_load(Path(LADDER_PATH).read_text(encoding="utf-8"))
+    interval = float(cfg["watch_after_handoff"]["sitrep_update_interval_s"])
+    tick_s = float(result.sim.tick_s)
+    handed = [r for r in result.ladder.values() if r.handling_outcome is S.HANDED_OFF]
+    assert handed
+    for run in handed:
+        t0 = after_handoff(run)
+        updates = [s for s in run.sitreps if s.kind == "update"]
+        assert updates, run.contact_id
+        ticks = [t0, *[s.tick for s in updates]]
+        assert all((b - a) * tick_s == interval for a, b in zip(ticks, ticks[1:], strict=False))
+        assert all(cp.to_state not in CLIMB_OR_WAIT for cp in run.checkpoints if cp.tick > t0)
+        i = run.visited.index(S.HANDED_OFF)
+        rungs = {cp.rung for cp in run.checkpoints[i:]}
+        assert rungs == {Rung.HAND_TO_PERSON}
+    for packet in result.sitrep_packets:
+        assert packet.inputs is not None
+        assert validate_sitrep(packet.sitrep, packet.inputs) == []
+        if packet.status.value == "update":
+            assert packet.sitrep.recommended_rung is Rung.HAND_TO_PERSON
+    assert result.audit_counts["llm_call"] == 0
+
+
+@pytest.mark.parametrize("sid", ["S05", "S06"])
+def test_watch_only_observes_through_runner(sid: str) -> None:
+    result = _v3(sid)
+    for run in result.ladder.values():
+        if run.handling_outcome is not S.HANDED_OFF:
+            continue
+        handed = after_handoff(run)
+        later = {a.kind for a in run.actions if a.tick > handed}
+        assert later - WATCH_ACTIONS <= {A.RELEASE_HOLD}
+        post = [cp for cp in run.checkpoints if cp.tick > handed]
+        assert all(cp.guard_decisions == () for cp in post)

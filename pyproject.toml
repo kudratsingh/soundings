@@ -7,6 +7,7 @@ dependencies = [
     "anthropic>=1.15.0",
     "fastapi>=0.143.3",
     "numpy>=2.5.4",
+    "ortools>=9.15.6755", # WO-082
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
@@ -60,6 +61,12 @@ ignore_missing_imports = true
 module = ["shapely.*"]
 ignore_missing_imports = true
 # --- WO-081 end ---
+
+# --- WO-082 begin ---
+[[tool.mypy.overrides]]  # WO-082
+module = ["ortools.*"]
+ignore_missing_imports = true
+# --- WO-082 end ---
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
