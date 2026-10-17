@@ -4,6 +4,7 @@ the anomaly score, and the committed ``data/pol_table.json``."""
 from __future__ import annotations
 
 import math
+import os
 import time
 from functools import cache
 
@@ -37,7 +38,10 @@ from soundings.sim.scenario import catalog_paths, resolve_scenario
 
 HARBOR = load_harbor()
 ZONES = sorted(z.zone_id for z in HARBOR.zones)
-GENERATION_BOUND_S = 60.0
+_LOADED = bool(os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("SOUNDINGS_CI"))
+GENERATION_BOUND_S = 60.0 * (4.0 if _LOADED else 1.0)
+"""Generation bound on a quiet machine (about 49 s alone); a shared CI runner under
+pytest-xdist gets a 4x load allowance (DECISIONS 2026-10-17 11:5x)."""
 SPEED = FeatureName.SPEED_OVER_GROUND.value
 DEPTH = FeatureName.DEPTH.value
 DWELL = FeatureName.DWELL_TIME_IN_ZONE.value
