@@ -22,6 +22,12 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from soundings.investigation.evidence import EvidenceTable
+from soundings.investigation.kalman import (
+    KalmanConfig,
+    VelocitySource,
+    kalman_state_xyv,
+    load_tracking_config,
+)
 from soundings.investigation.velocity import (
     FIT_WINDOW_S,
     BoolArray,
@@ -663,17 +669,40 @@ def last_fitted_state(track: TrackArrays) -> tuple[float, float, float, float] |
 
 
 def closing_to_asset(
-    track: TrackArrays, asset_x_m: float, asset_y_m: float
+    track: TrackArrays,
+    asset_x_m: float,
+    asset_y_m: float,
+    *,
+    velocity_source: VelocitySource = "window",
+    kalman_config: KalmanConfig | None = None,
 ) -> tuple[float, float] | None:
     """(closing rate m/s, time to asset s) toward one asset point.
 
     Closing rate is the fitted velocity projected on the line of sight to the asset
     (positive = approaching). Time is range / closing rate, or ``NOT_CLOSING_S`` when the
     contact is not closing. None (unknown) below 2 points in the last ``KIN_WINDOW_S``.
+
+    ``velocity_source="window"`` (the default) uses ``last_fitted_state``; ``"kalman"``
+    uses the WO-084 filter state at the last reading (``kalman_state_xyv`` over the whole
+    track), with the same None rule.
     """
-    state = last_fitted_state(track)
+    if velocity_source == "kalman":
+        if len(track.tail(KIN_WINDOW_S)) < 2:
+            return None
+        state = kalman_state_xyv(track, kalman_config)
+    elif velocity_source == "window":
+        state = last_fitted_state(track)
+    else:
+        raise ValueError(f"unknown velocity_source {velocity_source!r}")
     if state is None:
         return None
+    return closing_from_state(state, asset_x_m, asset_y_m)
+
+
+def closing_from_state(
+    state: tuple[float, float, float, float], asset_x_m: float, asset_y_m: float
+) -> tuple[float, float]:
+    """(closing rate, time to asset) of an (x, y, vx, vy) state toward one asset point."""
     x, y, vx, vy = state
     dx, dy = asset_x_m - x, asset_y_m - y
     rng = math.hypot(dx, dy)
@@ -871,6 +900,14 @@ SOURCE_DEFAULT_VISIBILITY: Final = "default:hour_of_day"
 ACOUSTIC_SOURCE_PREFIX: Final = "acoustic_detector:"
 SENSOR_SOURCE_PREFIX: Final = "sensor:"
 EXTRACTOR_SOURCE_PREFIX: Final = "extractor:"
+KALMAN_CLOSING_EXTRACTOR: Final = "closing_to_asset_kalman"
+"""Extractor named by closing rows built from the WO-084 filter (velocity_source=kalman)."""
+CLOSING_FEATURES: Final = frozenset(
+    {
+        FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET,
+        FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET,
+    }
+)
 
 # Assumption rows (WO-012 "Kinds"): the configured value, exactly. Their uncertainty is
 # stated in ``assumes``; ``confidence`` (SPEC-INV 9.10) is about reading quality, so an
@@ -1068,12 +1105,15 @@ def _derived(
     sources: Sequence[EvidenceRow],
     *,
     unknown_reason: str,
+    extractor: str | None = None,
 ) -> EvidenceRow:
     """A derived row; ``value=None`` writes ``unknown`` with ``unknown_reason`` as source.
 
     A known value's confidence is the minimum of its sources' (the table's ceiling).
+    ``extractor`` overrides the catalog extractor named in the source (WO-084 kalman rows).
     """
     spec = FEATURE_CATALOG[feature]
+    extractor = spec.extractor if extractor is None else extractor
     ids = tuple(dict.fromkeys(s.row_id for s in sources))
     known = value is not None
     return EvidenceRow(
@@ -1082,7 +1122,7 @@ def _derived(
         feature=feature,
         value=_row_value(value) if value is not None else UNKNOWN,
         unit=spec.unit,
-        source=f"{EXTRACTOR_SOURCE_PREFIX}{spec.extractor}" if known else unknown_reason,
+        source=f"{EXTRACTOR_SOURCE_PREFIX}{extractor}" if known else unknown_reason,
         confidence=min(_row_confidence(s) for s in sources) if known else UNKNOWN_CONFIDENCE,
         kind=EvidenceKind.DERIVED,
         probe_id=None,
@@ -1158,11 +1198,15 @@ def extract_kinematics(
     *,
     segments: Mapping[SegmentName, EvidenceRow],
     current_row: EvidenceRow,
+    velocity_source: VelocitySource = "window",
 ) -> list[EvidenceRow]:
     """One derived row per kinematic catalog feature, in catalog order.
 
     Each derives from the ``track_segment`` row of its window (``FEATURE_SEGMENT``);
-    ``drift_consistency`` also derives from ``current_row``.
+    ``drift_consistency`` also derives from ``current_row``. With
+    ``velocity_source="kalman"`` the two closing rows come from the WO-084 filter, name
+    ``extractor:closing_to_asset_kalman`` and derive from the ``full`` segment (the
+    filter reads the whole track); the default ``"window"`` rows are unchanged.
     """
     arrays = track_arrays(track)
     last = track.points[-1]
@@ -1185,7 +1229,9 @@ def extract_kinematics(
         reasons[FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET] = NO_CRITICAL_ASSET
         reasons[FeatureName.TIME_TO_NEAREST_CRITICAL_ASSET] = NO_CRITICAL_ASSET
     else:
-        closing = closing_to_asset(arrays, *to_local_m(asset.lat, asset.lon))
+        closing = closing_to_asset(
+            arrays, *to_local_m(asset.lat, asset.lon), velocity_source=velocity_source
+        )
     values[FeatureName.CLOSING_RATE_TO_NEAREST_CRITICAL_ASSET] = (
         None if closing is None else closing[0]
     )
@@ -1204,10 +1250,23 @@ def extract_kinematics(
     rows: list[EvidenceRow] = []
     for feature in KINEMATIC_FEATURES:
         sources = [segments[FEATURE_SEGMENT[feature]]]
+        extractor: str | None = None
+        if velocity_source == "kalman" and feature in CLOSING_FEATURES:
+            sources = [segments["full"]]
+            extractor = KALMAN_CLOSING_EXTRACTOR
         if feature is FeatureName.DRIFT_CONSISTENCY:
             sources.append(current_row)
         reason = reasons.get(feature, FEATURE_CATALOG[feature].unknown_source)
-        rows.append(_derived(track, feature, values[feature], sources, unknown_reason=reason))
+        rows.append(
+            _derived(
+                track,
+                feature,
+                values[feature],
+                sources,
+                unknown_reason=reason,
+                extractor=extractor,
+            )
+        )
     return rows
 
 
@@ -1444,6 +1503,7 @@ def contact_evidence(
     pol: PolBaseline | None,
     *,
     hour_of_day: float,
+    velocity_source: VelocitySource = "window",
 ) -> list[EvidenceRow]:
     """One extraction pass at the contact's last tick, as rows in append order.
 
@@ -1458,7 +1518,14 @@ def contact_evidence(
 
     by_feature: dict[FeatureName, list[EvidenceRow]] = {}
     produced = (
-        extract_kinematics(track, harbor, current_at, segments=segments, current_row=current_row)
+        extract_kinematics(
+            track,
+            harbor,
+            current_at,
+            segments=segments,
+            current_row=current_row,
+            velocity_source=velocity_source,
+        )
         + extract_acoustic(track)
         + extract_registry_placeholders(track)
         + extract_context(track, harbor, hour_of_day=hour_of_day)
@@ -1491,6 +1558,7 @@ def build_evidence(
     *,
     hour_of_day: float,
     tide_phase_for_hour: Callable[[int], Any] | None = None,
+    velocity_source: VelocitySource | None = None,
 ) -> EvidenceTable:
     """The evidence table of a run, from its observed tracks only.
 
@@ -1498,8 +1566,11 @@ def build_evidence(
     order. ``current_field`` is either a ``CurrentAt`` callable in local metres or an
     object with ``vector_at(lat, lon, tide_phase)``; the latter needs
     ``tide_phase_for_hour``. ``pol=None`` makes ``pattern_of_life_anomaly`` unknown with
-    source ``no_pol_table``.
+    source ``no_pol_table``. ``velocity_source=None`` reads ``closing_velocity_source``
+    from ``config/tracking.yaml`` (WO-084; ``window`` keeps the WO-012 rows).
     """
+    if velocity_source is None:
+        velocity_source = load_tracking_config().closing_velocity_source
     if hasattr(current_field, "vector_at"):
         if tide_phase_for_hour is None:
             raise TypeError("a current field object needs tide_phase_for_hour")
@@ -1517,7 +1588,16 @@ def build_evidence(
             raise ValueError(f"run.tracks[{contact_id!r}] holds {track.contact_id!r}")
         if not math.isclose(track.tick_s, run.tick_s, rel_tol=0.0, abs_tol=1e-12):
             raise ValueError(f"{contact_id}: track tick_s differs from run.tick_s")
-        table.extend(contact_evidence(track, harbor, current_at, pol, hour_of_day=hour_of_day))
+        table.extend(
+            contact_evidence(
+                track,
+                harbor,
+                current_at,
+                pol,
+                hour_of_day=hour_of_day,
+                velocity_source=velocity_source,
+            )
+        )
     return table
 
 
@@ -1525,12 +1605,14 @@ __all__ = [
     "ACOUSTIC_FEATURES",
     "BUCKETS",
     "BucketSpec",
+    "CLOSING_FEATURES",
     "CurrentAt",
     "DEFAULT_WEEKDAY",
     "FEATURE_CATALOG",
     "FEATURE_SEGMENT",
     "FIT_WINDOW_S",
     "FeatureSpec",
+    "KALMAN_CLOSING_EXTRACTOR",
     "KINEMATIC_FEATURES",
     "MIN_POINTS",
     "NOT_CLOSING_S",
@@ -1543,10 +1625,12 @@ __all__ = [
     "TransitStats",
     "UNKNOWN",
     "UNKNOWN_SOURCES",
+    "VelocitySource",
     "WEEKDAYS",
     "bucketize",
     "build_evidence",
     "classify_transit_pattern",
+    "closing_from_state",
     "closing_to_asset",
     "contact_evidence",
     "covering_nodes",
