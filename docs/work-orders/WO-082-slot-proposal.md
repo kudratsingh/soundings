@@ -153,7 +153,16 @@ None of the ladder rungs. This is registry planning ahead of any contact. The as
 - §3: dependency add logged; no `config/ladder.yaml` threshold touched (capacity lives in `config/registry.yaml`).
 
 ## Done
-PR: · Merged commit: · Test summary: · STATE.md updated: yes/no
+PR: see branch `wo/082-slot-proposal` · Merged commit: (squash, see STATE) · Test summary: `1823 passed, 2 skipped` (make check exit 0; 38 WO-082 tests) · STATE.md updated: yes
+- Dependency: `uv add ortools>=9.15.6755` (installed 9.15.6755 with absl-py, immutabledict, pandas, protobuf 6.33.6; about 5 s warm on this machine); imported only inside `slots.solve`/`build_model`/`make_solver` (`test_ortools_imported_lazily`); `ortools.*` mypy override in its own `# WO-082` table.
+- Hand-built case: OPTIMAL, 210 min (P-B +120, P-C +90), about 0.3 s cold; the brute-force reference in the test recomputes 210 and the next best 225.
+- Deviations (DECISIONS 2026-10-17 08:23): only `num_search_workers=1` is set (OR-Tools 9.15 returns MODEL_INVALID with both worker fields); `diagnose` lifts all latest starts first, then names the single lift with the least total delay (sorted-first would name P-A in variant (i)); variant (ii) names P-F, P-A and P-B (P-B also started at 09:00); `inputs_hash` covers `target_plan_id`; `PlanShift` adds the filed `start_at`/`end_at`; infeasible proposals list every plan with shift 0; accept checks `not_pending` before staleness; `no_tick_scale` applies to moving plans only.
+- "P-F's row is byte-identical" is read as every field except `status` and `conflicts` (the WO also requires every plan in the set to end `active`, which changes P-F's status).
+- Accept writes the shifts and the proposal status in one session; `recompute_conflicts` and `set_conflict_resolution` (WO-081) then run in their own sessions. All refusals (`not_pending`, `stale_proposal`, `infeasible`, `no_tick_scale`) happen before any plan row is written.
+- BT-01: `scenarios/BT-01.yaml` is not on main, so the stand-in is used; at default capacity 2 its components are proven INFEASIBLE (binding `capacity`), each in well under 2 s CPU. The strict OPTIMAL assertion turns on automatically when the real file lands.
+- e2e: `tests/e2e/test_registry_proposal.py` (capacity 1 via a test slot config) passes locally with `SOUNDINGS_E2E=1`; it writes `artifacts/registry-proposal.png` (gitignored).
+- Retention: `purge_older_than` also deletes proposals created before the cutoff (CLAUDE.md section 6).
+- No migrations: the plan table gained `earliest_start_at`/`latest_start_at` and there is a new `registry_proposal` table; delete any local `soundings.db` from before this WO.
 
 ## Notes for downstream
 - WO-061 (+QR): after a phone filing returns `status: "conflicted"`, the panel calls `POST /api/plans/{id}/proposal` and renders `shifts`, `total_delay_min` and `detail`. Accept and decline use the same routes.

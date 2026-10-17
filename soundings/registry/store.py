@@ -12,6 +12,7 @@ epoch, so seeded plans are byte-identical across runs (CLAUDE.md 2.4).
 from __future__ import annotations
 
 import builtins
+import enum
 import os
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -21,8 +22,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 from sqlalchemy import Engine, event
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Field as SQLField  # WO-082
 from sqlmodel import Session, SQLModel, col, create_engine, func, select, update
 
 from soundings.registry.conflicts import (
@@ -59,6 +62,14 @@ from soundings.registry.models import (
     scenario_epoch,
     tick_to_datetime,
     to_utc,
+)
+from soundings.registry.slots import (  # WO-082
+    SlotConfig,
+    SlotProposal,
+    load_slot_config,
+    model_set,
+    proposal_inputs_hash,
+    propose_slots,
 )
 from soundings.schemas.denylist import find_denylisted
 from soundings.schemas.harbor import Harbor, load_harbor
@@ -119,6 +130,7 @@ class RegistryStore:
         now: Clock | None = None,
         config: RegistryConfig | None = None,
         conflict_config: ConflictConfig | None = None,
+        slot_config: SlotConfig | None = None,  # WO-082
     ) -> None:
         self.db_path: Path | str = db_path if db_path is not None else db_path_from_env()
         self.harbor = harbor if harbor is not None else _default_harbor()
@@ -133,6 +145,12 @@ class RegistryStore:
             self.engine,
             tables=[Plan.__table__, PlanConflict.__table__],  # type: ignore[attr-defined]
         )
+        # --- WO-082: proposals ---
+        self.slot_config: SlotConfig = (
+            slot_config if slot_config is not None else load_slot_config()
+        )
+        SQLModel.metadata.create_all(self.engine, tables=[_PROPOSAL_TABLE])
+        # --- WO-082 end ---
 
     # --- plumbing -----------------------------------------------------------------------
 
@@ -209,6 +227,9 @@ class RegistryStore:
                 f"depth_min_m {draft.depth_min_m} is below depth_max_m {draft.depth_max_m}",
             )
         # --- WO-081 end ---
+        # --- WO-082: start bounds ---
+        _check_start_bounds(draft.earliest_start_at, draft.latest_start_at, draft.start_at)
+        # --- WO-082 end ---
         if self._modem_re.fullmatch(draft.modem_id) is None:
             raise PlanRejected(
                 RejectReason.BAD_MODEM_ID,
@@ -273,6 +294,9 @@ class RegistryStore:
             derived_end = datetime_to_tick(epoch, end_at, tick_s)
             if derived_end >= 0:
                 start_tick, end_tick = max(0, derived_start), derived_end
+        # --- WO-082: start bounds (a tick-only start is known only now) ---
+        _check_start_bounds(clean.earliest_start_at, clean.latest_start_at, start_at)
+        # --- WO-082 end ---
         created_at = clean.created_at if clean.created_at is not None else self.now()
         stored_tick_s = clean.tick_s if clean.tick_s is not None else (tick_s if bridge else None)
         with self._session() as session:
@@ -298,6 +322,10 @@ class RegistryStore:
                 depth_min_m=clean.depth_min_m,
                 depth_max_m=clean.depth_max_m,
                 tick_s=stored_tick_s,
+                # --- WO-082: start bounds ---
+                earliest_start_at=_utc_or_none(clean.earliest_start_at),
+                latest_start_at=_utc_or_none(clean.latest_start_at),
+                # --- WO-082 end ---
             )
             # --- WO-081 begin: conflicts at filing (the plan is still accepted) ---
             cfg = self.conflict_config
@@ -368,6 +396,12 @@ class RegistryStore:
                 session.delete(row)
             session.flush()
             self._refresh_status(session, partners)
+            # --- WO-082: proposals older than the retention window go too ---
+            for old in session.exec(
+                select(PlanProposal).where(col(PlanProposal.created_at) < cutoff)
+            ).all():
+                session.delete(old)
+            # --- WO-082 end ---
             session.commit()
             return len(rows)
 
@@ -638,6 +672,225 @@ class RegistryStore:
 
     # --- WO-081 end ---
 
+    # --- WO-082: proposals ---------------------------------------------------------------
+
+    def propose(self, plan_id: str, *, now: datetime | None = None) -> SlotProposal:
+        """Compute (not save) a slot proposal for ``plan_id`` over the in-force plans."""
+        at = now if now is not None else self.now()
+        plans = self.list(PlanStatus.ACTIVE)
+        if plan_id not in {p.plan_id for p in plans}:
+            raise KeyError(plan_id)
+        return propose_slots(
+            plan_id,
+            plans,
+            harbor=self.harbor,
+            now=at,
+            cfg=self.slot_config,
+            conflict_cfg=self.conflict_config,
+        )
+
+    def save_proposal(self, proposal: SlotProposal) -> StoredProposal:
+        """Store ``proposal`` as pending. Idempotent: the same id upserts the same payload
+        (a declined or stale row with that id becomes pending again)."""
+        payload = proposal.model_dump_json()
+        with self._session() as session:
+            row = session.get(PlanProposal, proposal.proposal_id)
+            if row is None:
+                row = PlanProposal(
+                    proposal_id=proposal.proposal_id,
+                    target_plan_id=proposal.target_plan_id,
+                    status=ProposalStatus.PENDING.value,
+                    payload_json=payload,
+                    inputs_hash=proposal.inputs_hash,
+                    created_at=to_utc(self.now()),
+                    resolved_at=None,
+                )
+            elif row.status != ProposalStatus.ACCEPTED.value:
+                if row.status != ProposalStatus.PENDING.value:
+                    row.created_at = to_utc(self.now())
+                row.status = ProposalStatus.PENDING.value
+                row.payload_json = payload
+                row.target_plan_id = proposal.target_plan_id
+                row.resolved_at = None
+            session.add(row)
+            session.commit()
+            return _stored(row)
+
+    def get_proposal(self, proposal_id: str) -> StoredProposal | None:
+        with self._session() as session:
+            row = session.get(PlanProposal, proposal_id)
+            return None if row is None else _stored(row)
+
+    def latest_pending_proposal(self, plan_id: str) -> StoredProposal | None:
+        """The newest pending proposal for ``plan_id`` (ties broken by proposal id)."""
+        with self._session() as session:
+            row = session.exec(
+                select(PlanProposal)
+                .where(
+                    col(PlanProposal.target_plan_id) == plan_id,
+                    col(PlanProposal.status) == ProposalStatus.PENDING.value,
+                )
+                .order_by(col(PlanProposal.created_at).desc(), col(PlanProposal.proposal_id))
+            ).first()
+            return None if row is None else _stored(row)
+
+    def accept_proposal(
+        self, proposal_id: str, *, at: datetime | None = None
+    ) -> tuple[StoredProposal, builtins.list[PlanView]]:
+        """Apply a pending, feasible, current proposal: shift its plans, clear the conflict.
+
+        Raises ``KeyError`` (unknown id), ``ProposalNotAcceptable`` (``not_pending``,
+        ``infeasible``, ``no_tick_scale``) or ``ProposalStale`` (the plans changed since
+        it was computed; the proposal is marked stale). Nothing else is written then.
+        Returns the accepted proposal and the plans it covers, by ``(start_at, plan_id)``.
+        """
+        when = to_utc(at if at is not None else self.now())
+        stored = self.get_proposal(proposal_id)
+        if stored is None:
+            raise KeyError(proposal_id)
+        if stored.status is not ProposalStatus.PENDING:
+            raise ProposalNotAcceptable("not_pending", f"proposal is {stored.status.value}")
+        proposal = stored.proposal
+        if self._proposal_hash(proposal) != proposal.inputs_hash:
+            self._resolve_proposal(proposal_id, ProposalStatus.STALE, when)
+            raise ProposalStale(proposal_id)
+        if proposal.status != "feasible":
+            raise ProposalNotAcceptable("infeasible", proposal.detail)
+        moved = {s.plan_id: s for s in proposal.shifts if s.shift_min != 0}
+        ids = sorted(s.plan_id for s in proposal.shifts)
+        with self._session() as session:
+            rows = {
+                r.plan_id: r
+                for r in session.exec(select(Plan).where(col(Plan.plan_id).in_(sorted(moved))))
+            }
+            for pid in sorted(moved):
+                row = rows[pid]
+                if row.start_tick is not None and row.tick_s is None:
+                    raise ProposalNotAcceptable(
+                        "no_tick_scale", f"{pid} has ticks but no tick_s to shift them by"
+                    )
+            for pid in sorted(moved):
+                row, shift = rows[pid], moved[pid]
+                delta = timedelta(minutes=shift.shift_min)
+                row.start_at = to_utc(from_storage(row.start_at, row.start_offset_min) + delta)
+                row.end_at = to_utc(from_storage(row.end_at, row.end_offset_min) + delta)
+                if row.start_tick is not None and row.tick_s is not None:
+                    ticks = round(shift.shift_min * 60 / row.tick_s)
+                    row.start_tick += ticks
+                    if row.end_tick is not None:
+                        row.end_tick += ticks
+                session.add(row)
+            prow = session.get(PlanProposal, proposal_id)
+            assert prow is not None
+            prow.status = ProposalStatus.ACCEPTED.value
+            prow.resolved_at = when
+            session.add(prow)
+            session.commit()
+        self.recompute_conflicts(ids)
+        plans = self.set_conflict_resolution(ids, proposal_id)
+        accepted = self.get_proposal(proposal_id)
+        assert accepted is not None
+        return accepted, plans
+
+    def decline_proposal(self, proposal_id: str, *, at: datetime | None = None) -> StoredProposal:
+        """Mark a pending proposal declined. Nothing else changes."""
+        stored = self.get_proposal(proposal_id)
+        if stored is None:
+            raise KeyError(proposal_id)
+        if stored.status is not ProposalStatus.PENDING:
+            raise ProposalNotAcceptable("not_pending", f"proposal is {stored.status.value}")
+        when = to_utc(at if at is not None else self.now())
+        return self._resolve_proposal(proposal_id, ProposalStatus.DECLINED, when)
+
+    def _proposal_hash(self, proposal: SlotProposal) -> str:
+        """The inputs hash the proposal would have if computed now over the same ``now``."""
+        plans = self.list(PlanStatus.ACTIVE)
+        target = next((p for p in plans if p.plan_id == proposal.target_plan_id), None)
+        if target is None:
+            return ""
+        members = model_set(target, plans, self.harbor, self.conflict_config)
+        capacity = self.slot_config.capacity_for(target.area)
+        return proposal_inputs_hash(
+            proposal.target_plan_id, members, proposal.now, capacity, self.slot_config
+        )
+
+    def _resolve_proposal(
+        self, proposal_id: str, status: ProposalStatus, when: datetime
+    ) -> StoredProposal:
+        with self._session() as session:
+            row = session.get(PlanProposal, proposal_id)
+            assert row is not None
+            row.status = status.value
+            row.resolved_at = when
+            session.add(row)
+            session.commit()
+            return _stored(row)
+
+    # --- WO-082 end ---
+
+
+# --- WO-082: proposals ---------------------------------------------------------------------
+
+
+class ProposalStatus(enum.StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    STALE = "stale"
+
+
+class PlanProposal(SQLModel, table=True):
+    """One stored slot proposal (WO-082). ``payload_json`` is the ``SlotProposal``."""
+
+    __tablename__ = "registry_proposal"
+
+    proposal_id: str = SQLField(primary_key=True)
+    target_plan_id: str = SQLField(index=True)
+    status: str = ProposalStatus.PENDING.value
+    payload_json: str
+    inputs_hash: str
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+
+_PROPOSAL_TABLE: Any = PlanProposal.__table__  # type: ignore[attr-defined]
+
+
+class StoredProposal(BaseModel):
+    """A proposal with its review status (WO-082)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    proposal: SlotProposal
+    status: ProposalStatus
+    created_at: AwareDatetime
+    resolved_at: AwareDatetime | None = None
+
+
+class ProposalStale(Exception):
+    """The plans changed since the proposal was computed; it was marked stale."""
+
+
+class ProposalNotAcceptable(Exception):
+    """``reason`` is ``not_pending``, ``infeasible`` or ``no_tick_scale``."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(f"{reason}: {detail}")
+        self.reason = reason
+        self.detail = detail
+
+
+def _stored(row: PlanProposal) -> StoredProposal:
+    return StoredProposal(
+        proposal=SlotProposal.model_validate_json(row.payload_json),
+        status=ProposalStatus(row.status),
+        created_at=from_storage(row.created_at, 0),
+        resolved_at=None if row.resolved_at is None else from_storage(row.resolved_at, 0),
+    )
+
+
+# --- WO-082 end ---
+
 
 def plans_from_scenario(
     scenario: Scenario, config: RegistryConfig | None = None
@@ -787,3 +1040,35 @@ def _tz_of(row: Plan) -> Any:
 def overlaps(a_start: Any, a_end: Any, b_start: Any, b_end: Any) -> bool:
     """Closed-interval overlap, the rule the SQL queries implement."""
     return bool(a_start <= b_end and b_start <= a_end)
+
+
+# --- WO-082: start bounds ---
+def _utc_or_none(value: datetime | None) -> datetime | None:
+    return None if value is None else to_utc(value)
+
+
+def _check_start_bounds(
+    earliest: datetime | None, latest: datetime | None, start: datetime | None
+) -> None:
+    """``earliest <= start <= latest`` for whichever bounds are given (START_BOUNDS_INVALID)."""
+    if earliest is not None and latest is not None and earliest > latest:
+        raise PlanRejected(
+            RejectReason.START_BOUNDS_INVALID,
+            f"earliest_start_at {earliest.isoformat()} is after latest_start_at "
+            f"{latest.isoformat()}",
+        )
+    if start is None:
+        return
+    if earliest is not None and start < earliest:
+        raise PlanRejected(
+            RejectReason.START_BOUNDS_INVALID,
+            f"start {start.isoformat()} is before earliest_start_at {earliest.isoformat()}",
+        )
+    if latest is not None and start > latest:
+        raise PlanRejected(
+            RejectReason.START_BOUNDS_INVALID,
+            f"start {start.isoformat()} is after latest_start_at {latest.isoformat()}",
+        )
+
+
+# --- WO-082 end ---

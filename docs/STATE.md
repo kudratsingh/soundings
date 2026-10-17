@@ -51,7 +51,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 062 | demo runner | part A + presenter mode merged; recording (part B) pending | wo/062a-demo-runner-core; wo/062p-presenter-mode | #21; WO-062P see branch PR | 39c22eb (part A) | part A 53; WO-062P: test_demo_script 29, test_presenter_api 5, test_sfx 12, e2e presenter smoke 1 |
 | 080 | Busy Tuesday scenario BT-01 | WO being written | wo/080-busy-tuesday | | | |
 | 081 | conflict detection at filing | PR open (auto-merge on green); JobType via local adapter until WO-080 part A | wo/081-conflict-detection | see branch PR | | 1546 passed, 1 skipped (52 WO-081 tests) |
-| 082 | slot proposal (CP-SAT) | WO being written | wo/082-slot-proposal | | | |
+| 082 | slot proposal (CP-SAT) | PR open (auto-merge on green) | wo/082-slot-proposal | see PR | | 1823 passed, 2 skipped (38 WO-082 tests: test_slots 20, test_slots_api 12, test_slots_integration 2, e2e 1, +3 START_BOUNDS_INVALID reject cases) |
 | 083 | separation advisories (CPA/TCPA) | WO being written | wo/083-separation-advisories | | | |
 | 084 | projected tracks (Kalman) | PR open (flag flipped to kalman for build_evidence; runner stays window) | wo/084-projected-tracks | see PR | | 1436 passed (24 test_kalman*) |
 | 085 | surge triage queue | WO being written | wo/085-surge-triage | | | |
