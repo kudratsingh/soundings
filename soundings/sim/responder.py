@@ -430,6 +430,43 @@ class Responder:
                 best = d if best is None or d < best else best
         return None if best is None else round6(best)
 
+    # --- WO-088D begin ---
+    @property
+    def search_track_spacing_m(self) -> float:
+        """Lawnmower leg spacing (config ``search_track_spacing_m``): the one source of
+        truth the search probe's sensor window and ETA read too."""
+        return float(self.config.search_track_spacing_m)
+
+    def search_eta_s(self, search_box: SearchBoxLike) -> float:
+        """Seconds from now to the end of the lawnmower over ``search_box``: the route to
+        its first leg point (from where the responder is) plus the pattern itself, the same
+        legs ``dispatch_search`` flies. 0 when no leg point lies inside the geofence."""
+        points = self._pattern_points(search_box)
+        if not points:
+            return 0.0
+        route = self._plan(self._xy, points[0], self._region(None))
+        transit = (
+            math.hypot(points[0][0] - self._xy[0], points[0][1] - self._xy[1])
+            if route is None
+            else _route_length(self._xy, route)
+        )
+        pattern = _route_length(points[0], points[1:])
+        return round6((transit + pattern) / self.config.speed_mps)
+
+    def _pattern_points(self, box: SearchBoxLike) -> list[XY]:
+        """The search pattern: the box centre first (the drift datum, the most likely
+        position), then the lawnmower legs ``search_track_spacing_m`` apart. The datum is
+        skipped when it lies outside the geofence."""
+        legs = self._lawnmower(box)
+        x_min, y_min = to_local_m(box.min_lat, box.min_lon)
+        x_max, y_max = to_local_m(box.max_lat, box.max_lon)
+        lat, lon, sx, sy = _snap((x_min + x_max) / 2.0, (y_min + y_max) / 2.0)
+        if self._region(None).ok_xy(sx, sy) and self.inside_geofence(lat, lon):
+            return [(sx, sy), *legs]
+        return legs
+
+    # --- WO-088D end ---
+
     # ------------------------------------------------------------------ commands
 
     def dispatch_to_look(
@@ -490,7 +527,7 @@ class Responder:
         refusal = self._precheck(contact_id)
         if refusal is not None:
             return refusal
-        points = self._lawnmower(search_box)
+        points = self._pattern_points(search_box)  # WO-088D: the datum first
         if not points:
             return DispatchResult(
                 accepted=False, reason="search box lies outside the geofence", eta_s=0.0
@@ -581,6 +618,7 @@ class Responder:
             if not self._battery_covers(self._return_time_s() + dt):
                 self._begin_return("battery at return cost")
         if self._state is ResponderState.RETURNING and self._at_dock():
+            self._set_pos(self._dock_lat, self._dock_lon, *self._dock_xy)  # WO-088D: berthed
             self._state = ResponderState.DOCKED
             self._mode = "idle"
             self._target = None

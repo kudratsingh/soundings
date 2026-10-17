@@ -10,7 +10,7 @@
 
 responder:
   id: resp_1                         # demo value
-  dock: {lat: 33.736, lon: -118.257} # demo value: a pier on the east side of the Main Channel
+  dock: {lat: 33.7405, lon: -118.2668} # demo value: a pier at the east end of the inner research basin (WO-088D; DECISIONS)
   speed_mps: 1.5                     # demo value: cruise speed
   standoff_m: 25.0                   # demo value: it orbits at standoff, never inside
   battery_min: 90.0                  # demo value: full charge, in minutes at cruise

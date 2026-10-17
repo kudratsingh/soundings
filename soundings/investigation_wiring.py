@@ -31,6 +31,7 @@ nothing, and the writer's text never feeds a field of the ``Recommendation`` oth
 
 from __future__ import annotations
 
+import dataclasses  # WO-088D
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager  # WO-060B
 from contextvars import ContextVar  # WO-060B
@@ -75,8 +76,13 @@ from soundings.investigation.probes import (
     ProbeContext,
     ProbeNotAllowed,
     ResponderPort,
+    advance_port,  # WO-088D
     catch_up,
+    contact_fix,  # WO-088D
+    latency_ticks,  # WO-088D
+    look_eta_estimate_s,  # WO-088D
     probe_latency_ticks,
+    release,  # WO-088D
     resolve_args,
     run_probe,
     state_name,
@@ -155,6 +161,7 @@ def responder_dispatch_inputs(
         inside = bool(fence(last.lat, last.lon)) if callable(fence) else None
     standoff = getattr(snap, "standoff_m", None)
     busy = state_name(snap) != "DOCKED"
+    busy = busy or int(snap.tick) > tick  # WO-088D: a search already flown past now
     return ResponderDispatchInputs(
         contact_id=contact_id,
         station_inside_geofence=inside,
@@ -189,6 +196,140 @@ def responder_available(
 
 
 # --- WO-088 end ---
+
+
+# --- WO-088D begin ---
+FIX_MAX_AGE_S = 30.0
+"""Demo value: the platform dispatches to look only at a fix at most this old."""
+
+
+class ResponderSession:
+    """The harbor's responder as one run sees it (a ``ResponderPort`` over the sim).
+
+    Every call goes to the injected port. Each dispatch is remembered by
+    ``(kind, contact, tick)``: a look the platform dispatched when it was chosen is the
+    same dispatch when the probe lands (``run_probe`` asks again at the send tick), so
+    the responder really is in transit, and busy, between the two. ``step`` never moves
+    time backwards (a search flown to its landing tick holds the responder's clock).
+    """
+
+    def __init__(self, port: ResponderPort) -> None:
+        self.port = port
+        self._memo: dict[tuple[str, str, int], Any] = {}
+
+    def __getattr__(self, name: str) -> Any:  # trail, recall, inside_geofence, search_eta_s
+        if name in ("port", "_memo"):
+            raise AttributeError(name)
+        return getattr(self.port, name)
+
+    @property
+    def snapshot(self) -> Any:
+        return self.port.snapshot
+
+    def dispatch_to_look(
+        self, contact_id: str, contact_lat: float, contact_lon: float, tick: int
+    ) -> Any:
+        key = ("look", contact_id, tick)
+        if key not in self._memo:
+            self._memo[key] = self.port.dispatch_to_look(contact_id, contact_lat, contact_lon, tick)
+        return self._memo[key]
+
+    def dispatch_search(self, contact_id: str, search_box: Any, tick: int) -> Any:
+        key = ("search", contact_id, tick)
+        if key not in self._memo:
+            self._memo[key] = self.port.dispatch_search(contact_id, search_box, tick)
+        return self._memo[key]
+
+    def step(
+        self,
+        tick: int,
+        *,
+        contact_lat: float | None = None,
+        contact_lon: float | None = None,
+        contact_speed_mps: float | None = None,
+        nearest_asset_lat: float | None = None,
+        nearest_asset_lon: float | None = None,
+    ) -> Any:
+        if tick < int(self.port.snapshot.tick):
+            return self.port.snapshot
+        return self.port.step(
+            tick,
+            contact_lat=contact_lat,
+            contact_lon=contact_lon,
+            contact_speed_mps=contact_speed_mps,
+            nearest_asset_lat=nearest_asset_lat,
+            nearest_asset_lon=nearest_asset_lon,
+        )
+
+    def travel_time_s(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        return float(self.port.travel_time_s(lat1, lon1, lat2, lon2))
+
+    def dispatches(self) -> tuple[tuple[str, str, int, bool], ...]:
+        """Every dispatch asked for: ``(kind, contact_id, tick, accepted)``, in order."""
+        return tuple((k[0], k[1], k[2], bool(r.accepted)) for k, r in self._memo.items())
+
+
+def advance_responder(world: ProbeWorld, tick: int, rung: Rung = Rung.ASK) -> None:
+    """Step the run's responder to ``tick``: toward its target with the target's last
+    fix and nearest asset while it has one, else on with what it was doing (return to
+    dock, or docked). Called once per runner tick, so the trail has a point per tick."""
+    port = world.responder
+    if port is None:
+        return
+    snap = port.snapshot
+    if int(snap.tick) >= tick:
+        return
+    target = getattr(snap, "target_contact_id", None)
+    if target is None or track_upto(world.run, target, tick) is None:
+        catch_up(port, tick)
+        return
+    advance_port(world.context(target, tick, rung), port, tick)
+
+
+def fresh_fix(world: ProbeWorld, contact_id: str, tick: int) -> bool:
+    """True when the contact's last fix is at most ``FIX_MAX_AGE_S`` old at ``tick``."""
+    track = track_upto(world.run, contact_id, tick)
+    if track is None:
+        return False
+    return (tick - track.points[-1].tick) * float(world.run.tick_s) <= FIX_MAX_AGE_S
+
+
+def dispatch_look_now(
+    world: ProbeWorld, contact_id: str, tick: int, rung: Rung, *, max_ticks: int | None = None
+) -> dict[str, Any] | None:
+    """Dispatch the responder to look at ``contact_id`` now; the probe args
+    (``{"eta_ticks": n}``: the real transit ETA plus the settle time) or None when the
+    responder declines, or when the look would land after ``max_ticks`` (then it is
+    sent back to dock at once). The guard check is the caller's."""
+    port = world.responder
+    if port is None:
+        return None
+    ctx = world.context(contact_id, tick, rung)
+    fix = contact_fix(ctx, tick)
+    if fix is None:
+        return None
+    catch_up(port, tick)
+    result = port.dispatch_to_look(contact_id, fix[0], fix[1], tick)
+    if not result.accepted:
+        return None
+    from soundings.investigation.probes import LOOK_SETTLE_S
+
+    n = latency_ticks(round(float(result.eta_s) + LOOK_SETTLE_S, 6), ctx.tick_s)
+    if max_ticks is not None and n > max_ticks:
+        release(port, tick)
+        return None
+    return {"eta_ticks": n}
+
+
+def look_fits(world: ProbeWorld, contact_id: str, tick: int, rung: Rung, ticks_left: int) -> bool:
+    """True when a look dispatched now would land within ``ticks_left`` (estimate)."""
+    est = look_eta_estimate_s(world.context(contact_id, tick, rung))
+    if est is None:
+        return False
+    return latency_ticks(round(est, 6), float(world.run.tick_s)) <= ticks_left
+
+
+# --- WO-088D end ---
 
 
 class RunProbeRunner:
@@ -284,6 +425,13 @@ class PlannerAdapter:
         tick_s = float(self.world.run.tick_s)
         # --- WO-088 begin --- (a look is a candidate only when the guard permits it)
         available = responder_available(self.world, cid, table, budget.tick)
+        # --- WO-088D begin --- (a look must land in time and look at a fresh fix)
+        available = (
+            available
+            and fresh_fix(self.world, cid, budget.tick)
+            and look_fits(self.world, cid, budget.tick, rung, budget.ticks_left)
+        )
+        # --- WO-088D end ---
         latency: dict[ProbeId, float] = {}
         if available:
             ctx0 = self.world.context(cid, budget.tick, rung)
@@ -304,18 +452,32 @@ class PlannerAdapter:
             responder_available=available,  # WO-088
             probe_latency_s=latency,  # WO-088
         )
-        if isinstance(self.planner, LlmPlanner):
-            when = f"{self.label}{cid}/t={budget.tick}"
-            choice = self.planner.choose(
-                state, self.tables, table=table, report=posterior, when=when
+        choice = self._choose(state, table, posterior, cid, budget.tick)
+        # --- WO-088D begin --- (dispatch to look when chosen; the real ETA is the latency)
+        look_args: dict[str, Any] | None = None
+        if choice.probe_id is ProbeId.RESPONDER_LOOK:
+            look_args = dispatch_look_now(
+                self.world, cid, budget.tick, rung, max_ticks=budget.ticks_left
             )
-        else:
-            choice = self.planner.choose(state, self.tables)
-        self.choices.append(RecordedChoice(contact_id=cid, tick=budget.tick, choice=choice))
+            if look_args is None:  # declined: choose again without the responder
+                state = dataclasses.replace(state, responder_available=False, probe_latency_s={})
+                choice = self._choose(state, table, posterior, cid, budget.tick)
+        # --- WO-088D end ---
         if choice.probe_id is None:
             return None
         spec = ALLOWLIST[choice.probe_id]
         ctx = self.world.context(cid, budget.tick, rung)
+        if look_args is not None and choice.probe_id is ProbeId.RESPONDER_LOOK:  # WO-088D
+            return ProbeChoice(
+                probe_id=choice.probe_id,
+                args=look_args,
+                cost_usd=spec.cost_usd,
+                latency_s=float(look_args["eta_ticks"]) * tick_s,
+                interruption=spec.interruption,
+                rung_required=spec.rung_required,
+                source=choice.source,
+                why=choice.why or "",
+            )
         return ProbeChoice(
             probe_id=choice.probe_id,
             args=resolve_args(choice.probe_id, ctx, table),
@@ -326,6 +488,27 @@ class PlannerAdapter:
             source=choice.source,
             why=choice.why or "",
         )
+
+    # --- WO-088D begin ---
+    def _choose(
+        self,
+        state: PlannerState,
+        table: EvidenceTable,
+        posterior: PosteriorReport,
+        cid: str,
+        tick: int,
+    ) -> PlannerChoice:
+        if isinstance(self.planner, LlmPlanner):
+            when = f"{self.label}{cid}/t={tick}"
+            choice = self.planner.choose(
+                state, self.tables, table=table, report=posterior, when=when
+            )
+        else:
+            choice = self.planner.choose(state, self.tables)
+        self.choices.append(RecordedChoice(contact_id=cid, tick=tick, choice=choice))
+        return choice
+
+    # --- WO-088D end ---
 
 
 # --- the writer --------------------------------------------------------------------------
