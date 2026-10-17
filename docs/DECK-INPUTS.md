@@ -37,7 +37,7 @@ watch → ask → slow → hold → hand to a person. We live on **ask** and **h
 ## Slide: twists
 | twist | what changed in the build | proof |
 |---|---|---|
-| 1 | | |
+| 1 | none — written response: Navy SBIR (N152-113, N252-116/117) primary; DHS S&T alternative; DIU fast on-ramp; NSF SBIR non-defense. Soundings sits upstream of the Navy 25.2 topics | twists/01/response.md + sources |
 | 2 | | |
 | 3 | | |
 

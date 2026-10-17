@@ -59,7 +59,7 @@ Last updated: 2026-10-17 00:27 PDT (Phases 0–2 complete; Phase 3 one-quarter; 
 ## Twist log
 | twist | landed | submitted | branch | commit | toggle/scenario |
 |---|---|---|---|---|---|
-| 1 | | | | | |
+| 1 | Fri 11:30 PM (scheduled); response received 2026-10-17 05:43 PDT | pending (owner submits via portal) | twist/1-funding-pathways | see PR | none — written response (funding pathway) |
 | 2 | | | | | |
 | 3 | | | | | |
 
