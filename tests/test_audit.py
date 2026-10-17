@@ -492,9 +492,7 @@ def test_cli_reads_env_db(tmp_path: Path) -> None:
 # --- determinism ---------------------------------------------------------------------------
 
 _HEAD_SCRIPT = """
-import sys
-sys.path.insert(0, {tests!r})
-from test_audit import _filled
+from tests.test_audit import _filled
 print(_filled(":memory:").head())
 """
 
@@ -508,7 +506,7 @@ def test_deterministic_chain_head(tmp_path: Path) -> None:
     for seed in ("0", "1"):
         env = {**os.environ, "PYTHONHASHSEED": seed, "MODEL_MODE": "replay"}
         out = subprocess.run(
-            [sys.executable, "-c", _HEAD_SCRIPT.format(tests=str(REPO / "tests"))],
+            [sys.executable, "-c", _HEAD_SCRIPT],
             capture_output=True,
             text=True,
             cwd=REPO,
