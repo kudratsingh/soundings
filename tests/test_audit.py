@@ -28,6 +28,7 @@ from soundings.ladder.audit import (
     AuditRow,
     LlmCallPayload,
     ProbePayload,
+    SitrepPayload,
     approval_payload,
     chain_hash,
     guard_decision_payload,
@@ -35,6 +36,8 @@ from soundings.ladder.audit import (
 from soundings.ladder.guards import GuardInputs
 from soundings.ladder.types import ActionScope, GuardDecision, GuardName, GuardVerdict
 from soundings.probe_keys import idempotency_key, tick_bucket
+from soundings.schemas.enums import Rung
+from tests.support.handoff_runs import REJECTION_CONTACT, S05Handoff, run_s05
 
 REPO = Path(__file__).resolve().parent.parent
 RUN = "S05-11"
@@ -521,3 +524,82 @@ def test_no_wall_clock_or_model_imports() -> None:
     text = (REPO / "soundings" / "ladder" / "audit.py").read_text(encoding="utf-8")
     for needle in ("soundings.llm", "anthropic", "datetime", "time.time"):
         assert needle not in text, needle
+
+
+# --- WO-042 part B: SITREP path rows from the handoff service ------------------------------
+
+
+def _handoff(tmp_path: Path, cid: str) -> S05Handoff:
+    return run_s05(tmp_path / cid, writer_mode="auto", cid=cid)
+
+
+def test_sitrep_path_rows_and_chain(tmp_path: Path) -> None:
+    good = _handoff(tmp_path, "c-0005")
+    sitreps = [r.payload for r in good.audit.rows(kind="sitrep")]
+    assert [p["status"] for p in sitreps][:2] == ["draft", "final"]
+    assert sitreps[0]["path"] == "template" and "fixture_key" not in sitreps[0]
+    final = sitreps[1]
+    assert final["path"] == "fixture-replay" and final["writer"] == "llm"
+    assert len(final["fixture_key"]) == 64 and "violation_reason" not in final
+    assert final["recommended_rung"] == "hand_to_person" and final["channel"] == "ui"
+    calls = [r.payload for r in good.audit.rows(kind="llm_call")]
+    assert calls == [
+        {"role": "sitrep_writer", "fixture_key": final["fixture_key"], "outcome": "accepted"}
+        | {"violation_reason": None}
+    ]
+    packet_md = good.service.packets[1].markdown
+    assert final["markdown_sha256"] == hashlib.sha256(packet_md.encode()).hexdigest()
+    assert good.audit.verify().ok
+
+    bad = _handoff(tmp_path, REJECTION_CONTACT)
+    final = [r.payload for r in bad.audit.rows(kind="sitrep")][1]
+    assert final["path"] == "fallback-after-rejection" and final["writer"] == "template"
+    assert final["violation_reason"] == "recommended_rung_mismatch"
+    assert final["recommended_rung"] == "hand_to_person"
+    (call,) = [r.payload for r in bad.audit.rows(kind="llm_call")]
+    assert call["outcome"] == "rejected"
+    assert call["violation_reason"] == "recommended_rung_mismatch"
+    assert call["fixture_key"] == final["fixture_key"]
+    assert bad.audit.verify().ok
+    assert _cli("verify", "--db", str(bad.audit.db)).returncode == 0
+
+
+def test_handoff_audit_kinds_and_token_hash(tmp_path: Path) -> None:
+    out = _handoff(tmp_path, "c-0005")
+    kinds = {r.kind for r in out.audit.rows()}
+    assert {"transition", "guard_decision", "approval", "action", "sitrep", "llm_call"} <= kinds
+    (approval,) = [r.payload for r in out.audit.rows(kind="approval")]
+    assert approval["outcome"] == "granted"
+    assert len(approval["token_hash"]) == 64
+    assert "mac" not in approval and "token" not in approval
+    assert all(r.retention_label == "30 days (demo)" for r in out.audit.rows())
+    seqs = [p.audit_seq for p in out.service.packets]
+    assert all(s is not None for s in seqs) and seqs == sorted(seqs)
+
+
+def test_sitrep_payload_without_path_keeps_part_a_shape() -> None:
+    plain = SitrepPayload(
+        markdown_sha256="ab" * 32, writer="template", status="final", recommended_rung=Rung.ASK
+    )
+    assert set(json.loads(canonical_json(plain))) == {
+        "markdown_sha256",
+        "writer",
+        "status",
+        "recommended_rung",
+    }
+    with pytest.raises(ValueError):
+        SitrepPayload(
+            markdown_sha256="ab" * 32,
+            writer="template",
+            status="final",
+            recommended_rung=Rung.ASK,
+            path="fallback-after-rejection",
+        )
+
+
+def test_handoff_chain_deterministic(tmp_path: Path) -> None:
+    a = _handoff(tmp_path / "a", "c-0005")
+    b = _handoff(tmp_path / "b", "c-0005")
+    assert [(r.kind, r.payload_json, r.row_hash) for r in a.audit.rows()] == [
+        (r.kind, r.payload_json, r.row_hash) for r in b.audit.rows()
+    ]

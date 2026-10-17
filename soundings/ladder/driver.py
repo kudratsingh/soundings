@@ -729,7 +729,16 @@ class DriverSession:
         )
 
     def _render(self, c: _Contact, inputs: SitrepInputs) -> None:
-        text = self.driver.sitrep_writer.render(inputs)
+        # --- WO-042 begin ---
+        # A writer that also takes the contact's evidence rows (WO-042 ``HandoffService``)
+        # gets every row the driver kept for the contact; any other ``SitrepWriterLike``
+        # renders from the inputs alone, exactly as before.
+        with_rows = getattr(self.driver.sitrep_writer, "render_with_rows", None)
+        if callable(with_rows):
+            text = str(with_rows(inputs, tuple(c.rows.values())))
+        else:
+            text = self.driver.sitrep_writer.render(inputs)
+        # --- WO-042 end ---
         c.sitreps.append(RenderedSitrep.build(inputs, text))
 
     def _sitrep(
