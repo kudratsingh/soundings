@@ -313,20 +313,27 @@ def find_cue(
     audio: np.ndarray,
     template: np.ndarray,
     expect_s: float,
-    search_s: float = 0.4,
+    search_s: float = 0.25,
     rate: int = RATE,
 ) -> float:
-    """Where ``template`` starts in ``audio`` near ``expect_s`` (normalised cross-correlation)."""
+    """Where ``template`` starts in ``audio`` near ``expect_s``.
+
+    A matched filter restricted to the template's own band (bins within 20 dB of its
+    spectral peak), so speech outside the cue's notes cannot pull the peak.
+    """
     lo = max(0, int((expect_s - search_s) * rate))
     hi = min(audio.size, int((expect_s + search_s) * rate) + template.size)
     seg = audio[lo:hi].astype(np.float64)
     tpl = template.astype(np.float64)
     if seg.size < tpl.size:
         raise ValueError("search window shorter than the template")
-    corr = np.correlate(seg, tpl, mode="valid")
-    energy = np.convolve(np.square(seg), np.ones(tpl.size), mode="valid")
-    score = corr / np.sqrt(np.maximum(energy, 1e-12))
-    return (lo + int(np.argmax(score))) / rate
+    nfft = 1 << int(math.ceil(math.log2(seg.size + tpl.size)))
+    spec_t = np.fft.rfft(tpl, nfft)
+    mag = np.abs(spec_t)
+    band = mag >= 0.1 * float(np.max(mag))
+    corr = np.fft.irfft(np.fft.rfft(seg, nfft) * np.conj(spec_t) * band, nfft)
+    valid = corr[: seg.size - tpl.size + 1]
+    return (lo + int(np.argmax(valid))) / rate
 
 
 def load_sfx(name: str, rate: int = RATE) -> np.ndarray:
