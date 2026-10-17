@@ -42,7 +42,7 @@ Clock: submission 10:00 PM; freeze non-demo work 6:00 PM; hard freeze 8:30 PM; f
 | 033 | investigation machine | part A merged; part B pending | wo/033a-investigation-core | see PR | | 1266 passed (122 new: test_stopping_rule, test_investigation_machine, test_investigation part A) |
 | 040 | ladder machine | merged | wo/040-ladder-machine | #6 | 76edbcc | 450 passed (55 ladder/clock) |
 | 041 | guards + standing orders | merged | wo/041-guards-standing-orders | #9 | 1848d92 | 950 passed (141 guards/orders/approval) |
-| 042 | sitrep + handoff + audit | pending | wo/042-sitrep-handoff-audit | | | |
+| 042 | sitrep + handoff + audit | part A merged; part B pending | wo/042a-audit-sitrep-template (part A) | #18 | | 45 part A tests (test_audit 21, test_sitrep 24); full suite green on main at rebase |
 | 043 | watch after handoff | part A merged; part B pending | wo/043a-ladder-driver-watch | | | see PR (part A: test_ladder_driver 14, test_watch_after_handoff 9) |
 | 050 | baselines | merged | wo/050-baselines | #13 | f2e8bc3 | 979 passed (29 baselines) |
 | 051 | eval harness | part A merged; part B pending | wo/051a-eval-core (part A) | #24 | | 1454+ passed after rebase (42 WO-051 part A) |
