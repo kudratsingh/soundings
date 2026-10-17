@@ -92,7 +92,7 @@ from soundings.matcher import (
     registry_lookup,
     registry_lookup_rows,
 )
-from soundings.ports import ObservedTracks, WorldRun
+from soundings.ports import CloseLook, ObservedTracks, WorldRun
 from soundings.probe_keys import TICK_BUCKET_S, idempotency_key, tick_bucket
 from soundings.registry.models import PlanView
 from soundings.registry.store import RegistryStore
@@ -102,7 +102,6 @@ from soundings.schemas.enums import (
     EvidenceKind,
     FeatureName,
     HailReply,
-    Hypothesis,
     ProbeId,
     Rung,
     ToggleName,
@@ -838,20 +837,6 @@ _RESPONDER_UNITS: Final[Mapping[FeatureName, Unit]] = MappingProxyType(
         FeatureName.SEARCH_POSITION: Unit.ID,
     }
 )
-VISUAL_CLASS_OF: Final[Mapping[Hypothesis, str]] = MappingProxyType(
-    {
-        Hypothesis.FILED_ON_PLAN: "uuv",
-        Hypothesis.FILED_OFF_PLAN: "uuv",
-        Hypothesis.UNFILED_KNOWN_OPERATOR: "uuv",
-        Hypothesis.UNAUTHORIZED_UUV: "uuv",
-        Hypothesis.BIOLOGIC: "marine_life",
-        Hypothesis.DEBRIS_OR_DRIFT: "debris",
-        Hypothesis.SURFACE_VESSEL_AIS_OFF: "surface_vessel",
-        Hypothesis.UNAUTHORIZED_DIVER: "diver",
-    }
-)
-"""What a close look sees for each simulated contact (a class, never a hypothesis id)."""
-
 RESPONDER_ALLOWLIST: Final[Mapping[ProbeId, ProbeSpec]] = MappingProxyType(
     {
         ProbeId.RESPONDER_LOOK: ProbeSpec(
@@ -1087,22 +1072,13 @@ def range_factor(range_m: float | None) -> float:
     return 1.0 if range_m <= LOOK_RANGE_REF_M else LOOK_RANGE_REF_M / range_m
 
 
-def _close_acoustics(ctx: ProbeContext, t: int) -> dict[FeatureName, EvidenceValue]:
-    """The contact's acoustic signature from its latest real detection at or before ``t``."""
-    dets = [
-        d
-        for d in ctx.run.detections
-        if d.observed_contact_id == ctx.contact_id and d.tick <= t and not d.is_false_alarm
-    ]
-    if not dets:
-        return {}
-    d = max(dets, key=lambda x: (x.tick, x.node_id))
-    return {
-        FeatureName.PROPELLER_TONAL_PRESENT: bool(d.propeller_tonal_present),
-        FeatureName.TONAL_BAND: d.tonal_band.value,
-        FeatureName.CAVITATION_INDEX: float(d.cavitation_index),
-        FeatureName.BREATHING_OR_CLICK_PRESENT: bool(d.breathing_or_click_present),
-    }
+def _close_look(ctx: ProbeContext, t: int) -> CloseLook | None:
+    """The world's answer to a close look (``CloseLookWorld.close_look``), if it has one."""
+    look = getattr(ctx.run, "close_look", None)
+    if not callable(look):
+        return None
+    answer = look(ctx.contact_id, t)
+    return answer if isinstance(answer, CloseLook) else None
 
 
 def _responder_look(
@@ -1129,11 +1105,12 @@ def _responder_look(
         return []
     visibility = camera_visibility(ctx, landed)
     factor = range_factor(snap.distance_to_target_m)
-    truth = ctx.run.contact_truth.get(ctx.contact_id)
+    close_look = _close_look(ctx, landed)
     rows: list[EvidenceRow] = []
     visual: EvidenceValue = UNKNOWN
-    if truth is not None and visibility > 0.0 and factor > 0.0:
-        visual = VISUAL_CLASS_OF[truth.hypothesis]
+    seen_class = None if close_look is None else close_look.visual_class
+    if seen_class is not None and visibility > 0.0 and factor > 0.0:
+        visual = seen_class
     rows.append(
         _responder_row(
             ctx, pid, FeatureName.VISUAL_CLASS, visual,
@@ -1159,9 +1136,9 @@ def _responder_look(
         pattern = classify_transit_pattern(arrays)
         pattern_value = UNKNOWN if pattern is None else pattern.value
     rows.append(_responder_row(ctx, pid, FeatureName.TRANSIT_PATTERN, pattern_value, close, landed))
-    heard = _close_acoustics(ctx, landed)
+    heard = {} if close_look is None else close_look.acoustics
     for feature in LOOK_ACOUSTIC_FEATURES:
-        value = heard.get(feature, UNKNOWN)
+        value: EvidenceValue = heard.get(feature.value, UNKNOWN)
         rows.append(_responder_row(ctx, pid, feature, value, close, landed))
     return rows
 
