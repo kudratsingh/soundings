@@ -196,9 +196,11 @@ function App() {
     }, 5000)
     // --- WO-060B end ---
     // WO-060C: exactly once per page load (StrictMode runs this effect twice in dev)
-    if (params.scenario && !autoStarted.current) {
-      autoStarted.current = true
-      begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
+    if (params.scenario) {
+      if (!autoStarted.current) {
+        autoStarted.current = true
+        begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
+      }
     }
     return () => window.clearInterval(poll) // WO-060B
   }, [])
