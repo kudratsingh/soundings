@@ -330,7 +330,17 @@ def test_pending_policy_renders_placeholders(tmp_path: Path, report: dict[str, A
     copy = tmp_path / "DEVPOST.md"
     shutil.copy(DEVPOST, copy)
     build_deck.refresh_devpost(copy, build_deck.Report(partial))
-    assert copy.read_text() == DEVPOST.read_text()
+    # The committed DEVPOST.md carries the numbers of the last `make deck` (final pass,
+    # 2026-10-17 19:41 PDT), so a pending-policy refresh rewrites only the eval block:
+    # placeholders inside it, everything around it byte-identical.
+    before, after = copy.read_text(), DEVPOST.read_text()
+    b_head, b_rest = before.split(build_deck.EVAL_BEGIN, 1)
+    a_head, a_rest = after.split(build_deck.EVAL_BEGIN, 1)
+    b_block, b_tail = b_rest.split(build_deck.EVAL_END, 1)
+    a_block, a_tail = a_rest.split(build_deck.EVAL_END, 1)
+    assert (b_head, b_tail) == (a_head, a_tail)
+    assert "eval pending" in b_block
+    assert not re.search(r"\d", b_block)
 
 
 # ---------------------------------------------------------------------------
@@ -486,10 +496,16 @@ def test_devpost_description_length_and_refresh(tmp_path: Path) -> None:
     # idempotent
     build_deck.refresh_devpost(copy, rep)
     assert copy.read_text() == filled
-    # and back to pending without a report
+    # and back to pending without a report: only the eval block changes
     build_deck.refresh_devpost(copy, build_deck.Report(None))
-    assert copy.read_text() == DEVPOST.read_text()
-    assert 180 <= _words(_section(DEVPOST.read_text(), "Description (about 250 words)")) <= 270
+    pending, committed = copy.read_text(), DEVPOST.read_text()
+    p_head, p_rest = pending.split(build_deck.EVAL_BEGIN, 1)
+    c_head, c_rest = committed.split(build_deck.EVAL_BEGIN, 1)
+    p_block, p_tail = p_rest.split(build_deck.EVAL_END, 1)
+    _c_block, c_tail = c_rest.split(build_deck.EVAL_END, 1)
+    assert (p_head, p_tail) == (c_head, c_tail)
+    assert "eval pending" in p_block
+    assert 180 <= _words(_section(committed, "Description (about 250 words)")) <= 270
 
 
 # ---------------------------------------------------------------------------
