@@ -3,6 +3,7 @@
 // local API; nothing here touches a live model.
 
 import type { RunSummary } from './api'
+import { RUN_SOURCE } from './api'
 
 export type StepKind = 'catalog' | 'action' | 'live' | 'twist' | 'eval'
 
@@ -152,7 +153,9 @@ export async function startStepRun(
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario, seed, speed, toggles }),
+    // WO-062B found live presenter runs on the batch source (no hold, twist toggles 400); stage runs
+    // use the same runner v3 source as the main screen.
+    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE }),
   })
   if (!res.ok) throw new Error(`start run: HTTP ${res.status} ${await res.text()}`)
   return (await res.json()) as RunSummary
