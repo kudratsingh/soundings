@@ -1609,3 +1609,62 @@ button.link:hover {
   box-shadow: inset 3px 0 0 var(--evidence);
 }
 /* --- WO-060D end --- */
+
+/* --- WO-060E begin: quiet the other cases (opacity-only motion; fixed row heights) --- */
+.show-all-btn {
+  margin-left: 0;
+}
+
+.others-row {
+  display: grid;
+  grid-template-columns: 10px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  text-align: left;
+  cursor: pointer;
+  contain: content;
+  white-space: nowrap;
+}
+
+.others-row:hover,
+.others-row.open {
+  background: var(--hover);
+}
+
+.others-n {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.others-sum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.case-row.unfolded {
+  animation: quiet-unfold var(--fade-ms) ease-out both;
+}
+
+@keyframes quiet-unfold {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .case-row.unfolded {
+    animation: none;
+  }
+}
+/* --- WO-060E end --- */

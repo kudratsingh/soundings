@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from tests.e2e._judge import offline
+from tests.e2e._quiet import reveal
 
 
 def _page(browser: Any, live_server: str, query: str) -> Any:
@@ -70,7 +71,8 @@ def test_responder_moment_and_steady_now_line(live_server: str, browser: Any) ->
     page = _page(browser, live_server, "scenario=S02&seed=3&speed=50&tiles=off")
     page.wait_for_selector("[data-testid=contact-marker]", timeout=60_000)
     # WO-060D: key moments show the focused case; pin the glider's case (c-0001).
-    page.locator("[data-testid=case-row]", has_text="c-0001").first.click()
+    # WO-060E: a case that is not the focus sits behind `others · n`; reveal opens it.
+    reveal(page, "[data-testid=case-row][data-case='c-0001']", 60_000).first.click()
     seen: list[str] = []
     for _ in range(240):
         line = page.locator("[data-testid=now-line]").inner_text().split("—")[0].strip()

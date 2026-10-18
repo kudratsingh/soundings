@@ -9,6 +9,9 @@
 // WO-060D: with a focused case, 'follow selected' starts on (it pans only when the focused
 // contact leaves the middle of the view) and every other contact is drawn at reduced opacity
 // in its state colour; the responder overlay is untouched.
+// WO-060E: with `quietOthers`, every contact outside the focused case is drawn dimmed, with no
+// label and no leader; the focused one keeps its label, trail, leader and ellipse. The
+// responder overlay and the legend are untouched.
 
 import L from 'leaflet'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -52,6 +55,10 @@ interface Props {
   tickS?: number
   /** WO-060D: draw contacts outside the focused case at reduced opacity. */
   dimOthers?: boolean
+  // --- WO-060E begin ---
+  /** Draw contacts outside the focused case dimmed and unlabelled. */
+  quietOthers?: boolean
+  // --- WO-060E end ---
 }
 
 const TONE_COLOR: Record<Tone, string> = {
@@ -150,6 +157,7 @@ const ContactLayer = memo(function ContactLayer({
   onSelect,
   projected = false, // WO-086
   dim = false, // WO-060D
+  quiet = false, // WO-060E
 }: {
   c: ContactView
   selected: boolean
@@ -161,6 +169,8 @@ const ContactLayer = memo(function ContactLayer({
   projected?: boolean
   /** WO-060D: not the focused case: reduced opacity, still in its state colour. */
   dim?: boolean
+  /** WO-060E: outside the focused case: dimmed, no label, no leader. */
+  quiet?: boolean
 }) {
   const ref = useRef<LCircleMarker | null>(null)
   useEffect(() => {
@@ -169,10 +179,11 @@ const ContactLayer = memo(function ContactLayer({
       el.setAttribute('data-testid', 'contact-marker')
       el.setAttribute('data-contact', c.contact_id)
       el.setAttribute('data-dim', dim ? '1' : '0') // WO-060D
+      el.setAttribute('data-quiet', quiet ? '1' : '0') // WO-060E
     }
   })
   const color = TONE_COLOR[tone]
-  const k = dim ? DIM : 1 // WO-060D
+  const k = dim || quiet ? DIM : 1 // WO-060D; WO-060E quiet contacts are dimmed the same
   const trail = c.track.slice(-TRAIL_FIXES)
   const third = Math.max(1, Math.floor(trail.length / 3))
   const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
@@ -205,7 +216,7 @@ const ContactLayer = memo(function ContactLayer({
           />
         ) : null,
       )}
-      {lead && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9 * k, dashArray: '2 4' }} />}
+      {lead && !quiet /* WO-060E */ && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9 * k, dashArray: '2 4' }} />}
       {selected && <CircleMarker center={pos} radius={15} interactive={false} className="halo" pathOptions={{ color, weight: 1.5, opacity: 0.9, fillOpacity: 0.08 }} />}
       <CircleMarker
         ref={ref}
@@ -214,9 +225,11 @@ const ContactLayer = memo(function ContactLayer({
         pathOptions={{ color: '#06121c', weight: 1.5, opacity: k, fillColor: color, fillOpacity: k }}
         eventHandlers={{ click: () => onSelect(c.contact_id) }}
       >
-        <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
-          {label}
-        </Tooltip>
+        {!quiet /* WO-060E: no label outside the focused case */ && (
+          <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
+            {label}
+          </Tooltip>
+        )}
       </CircleMarker>
     </>
   )
@@ -279,6 +292,7 @@ export default function HarborMap({
   mapStyle = 'radar',
   tickS = 2,
   dimOthers = false, // WO-060D
+  quietOthers = false, // WO-060E
 }: Props) {
   const [legend, setLegend] = useState(false)
   const [follow, setFollow] = useState(true) // WO-060D: the focused contact is followed by default
@@ -388,6 +402,7 @@ export default function HarborMap({
             onSelect={onSelect}
             projected={c.contact_id === projectedId} // WO-086
             dim={dimOthers && !isSel(c.contact_id)} // WO-060D
+            quiet={quietOthers && !isSel(c.contact_id)} // WO-060E
           />
         ))}
         {overlay}

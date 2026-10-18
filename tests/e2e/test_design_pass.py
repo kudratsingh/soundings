@@ -5,12 +5,12 @@ request aborted and a PerformanceObserver (layout-shift, longtask) injected befo
 
 (a) within 10 s: the cases list, a non-empty NOW line, the key-moments strip, and a case
     view whose ASK step shows the hail result;
-(b) picks another case from the list: the case view switches and shows only that case's
-    steps;
+(b) opens ``others · n`` (WO-060E) and picks another case: the case view switches and
+    shows only that case's steps;
 (c) measures 30 s of streaming: cumulative layout shift < 0.1 and no long task over 200 ms
     (the numbers are printed);
-(d) with both drawers open the case view holds < 400 row nodes while the stream has
-    reported > 1,000 rows;
+(d) with both drawers open (``show all`` on, WO-060E) the case view holds < 400 row nodes
+    while the stream has reported > 1,000 rows;
 (e) scrolls the case view and waits for new events: scrollTop does not jump;
 (f) the legend opens; no horizontal scrollbar at 1440x900 or 1920x1080.
 
@@ -23,6 +23,8 @@ from __future__ import annotations
 import time
 from typing import Any
 from urllib.parse import urlparse
+
+from tests.e2e._quiet import open_others
 
 LOOPBACK = {"127.0.0.1", "localhost"}
 ROWS_JS = (
@@ -98,6 +100,9 @@ def test_case_centric_and_stable(live_server: str, browser: Any) -> None:
     assert bar_h <= 52, f"top bar is {bar_h} px tall"
 
     # (b) select a different case: the view switches and shows only that case's steps
+    # WO-060E: every case but the focus is folded behind `others · n`; open it first.
+    page.wait_for_selector("[data-testid=others-row]", timeout=20_000)
+    open_others(page)
     page.wait_for_function(
         "() => document.querySelectorAll('[data-testid=case-row]').length >= 2", timeout=20_000
     )
@@ -150,6 +155,8 @@ def test_case_centric_and_stable(live_server: str, browser: Any) -> None:
         timeout=60_000,
     )
     page.click("[data-testid=evidence-drawer]")
+    # WO-060E: the every-case drawer is drawn only with `show all` on (debugging)
+    page.click("[data-testid=show-all]")
     page.click("[data-testid=transitions-drawer]")
     page.wait_for_selector("[data-testid=transitions-drawer-list]")
     total = int(page.locator("[data-testid=rows-total]").get_attribute("data-rows") or 0)

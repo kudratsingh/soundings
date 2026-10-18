@@ -88,6 +88,7 @@ open into Harbor Night: click its **Close** when step 4/7 lands (the recorder do
 
 ## 5. Controls
 
+- The screen shows one case; `others · n` opens the rest; `show all` reveals every event (WO-060E; `show all` is not drawn in presenter mode).
 - **Reset** restarts the scenario on screen (~1 s); old cases clear; one run per click.
 - Speed select + **Reset** applies the speed (top bar shows `50×`).
 - **About** → focus lands on Close; Physics tab shows 5 cards; Esc closes.
