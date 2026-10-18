@@ -95,6 +95,7 @@ def test_s05_focus_stays_on_the_first_case_past_ask(live_server: str, browser: A
     # climbs or is handed off, and nothing moves it from then on.
     climbed = ",".join(f"[data-testid=case-row][data-state={s}]" for s in CLIMBED)
     page.wait_for_selector(climbed, timeout=180_000)
+    page.wait_for_timeout(300)  # let the 50 ms focus sampler log the switch (loaded machines)
     hero = _focused(page)
     hero_row = page.locator(f"[data-testid=case-row][data-case='{hero}']")
     assert hero_row.get_attribute("data-focused") == "1"
