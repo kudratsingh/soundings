@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ScenarioInfo } from '../api'
 
 interface Props {
@@ -7,16 +7,26 @@ interface Props {
   onStart(scenario: string, seed: number | null, speed: number | null): void
   /** A run is on screen: the button restarts it (design pass). */
   running?: boolean
+  /** REH: the catalog run on screen; the fields follow it when a new run starts. */
+  current?: { key: string; scenario: string; seed: string; speed: string } | null
   /** WO-060C: a start is in flight; the button is inert (aria-busy) until its first event. */
   starting?: boolean
 }
 
 const SPEEDS = ['1', '5', '20', '50', '100', '0']
 
-export default function ScenarioPicker({ scenarios, initial, onStart, running = false, starting = false }: Props) {
+export default function ScenarioPicker({ scenarios, initial, onStart, running = false, current = null, starting = false }: Props) {
   const [scenario, setScenario] = useState(initial.scenario || 'S02')
   const [seed, setSeed] = useState(initial.seed)
   const [speed, setSpeed] = useState(initial.speed || '20')
+  // --- REH begin ---
+  useEffect(() => {
+    if (!current) return
+    setScenario(current.scenario)
+    setSeed(current.seed)
+    if (SPEEDS.includes(current.speed)) setSpeed(current.speed)
+  }, [current?.key])
+  // --- REH end ---
   return (
     <form
       className="picker"
