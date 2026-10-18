@@ -35,6 +35,56 @@ steps:
     spotlight: state-timeline
     caption: "Busy Tuesday. Filed jobs clear at ask; a plan is filed from a phone, conflict → proposed slot → accepted."
     say: "Busy Tuesday at 20x. Filed jobs clear at ask. A silent glider is found in the drift box."
+    # WO-062C: in the recording nobody holds a phone, so the demo files the plan itself
+    # (presenter log: "auto: plan filed (stands in for the phone)") through the registry
+    # endpoint the QR form uses, then clicks Accept on the proposal card. Times are local
+    # on today + day_offset (never in the past, so the slot solver can move the plan).
+    # The two in-force jobs (the first is S01's own plan) sit in separate depth bands, so
+    # they do not conflict with each other; the filed plan spans both bands, so the zone
+    # holds three concurrent plans over its capacity of two (config/registry.yaml slots)
+    # and the solver moves the new plan (OPTIMAL; tests/test_demo_auto_file.py).
+    # `make demo-video` files into a temp registry; on stage add `&auto=0` to the URL to
+    # leave the filing to a judge's phone.
+    auto_file:
+      at_s: 8
+      accept_after_s: 12
+      day_offset: 1
+      utc_offset: "-07:00"
+      in_force:
+        - plan_id: P-2026-1017-001
+          operator: "USC Wrigley (demo)"
+          vehicle: "AUV-Survey-1"
+          modem_id: "MOD-3310"
+          area: inner_basin_research
+          start: "14:00"
+          end: "16:00"
+          contact_channel: "sim-phone-operator"
+          job_type: survey
+          depth_min_m: 0
+          depth_max_m: 10
+        - plan_id: P-2026-1017-002
+          operator: "Harbor Survey Co (demo)"
+          vehicle: "ROV-Blue-2"
+          modem_id: "MOD-3311"
+          area: inner_basin_research
+          start: "14:00"
+          end: "16:00"
+          contact_channel: "radio ch 16"
+          job_type: survey
+          depth_min_m: 15
+          depth_max_m: 30
+      plan:
+        plan_id: P-PHONE-1
+        operator: "Phone filing (scripted demo)"
+        vehicle: "Survey glider"
+        modem_id: "MOD-4401"
+        area: inner_basin_research
+        start: "14:30"
+        end: "16:00"
+        contact_channel: "sim-phone-judge"
+        job_type: survey
+        depth_min_m: 0
+        depth_max_m: 30
   - t: "1:00"
     scenario: S05
     # WO-062B: 20x, not 1x. At 1x the run is still INVESTIGATING at +60 s, so the hold,

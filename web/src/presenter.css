@@ -150,3 +150,136 @@
   text-shadow: 0 1px 2px #000;
 }
 /* --- WO-088 end --- */
+
+/* --- WO-062C begin: the caption bar never covers the ladder rail; the evidence card --- */
+/* PresenterMode sets --presenter-bar-h (the bar's measured height, never shrinking within
+   a session) and the presenter-on class on <html>; the rail ends above the bar. */
+.presenter-on .rail {
+  box-sizing: border-box;
+  padding-bottom: var(--presenter-bar-h, 0px);
+}
+
+.presenter-evidence {
+  position: fixed;
+  left: 24px;
+  bottom: calc(var(--presenter-bar-h, 120px) + 16px);
+  z-index: 2400;
+  display: grid;
+  grid-template-columns: minmax(0, 330px) minmax(0, 1fr);
+  gap: 18px;
+  width: min(1100px, calc(100vw - 48px - clamp(560px, 42vw, 760px)));
+  padding: 16px 18px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  animation: pe-in 0.4s ease both;
+}
+
+@keyframes pe-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.presenter-evidence .pe-title {
+  display: block;
+  font-size: 18px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.presenter-evidence .pe-est {
+  display: block;
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pe-ledger ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pe-ledger li,
+.pe-blunt {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+.pe-n {
+  min-width: 2.2ch;
+  text-align: right;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-blunt {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 2px solid var(--blunt);
+  border-radius: 6px;
+  color: var(--blunt);
+}
+
+.pe-blunt .pe-n {
+  color: var(--blunt);
+  font-size: 36px;
+}
+
+.pe-eval table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 18px;
+}
+
+.pe-eval th,
+.pe-eval td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.pe-eval thead th {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+  vertical-align: bottom;
+}
+
+.pe-eval thead th:first-child {
+  color: var(--assumption);
+}
+
+.pe-eval tbody th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.pe-eval td {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-eval .pe-ours {
+  color: var(--benign);
+}
+
+.pe-missing {
+  margin: 12px 0;
+  font-size: 24px;
+  color: var(--threat);
+}
+/* --- WO-062C end --- */
