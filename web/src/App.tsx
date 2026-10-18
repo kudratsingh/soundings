@@ -92,6 +92,18 @@ function useParams() {
   }, [])
 }
 
+// --- WO-060C begin ---
+interface Starting {
+  scenario: string
+  seed: number | null
+  runId: string | null
+}
+
+function startingLine(s: Starting): string {
+  return `starting ${s.scenario}${s.seed !== null ? ` seed ${s.seed}` : ''}…`
+}
+// --- WO-060C end ---
+
 /** The boundary-table line for the active rung: who decides what there. */
 function boundaryReason(boundary: BoundaryInfo | null, rung: Rung): string {
   if (!boundary) return ''
@@ -127,12 +139,32 @@ function App() {
     : Object.fromEntries((physics?.nodes ?? []).map((n) => [n.node_id, n]))
   // --- WO-089 end ---
 
+  // --- WO-060C begin: one start at a time; the previous run is stopped (replaces) ---
+  const [starting, setStarting] = useState<Starting | null>(null)
+  const inFlight = useRef(false)
+  const autoStarted = useRef(false)
+  const runIdRef = useRef<string | null>(null)
+  runIdRef.current = runId
+  // The starting line stays until the new run's first event arrives.
+  useEffect(() => {
+    if (starting?.runId && run.runId === starting.runId && run.lastSeq >= 0) setStarting(null)
+  }, [starting, run.runId, run.lastSeq])
+  // --- WO-060C end ---
+
   const begin = (scenario: string, seed: number | null, speed: number | null) => {
+    if (inFlight.current) return // WO-060C: a click while a start is in flight is ignored
+    inFlight.current = true
+    setStarting({ scenario, seed, runId: null })
     setPicked(null)
     setHighlight(null)
+    const replaces = runIdRef.current // WO-060C
     // WO-060B: toggles from the URL; WO-061: ?source= picks the run source (stepped: a person approves)
-    ;(params.source ? startRunOn(params.source, scenario, seed, speed, params.toggles) : startRun(scenario, seed, speed, params.toggles))
+    ;(params.source
+      ? startRunOn(params.source, scenario, seed, speed, params.toggles, replaces)
+      : startRun(scenario, seed, speed, params.toggles, replaces)
+    )
       .then((r) => {
+        setStarting({ scenario, seed: r.seed, runId: r.run_id }) // WO-060C
         setRunId(r.run_id)
         const q = new URLSearchParams(window.location.search)
         q.set('scenario', scenario)
@@ -140,7 +172,13 @@ function App() {
         if (speed !== null) q.set('speed', String(speed))
         window.history.replaceState(null, '', `?${q.toString()}`)
       })
-      .catch((e: unknown) => setProblem(String(e)))
+      .catch((e: unknown) => {
+        setStarting(null) // WO-060C
+        setProblem(String(e))
+      })
+      .finally(() => {
+        inFlight.current = false // WO-060C
+      })
   }
 
   useEffect(() => {
@@ -158,7 +196,9 @@ function App() {
         .catch(() => setModel(null))
     }, 5000)
     // --- WO-060B end ---
-    if (params.scenario) {
+    // WO-060C: exactly once per page load (StrictMode runs this effect twice in dev)
+    if (params.scenario && !autoStarted.current) {
+      autoStarted.current = true
       begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
     }
     return () => window.clearInterval(poll) // WO-060B
@@ -182,7 +222,8 @@ function App() {
     const index = new Map(caseRows.map((r) => [r.row_id, r] as const))
     return caseItems(run.cases, summary.members, run.posteriorOf, index)
   }, [memberKey, caseRows, run.posteriorOf, summary?.state])
-  const now = nowLine(summary, items, tickS)
+  // WO-060C: between the click and the first event the NOW line says what is starting
+  const now = starting ? startingLine(starting) : nowLine(summary, items, tickS)
 
   // Map: case colour per contact id, the selected lineage, and labels.
   const { toneOf, caseLabel } = useMemo(() => {
@@ -272,7 +313,7 @@ function App() {
         </span>
         {run.finished && <span className="badge">run finished</span>}
         <span className="spacer" />
-        <ScenarioPicker scenarios={scenarios} initial={params} onStart={begin} running={run.started !== null} />
+        <ScenarioPicker scenarios={scenarios} initial={params} onStart={begin} running={run.started !== null} starting={starting !== null} />
         <button type="button" data-testid="sitrep-open" onClick={() => setSitrepOpen((o) => !o)}>
           SITREP{run.sitreps.length ? ` (${run.sitreps.length})` : ''}
         </button>

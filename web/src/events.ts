@@ -231,6 +231,7 @@ export interface RunFinishedPayload {
   track_hash: string
   transition_log_hash: string
   n_events: number
+  reason?: 'cancelled' // WO-060C: stopped by Reset (omitted on a run that ran to its end)
 }
 
 // --- WO-089 begin: live sensor range rings ---

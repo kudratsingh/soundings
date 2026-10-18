@@ -68,11 +68,12 @@ export async function startStepRun(
   seed: number | null,
   speed: number | null,
   toggles: string[] = [],
+  replaces: string | null = null, // WO-060C: the run on screen is stopped first
 ): Promise<RunSummary> {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario, seed, speed, toggles }),
+    body: JSON.stringify({ scenario, seed, speed, toggles, replaces }),
   })
   if (!res.ok) throw new Error(`start run: HTTP ${res.status} ${await res.text()}`)
   return (await res.json()) as RunSummary

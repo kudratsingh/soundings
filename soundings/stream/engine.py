@@ -19,6 +19,7 @@ import asyncio
 import bisect
 import builtins
 import itertools
+import threading  # WO-060C
 from collections import defaultdict
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -475,6 +476,37 @@ def source_names() -> list[str]:
 # --- runs and the engine ------------------------------------------------------------------
 
 
+# --- WO-060C begin: the final event of a cancelled run ---
+def _cancelled_finish(
+    run_id: str, kept: Sequence[StreamEvent], track_hash_value: str
+) -> RunFinished:
+    """``run_finished`` after the last released event: same tick and sim time, the next
+    ``seq``, each contact's last streamed state, ``reason: cancelled``."""
+    terminal: dict[str, LadderState] = {}
+    for e in kept:
+        if e.type == "transition":
+            terminal[e.payload.contact_id] = e.payload.to_state
+    last = kept[-1] if kept else None
+    return RunFinished.model_validate(
+        {
+            "run_id": run_id,
+            "seq": last.seq + 1 if last is not None else 0,
+            "tick": last.tick if last is not None else 0,
+            "t_s": last.t_s if last is not None else 0.0,
+            "payload": RunFinishedPayload(
+                terminal=dict(sorted(terminal.items())),
+                track_hash=track_hash_value,
+                transition_log_hash="",
+                n_events=len(kept) + 1,
+                reason="cancelled",
+            ),
+        }
+    )
+
+
+# --- WO-060C end ---
+
+
 @dataclass
 class RunHandle:
     """One held run: its events and the pacing clock that releases them."""
@@ -494,6 +526,10 @@ class RunHandle:
     _awaiting: set[str] = field(default_factory=set, repr=False)
     _last_t: float = field(default=0.0, repr=False)
     _anchor: tuple[float, float, float] = field(default=(0.0, 0.0, 1.0), repr=False)
+    # --- WO-060C begin: a run stopped by Reset ---
+    cancelled: bool = False
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    # --- WO-060C end ---
 
     def __post_init__(self) -> None:
         self._due = []
@@ -553,17 +589,63 @@ class RunHandle:
 
     @property
     def exhausted(self) -> bool:
+        if self.cancelled:  # WO-060C
+            return True
         src = self.source
         return not _is_lazy(src) or bool(getattr(src, "exhausted", True))
 
     def available(self) -> int:
         """How many events (a prefix) the pacing clock has released so far."""
-        if self.speed <= 0:
-            self._fill(float("inf"))
-            return len(self.events)
-        now = self.clock.now_s()
-        self._fill(now)
-        return bisect.bisect_right(self._due, now)
+        with self._lock:  # WO-060C: never interleaved with ``cancel``
+            if self.cancelled:
+                return len(self.events)
+            if self.speed <= 0:
+                self._fill(float("inf"))
+                return len(self.events)
+            now = self.clock.now_s()
+            self._fill(now)
+            return bisect.bisect_right(self._due, now)
+
+    # --- WO-060C begin: cancel (Reset stops the run on stage) ---
+    def cancel(self) -> bool:
+        """Stop an unfinished run: what the pacing clock already released is kept, then one
+        final ``run_finished`` with ``reason: cancelled``; nothing follows it. The source is
+        told to stop (a lazy source never steps again, a background build is discarded and
+        its audit log closed). Returns False when the run had already finished (idempotent).
+
+        Nothing here touches the ladder's decisions (CLAUDE.md 2.2): a cancelled run simply
+        stops being stepped, and its released prefix is the same prefix every subscriber saw.
+        """
+        with self._lock:
+            if self.cancelled:
+                return False
+            n = self.available()
+            if n >= len(self.events) and self.exhausted:
+                return False
+            stop = getattr(self.source, "cancel", None)
+            if callable(stop):
+                stop()
+            kept = list(self.events[:n])
+            final = _cancelled_finish(self.run_id, kept, self._known_track_hash())
+            due = self._due[:n]
+            self._due = [*due, due[-1] if due else 0.0]
+            # A new list: a lazy source's shared buffer is no longer the run's stream, and a
+            # subscriber indexing the old list sees the same prefix.
+            self.events = [*kept, final]
+            self.cancelled = True
+            return True
+
+    def _known_track_hash(self) -> str:
+        for e in reversed(self.events):
+            if e.type == "run_finished":
+                return str(e.payload.track_hash)
+        try:
+            th = getattr(self.source, "track_hash", None)
+        except Exception:  # a source that cannot say (still building, or failed)
+            th = None
+        return th if isinstance(th, str) else ""
+
+    # --- WO-060C end ---
 
     @property
     def finished(self) -> bool:
@@ -571,7 +653,7 @@ class RunHandle:
 
     def wait_s(self, index: int) -> float:
         """Wall seconds until event ``index`` is released (0 when it already is)."""
-        if self.speed <= 0:
+        if self.speed <= 0 or self.cancelled:  # WO-060C: a cancelled run is all released
             return 0.0
         if index >= len(self._due):
             return MAX_POLL_S if not self.exhausted else 0.0
@@ -588,6 +670,7 @@ class RunHandle:
             "source": self.source.name,
             "n_events": len(self.events),
             "finished": self.finished,
+            "cancelled": self.cancelled,  # WO-060C
         }
 
 
@@ -618,8 +701,13 @@ class RunEngine:
         use_llm: bool = False,
         source: str = "batch",
         responder: bool = False,  # WO-088D: the API (UI runs) passes True
+        replaces: str | None = None,  # WO-060C: stop this run first (one run on stage)
     ) -> RunHandle:
         sc = resolve_scenario(scenario) if isinstance(scenario, str) else scenario
+        # --- WO-060C begin ---
+        if replaces is not None and replaces in self._runs:
+            self.cancel(replaces)
+        # --- WO-060C end ---
         factory = _SOURCES.get(source)
         if factory is None:
             raise UnsupportedOption(f"unknown source {source!r}; known: {source_names()}")
@@ -691,15 +779,28 @@ class RunEngine:
         """Held runs, newest first."""
         return sorted(self._runs.values(), key=lambda h: h.order, reverse=True)
 
+    # --- WO-060C begin ---
+    def cancel(self, run_id: str) -> RunHandle:
+        """Stop a held run (``RunHandle.cancel``); a finished run is left as it is.
+        ``UnknownRun`` when no run with that id is held."""
+        handle = self.get(run_id)
+        handle.cancel()
+        return handle
+
+    # --- WO-060C end ---
+
     def approve(self, run_id: str, request_id: str, approver: str) -> ApprovalResultEvent:
         """Delegate to the run's source; the ladder's guard still decides (WO-061)."""
-        return self.get(run_id).source.approve(request_id, approver)
+        handle = self.get(run_id)
+        if handle.cancelled:  # WO-060C: a stopped run asks nobody anything
+            raise NoPendingApproval(f"run {run_id!r} was cancelled")
+        return handle.source.approve(request_id, approver)
 
     def run_to_end(self, run_id: str, approve_first: bool = False) -> builtins.list[StreamEvent]:
         """Every event of the run, unpaced. ``approve_first`` matters only to ``stepped``."""
         # --- WO-060B begin ---
         handle = self.get(run_id)
-        if _is_lazy(handle.source):
+        if _is_lazy(handle.source) and not handle.cancelled:  # WO-060C
             handle.source.events()
             handle._extend_due()
         # --- WO-060B end ---
@@ -714,7 +815,10 @@ class RunEngine:
         nothing. Returns the contact id. ``NoPendingApproval`` when the run has no open
         request for the token's contact or its source takes no tokens; ``ValueError``
         (``soundings.stream.v3.TokenRefused``) when the token does not verify for it."""
-        src = self.get(run_id).source
+        handle = self.get(run_id)
+        if handle.cancelled:  # WO-060C
+            raise NoPendingApproval(f"run {run_id!r} was cancelled")
+        src = handle.source
         deliver = getattr(src, "deliver_approval", None)
         if deliver is None:
             raise NoPendingApproval(f"run {run_id!r} ({src.name}) takes no approval tokens")
