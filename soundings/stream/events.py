@@ -159,6 +159,13 @@ class RunFinishedPayload(_Model):
     track_hash: str
     transition_log_hash: str
     n_events: int
+    # --- WO-060C begin: a run stopped by Reset (DELETE /api/runs/{id} or ``replaces``) ---
+    reason: Literal["cancelled"] | None = Field(default=None, exclude_if=lambda v: v is None)
+    """``cancelled`` when the run was stopped before its end; omitted on a run that ran to
+    its end, so a completed stream is byte-identical to the stream before WO-060C. A
+    cancelled run's ``terminal`` is each contact's last streamed state and its
+    ``transition_log_hash`` is empty (the ladder log was never closed)."""
+    # --- WO-060C end ---
 
 
 class ErrorPayload(_Model):

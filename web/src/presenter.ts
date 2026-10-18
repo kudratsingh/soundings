@@ -152,13 +152,14 @@ export async function startStepRun(
   seed: number | null,
   speed: number | null,
   toggles: string[] = [],
+  replaces: string | null = null, // WO-060C: the run on screen is stopped first
 ): Promise<RunSummary> {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // WO-062B found live presenter runs on the batch source (no hold, twist toggles 400); stage runs
     // use the same runner v3 source as the main screen.
-    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE }),
+    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE, replaces }),
   })
   if (!res.ok) throw new Error(`start run: HTTP ${res.status} ${await res.text()}`)
   return (await res.json()) as RunSummary

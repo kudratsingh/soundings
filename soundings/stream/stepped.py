@@ -176,8 +176,13 @@ class DeferredSteppedSource:
         self._lock = threading.Lock()
         self._ready = threading.Event()
         self._failed = False
+        self._cancelled = threading.Event()  # WO-060C
+        self._thread: threading.Thread | None = None  # WO-060C
         if background:
-            threading.Thread(target=self._build, name=f"stepped-{req.run_id}", daemon=True).start()
+            self._thread = threading.Thread(
+                target=self._build, name=f"stepped-{req.run_id}", daemon=True
+            )
+            self._thread.start()
         else:
             self._build()
 
@@ -199,6 +204,13 @@ class DeferredSteppedSource:
             self._ready.set()
             return
         with self._lock:
+            # --- WO-060C begin: a run cancelled while building is discarded, not started ---
+            if self._cancelled.is_set():
+                inner.cancel()
+                self._failed = True
+                self._ready.set()
+                return
+            # --- WO-060C end ---
             if self._annotator is not None:
                 self._annotator.expected_track_hash = inner.track_hash
                 inner.annotate(self._annotator)
@@ -219,6 +231,31 @@ class DeferredSteppedSource:
                 return
         hook()
 
+    # --- WO-060C begin ---
+    def cancel(self) -> None:
+        """Stop the run: a finished build is stopped (``V3Source.cancel``), a build still in
+        progress is discarded as soon as runner v3's precompute returns, and nothing waits
+        on it (an unpaced pull returns at once)."""
+        with self._lock:
+            self._cancelled.set()
+            inner = self._inner
+        if inner is not None:
+            inner.cancel()
+        self._ready.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def join(self, timeout: float | None = None) -> bool:
+        """Wait for the build thread; True once it has exited (or there never was one)."""
+        if self._thread is not None:
+            self._thread.join(timeout)
+            return not self._thread.is_alive()
+        return True
+
+    # --- WO-060C end ---
+
     def wait_ready(self, timeout: float | None = None) -> bool:
         return self._ready.wait(timeout)
 
@@ -234,7 +271,7 @@ class DeferredSteppedSource:
 
     @property
     def exhausted(self) -> bool:
-        if self._failed:
+        if self._failed or self._cancelled.is_set():  # WO-060C
             return True
         return self._inner is not None and self._inner.exhausted
 
@@ -253,7 +290,7 @@ class DeferredSteppedSource:
     def pull(self, until_t_s: float) -> int:
         """Step the built run; an unpaced pull (``inf``) waits for the build instead of
         spinning (the engine's speed-0 fill loops until the stream is exhausted)."""
-        if self._inner is None and until_t_s == math.inf:
+        if self._inner is None and until_t_s == math.inf and not self._cancelled.is_set():
             self._ready.wait()
         inner = self._inner
         return 0 if inner is None else inner.pull(until_t_s)

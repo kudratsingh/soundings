@@ -22,6 +22,7 @@ env:
     tests/test_slots_integration.py tests/test_separation_bt01.py tests/test_bt01_window_flex.py
     tests/test_vessel_transit.py tests/test_generate.py tests/test_busy_tuesday_rules.py
     tests/test_ledger_integration.py tests/test_sensor_ranges.py tests/test_triage_integration.py
+    tests/test_run_cancel.py
   HEAVY_B: >-
     tests/test_catalog_expected.py tests/test_catalog_outcomes_physics.py tests/test_eval.py
     tests/test_soundings_policy.py tests/test_policies.py tests/test_runner_v3.py

@@ -7,11 +7,13 @@ interface Props {
   onStart(scenario: string, seed: number | null, speed: number | null): void
   /** A run is on screen: the button restarts it (design pass). */
   running?: boolean
+  /** WO-060C: a start is in flight; the button is inert (aria-busy) until its first event. */
+  starting?: boolean
 }
 
 const SPEEDS = ['1', '5', '20', '50', '100', '0']
 
-export default function ScenarioPicker({ scenarios, initial, onStart, running = false }: Props) {
+export default function ScenarioPicker({ scenarios, initial, onStart, running = false, starting = false }: Props) {
   const [scenario, setScenario] = useState(initial.scenario || 'S02')
   const [seed, setSeed] = useState(initial.seed)
   const [speed, setSpeed] = useState(initial.speed || '20')
@@ -20,6 +22,7 @@ export default function ScenarioPicker({ scenarios, initial, onStart, running = 
       className="picker"
       onSubmit={(e) => {
         e.preventDefault()
+        if (starting) return // WO-060C: one start at a time
         onStart(scenario, seed === '' ? null : Number(seed), Number(speed))
       }}
     >
@@ -38,8 +41,8 @@ export default function ScenarioPicker({ scenarios, initial, onStart, running = 
           </option>
         ))}
       </select>
-      <button type="submit" data-testid="start-run">
-        {running ? 'Reset' : 'Start'}
+      <button type="submit" data-testid="start-run" aria-busy={starting} data-starting={starting ? '1' : '0'}>
+        {starting ? 'starting…' : running ? 'Reset' : 'Start'}
       </button>
     </form>
   )

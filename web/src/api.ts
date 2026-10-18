@@ -17,6 +17,7 @@ export interface RunSummary {
   source: string
   n_events: number
   finished: boolean
+  cancelled?: boolean // WO-060C: stopped by Reset
 }
 
 export interface BoundaryRow {
@@ -100,11 +101,17 @@ export const fetchHarbor = () => getJson<HarborGeoJson>('/api/harbor')
 // --- WO-060B begin: runs start on the runner v3 source ("v3") with optional toggles ---
 export const RUN_SOURCE = 'v3'
 
-export async function startRun(scenario: string, seed: number | null, speed: number | null, toggles: string[] = []) {
+export async function startRun(
+  scenario: string,
+  seed: number | null,
+  speed: number | null,
+  toggles: string[] = [],
+  replaces: string | null = null, // WO-060C: the run on screen is stopped first
+) {
   const res = await fetch('/api/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE }),
+    body: JSON.stringify({ scenario, seed, speed, toggles, source: RUN_SOURCE, replaces }),
   })
   // --- WO-060B end ---
   if (!res.ok) throw new Error(`start run: HTTP ${res.status} ${await res.text()}`)
@@ -175,8 +182,14 @@ export interface InjectReply {
 }
 
 /** Start a catalog run on a named source (`?source=stepped`: a person approves). */
-export const startRunOn = (source: string, scenario: string, seed: number | null, speed: number | null, toggles: string[] = []) =>
-  postJson<RunSummary>('/api/runs', { scenario, seed, speed, toggles, source })
+export const startRunOn = (
+  source: string,
+  scenario: string,
+  seed: number | null,
+  speed: number | null,
+  toggles: string[] = [],
+  replaces: string | null = null, // WO-060C
+) => postJson<RunSummary>('/api/runs', { scenario, seed, speed, toggles, source, replaces })
 
 export const postInject = (req: InjectReq) => postJson<InjectReply>('/api/inject', req)
 export const postPrepare = (req: InjectReq) => postJson<{ prepared: boolean; scenario_id: string }>('/api/inject/prepare', req)

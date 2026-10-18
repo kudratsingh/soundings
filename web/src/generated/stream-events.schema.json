@@ -1658,6 +1658,19 @@
           "title": "N Events",
           "type": "integer"
         },
+        "reason": {
+          "anyOf": [
+            {
+              "const": "cancelled",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
         "terminal": {
           "additionalProperties": {
             "$ref": "#/$defs/LadderState"
