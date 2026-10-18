@@ -92,9 +92,20 @@ export interface CaseIndex {
   approvalOwner: Record<string, string>
   /** Every evidence row the stream has reported (copies included). */
   totalRows: number
+  /** REH: the responder's last state, so a key moment marks each change (dispatch, station, return). */
+  responderState?: string
 }
 
 export const emptyCaseIndex = (): CaseIndex => ({ tracks: {}, order: [], moments: [], approvalOwner: {}, totalRows: 0 })
+
+// --- REH begin: the responder's state changes are key moments of the case it looks at
+// (CLAUDE.md section 8 A2 vocabulary: dispatch to look, station, standoff, return to dock) ---
+export const RESPONDER_MOMENT: Record<string, string> = {
+  TRANSIT: 'responder dispatched to look',
+  ON_STATION: 'responder on station, looking',
+  RETURNING: 'responder returning to dock',
+}
+// --- REH end ---
 
 const MOMENT_OF_STATE: Partial<Record<LadderState, [string, MomentKind]>> = {
   WATCHING: ['detected', 'info'],
@@ -229,7 +240,9 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
           guard: p.guard ? `${p.guard.name}: ${p.guard.result}` : null,
         })
         t.lastEventTick = e.tick
-        t.stateTick = e.tick
+        // REH: a self-transition (a watch-after-handoff update) does not restart the state's
+        // clock, so the auto-selected case and its NOW line stop flipping between cases.
+        if (p.from_state !== p.to_state) t.stateTick = e.tick
         const m = MOMENT_OF_STATE[p.to_state]
         if (m) moment({ seq: e.seq, tick: e.tick, contact_id: p.contact_id, label: m[0], kind: m[1] })
         break
@@ -290,6 +303,17 @@ export function foldCases(prev: CaseIndex, events: StreamEvent[]): CaseIndex {
         break
       }
       // --- WO-060B end ---
+      // --- REH begin ---
+      case 'responder': {
+        const p = e.payload
+        if (p.state === next.responderState) break
+        next.responderState = p.state
+        const label = RESPONDER_MOMENT[p.state]
+        const cid = p.target_contact_id
+        if (label && cid && next.tracks[cid]) moment({ seq: e.seq, tick: e.tick, contact_id: cid, label, kind: 'info' })
+        break
+      }
+      // --- REH end ---
       default:
         break
     }
@@ -324,14 +348,21 @@ export function toneOf(state: LadderState): Tone {
   return 'unknown'
 }
 
-/** Severity sort key: threat first, then needs-approval, then investigating, then resolved. */
+/** Severity sort key: needs-approval first, then live threat, handed off, investigating, resolved. */
 export function severityKey(state: LadderState): [number, number] {
   const tone = toneOf(state)
-  if (tone === 'threat') return [0, 0]
-  if (tone === 'approval') return [1, 0]
+  // --- REH begin: a request waiting on a person comes first; a case already handed to a
+  // person (the work has stopped) ranks after the live threat states, never above an open
+  // approval request (rehearsal 2026-10-17: the NOW line showed a watched case instead) ---
+  if (tone === 'approval') return [0, 0]
+  if (tone === 'threat') return [1, HANDED_STATES.has(state) ? 1 : 0]
+  // --- REH end ---
   if (tone === 'unknown') return [2, ACTIVE_RANK[state] ?? 5]
   return [3, 0]
 }
+
+/** The states after the handoff: the work has stopped; the case is only watched. */
+const HANDED_STATES = new Set<LadderState>(['HANDED_OFF', 'WATCH_AFTER_HANDOFF'])
 
 // ---------------------------------------------------------------- steps
 

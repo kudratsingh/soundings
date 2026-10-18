@@ -20,11 +20,12 @@ export default function AboutPanel({ open, about, boundary, onClose, physics = n
   if (!open) return null
   const h = about?.honesty
   return (
-    <div className="modal-back" role="dialog" aria-label="About" data-testid="about-panel">
+    <div className="modal-back" role="dialog" aria-modal="true" aria-label="About" data-testid="about-panel">
       <div className="modal">
         <header className="drawer-head">
           <h2>{about?.title ?? 'About'}</h2>
-          <button type="button" onClick={onClose}>
+          {/* REH: focus lands on Close when the panel opens; Escape also closes it (App) */}
+          <button type="button" onClick={onClose} autoFocus data-testid="about-close">
             Close
           </button>
         </header>
