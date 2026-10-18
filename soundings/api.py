@@ -74,6 +74,12 @@ def create_app(web_dist: Path = WEB_DIST) -> FastAPI:
     application.include_router(qr_router)
     # --- WO-061 QR end ---
 
+    # --- WO-062C begin: GET /api/eval/summary (presenter evidence card; read-only) ---
+    from soundings.api_routes.eval_summary import router as eval_summary_router
+
+    application.include_router(eval_summary_router)
+    # --- WO-062C end ---
+
     if web_dist.is_dir():
         application.mount("/", StaticFiles(directory=web_dist, html=True), name="web")
 
