@@ -21,3 +21,9 @@ def test_begin_does_not_rewrite_the_url_with_the_scenario() -> None:
 def test_deep_link_autostart_is_still_guarded_by_the_scenario_param() -> None:
     src = APP.read_text(encoding="utf-8")
     assert "if (params.scenario) {" in src
+
+
+def test_deep_link_clears_its_query_after_starting() -> None:
+    src = APP.read_text(encoding="utf-8")
+    block = src.split("if (params.scenario) {", 1)[1].split("}", 1)[0]
+    assert "replaceState(null, '', window.location.pathname)" in block
