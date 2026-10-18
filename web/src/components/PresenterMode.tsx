@@ -55,16 +55,16 @@ function judgeActions(step: PresenterStep): void {
 // --- WO-061 end ---
 
 /** Start what a step starts; returns the run id, or null when the step starts no run. */
-async function applyStep(step: PresenterStep, previousRunRef: string | null): Promise<string | null> {
+async function applyStep(step: PresenterStep, previousRunRef: string | null, onScreen: string | null = null): Promise<string | null> {
   for (const note of step.pending) console.info(`presenter: step ${step.index + 1}: ${note}`)
   const speed = step.speed_factor
   if (step.kind === 'catalog' && step.scenario) {
     if (step.continue_run && previousRunRef === step.scenario) return null
-    return (await startStepRun(step.scenario, step.seed ?? null, speed)).run_id
+    return (await startStepRun(step.scenario, step.seed ?? null, speed, [], onScreen)).run_id // WO-060C
   }
   if ((step.kind === 'twist' || step.action === 'twist_toggles') && step.run_ref) {
     try {
-      return (await startStepRun(step.run_ref, step.seed ?? null, speed, step.toggles ?? [])).run_id
+      return (await startStepRun(step.run_ref, step.seed ?? null, speed, step.toggles ?? [], onScreen)).run_id // WO-060C
     } catch (e) {
       // runner v1 takes no toggles yet (WO-060 part B): keep the current run, sound the twist
       console.info(`presenter: step ${step.index + 1}: twist toggles pending (${String(e)})`)
@@ -160,6 +160,9 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
   useEffect(() => {
     mutedRef.current = muted
   }, [muted])
+  // WO-060C: the run on screen, stopped when a step (or reset) starts the next one
+  const onScreenRef = useRef<string | null>(run.runId)
+  onScreenRef.current = run.runId
   // --- WO-062C begin ---
   const barRef = useRef<HTMLDivElement | null>(null)
   useBarHeight(barRef)
@@ -180,7 +183,7 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
     setPaused(Boolean(step.pause_for_click))
     logPresenter(step.index, nav.kind)
     judgeActions(step) // WO-061
-    applyStep(step, runRef.current)
+    applyStep(step, runRef.current, onScreenRef.current)
       .then((runId) => {
         if (gen !== generation.current) return
         if (runId) {

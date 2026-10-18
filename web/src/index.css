@@ -132,6 +132,13 @@ h3 {
   min-width: 0;
 }
 
+/* WO-060C: a start in flight; the picker's button takes no click until the run begins */
+.picker button[aria-busy='true'] {
+  pointer-events: none;
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .picker {
   display: flex;
   gap: 6px;

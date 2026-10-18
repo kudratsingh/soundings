@@ -733,6 +733,20 @@ class V3Source:
             result.audit.close()
         self._exhausted = True
 
+    # --- WO-060C begin: Reset stops the run ---
+    def cancel(self) -> None:
+        """Never step again: no more events, open requests dropped, the audit log closed.
+        The engine writes the cancelled ``run_finished`` (``RunHandle.cancel``)."""
+        if self._exhausted:
+            return
+        self._exhausted = True
+        self._open.clear()
+        audit = getattr(self.rs, "audit", None)
+        if audit is not None:
+            audit.close()
+
+    # --- WO-060C end ---
+
     # --- approvals -----------------------------------------------------------------------
 
     def open_requests(self) -> dict[str, list[str]]:
