@@ -145,11 +145,10 @@ function App() {
     ;(params.source ? startRunOn(params.source, scenario, seed, speed, params.toggles) : startRun(scenario, seed, speed, params.toggles))
       .then((r) => {
         setRunId(r.run_id)
-        const q = new URLSearchParams(window.location.search)
-        q.set('scenario', scenario)
-        if (seed !== null) q.set('seed', String(seed))
-        if (speed !== null) q.set('speed', String(speed))
-        window.history.replaceState(null, '', `?${q.toString()}`)
+        // Owner directive 2026-10-17 17:50: a window only runs what Start was pressed for. The
+        // URL is not rewritten with the picked scenario, so a restored or reopened tab stays
+        // on the picker instead of auto-starting the last run. Deep links (?scenario=...) still
+        // start on load for the shot scripts and the e2e smokes.
       })
       .catch((e: unknown) => setProblem(String(e)))
   }
