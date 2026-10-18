@@ -16,6 +16,8 @@ registry_plans:
   window:
     start_tick: 768
     end_tick: 3648
+    earliest_start_tick: 0
+    latest_start_tick: 1848
   contact: sim-phone-survey-01
   job_type: survey
 - plan_id: P-BT01-002
@@ -26,6 +28,8 @@ registry_plans:
   window:
     start_tick: 1704
     end_tick: 3996
+    earliest_start_tick: 624
+    latest_start_tick: 2784
   contact: sim-phone-survey-02
   job_type: survey
 - plan_id: P-BT01-003
@@ -36,6 +40,8 @@ registry_plans:
   window:
     start_tick: 1584
     end_tick: 3204
+    earliest_start_tick: 504
+    latest_start_tick: 2664
   contact: sim-phone-survey-03
   job_type: survey
 - plan_id: P-BT01-004
@@ -46,6 +52,8 @@ registry_plans:
   window:
     start_tick: 1392
     end_tick: 3888
+    earliest_start_tick: 312
+    latest_start_tick: 2472
   contact: sim-phone-survey-04
   job_type: survey
 - plan_id: P-BT01-005
@@ -56,6 +64,8 @@ registry_plans:
   window:
     start_tick: 180
     end_tick: 2112
+    earliest_start_tick: 0
+    latest_start_tick: 2340
   contact: sim-phone-pile_inspection-01
   job_type: pile_inspection
 - plan_id: P-BT01-006
@@ -66,6 +76,8 @@ registry_plans:
   window:
     start_tick: 504
     end_tick: 1788
+    earliest_start_tick: 0
+    latest_start_tick: 2664
   contact: sim-phone-pile_inspection-02
   job_type: pile_inspection
 - plan_id: P-BT01-007
@@ -76,6 +88,8 @@ registry_plans:
   window:
     start_tick: 444
     end_tick: 2736
+    earliest_start_tick: 0
+    latest_start_tick: 1524
   contact: sim-phone-survey-05
   job_type: survey
 - plan_id: P-BT01-008
@@ -86,6 +100,8 @@ registry_plans:
   window:
     start_tick: 684
     end_tick: 3240
+    earliest_start_tick: 0
+    latest_start_tick: 1764
   contact: sim-phone-survey-06
   job_type: survey
 - plan_id: P-BT01-009
@@ -96,6 +112,8 @@ registry_plans:
   window:
     start_tick: 936
     end_tick: 4884
+    earliest_start_tick: 396
+    latest_start_tick: 1476
   contact: sim-phone-dredge-01
   job_type: dredge
 - plan_id: P-BT01-010
@@ -106,6 +124,8 @@ registry_plans:
   window:
     start_tick: 600
     end_tick: 1848
+    earliest_start_tick: 0
+    latest_start_tick: 2040
   contact: sim-phone-hull_cleaning-01
   job_type: hull_cleaning
 - plan_id: P-BT01-011
@@ -116,6 +136,8 @@ registry_plans:
   window:
     start_tick: 1452
     end_tick: 2412
+    earliest_start_tick: 0
+    latest_start_tick: 3612
   contact: sim-phone-pile_inspection-03
   job_type: pile_inspection
 - plan_id: P-BT01-012
@@ -126,6 +148,8 @@ registry_plans:
   window:
     start_tick: 1668
     end_tick: 3528
+    earliest_start_tick: 0
+    latest_start_tick: 3828
   contact: sim-phone-pile_inspection-04
   job_type: pile_inspection
 - plan_id: P-BT01-013
@@ -136,6 +160,8 @@ registry_plans:
   window:
     start_tick: 1476
     end_tick: 5112
+    earliest_start_tick: 936
+    latest_start_tick: 2016
   contact: sim-phone-dredge-02
   job_type: dredge
 - plan_id: P-BT01-014
@@ -146,6 +172,8 @@ registry_plans:
   window:
     start_tick: 1680
     end_tick: 2976
+    earliest_start_tick: 0
+    latest_start_tick: 3840
   contact: sim-phone-pile_inspection-05
   job_type: pile_inspection
 - plan_id: P-BT01-015
@@ -156,6 +184,8 @@ registry_plans:
   window:
     start_tick: 1284
     end_tick: 5124
+    earliest_start_tick: 744
+    latest_start_tick: 1824
   contact: sim-phone-dredge-03
   job_type: dredge
 - plan_id: P-BT01-016
@@ -166,6 +196,8 @@ registry_plans:
   window:
     start_tick: 1128
     end_tick: 3408
+    earliest_start_tick: 48
+    latest_start_tick: 2208
   contact: sim-phone-survey-07
   job_type: survey
 - plan_id: P-BT01-017
@@ -176,6 +208,8 @@ registry_plans:
   window:
     start_tick: 300
     end_tick: 4320
+    earliest_start_tick: 0
+    latest_start_tick: 840
   contact: sim-phone-dredge-04
   job_type: dredge
 - plan_id: P-BT01-018
@@ -186,6 +220,8 @@ registry_plans:
   window:
     start_tick: 0
     end_tick: 1428
+    earliest_start_tick: 0
+    latest_start_tick: 2160
   contact: sim-phone-pile_inspection-06
   job_type: pile_inspection
 - plan_id: P-BT01-019
@@ -196,6 +232,8 @@ registry_plans:
   window:
     start_tick: 12
     end_tick: 1560
+    earliest_start_tick: 0
+    latest_start_tick: 1452
   contact: sim-phone-hull_cleaning-02
   job_type: hull_cleaning
 - plan_id: P-BT01-020
@@ -206,6 +244,8 @@ registry_plans:
   window:
     start_tick: 696
     end_tick: 1836
+    earliest_start_tick: 0
+    latest_start_tick: 2136
   contact: sim-phone-hull_cleaning-03
   job_type: hull_cleaning
 - plan_id: P-BT01-021
@@ -216,6 +256,8 @@ registry_plans:
   window:
     start_tick: 1308
     end_tick: 3192
+    earliest_start_tick: 0
+    latest_start_tick: 3468
   contact: sim-phone-pile_inspection-07
   job_type: pile_inspection
 - plan_id: P-BT01-022
@@ -226,6 +268,8 @@ registry_plans:
   window:
     start_tick: 252
     end_tick: 2724
+    earliest_start_tick: 0
+    latest_start_tick: 1332
   contact: sim-phone-survey-08
   job_type: survey
 - plan_id: P-BT01-023
@@ -236,6 +280,8 @@ registry_plans:
   window:
     start_tick: 768
     end_tick: 4176
+    earliest_start_tick: 228
+    latest_start_tick: 1308
   contact: sim-phone-dredge-05
   job_type: dredge
 - plan_id: P-BT01-024
@@ -246,6 +292,8 @@ registry_plans:
   window:
     start_tick: 1092
     end_tick: 2580
+    earliest_start_tick: 0
+    latest_start_tick: 2532
   contact: sim-phone-hull_cleaning-04
   job_type: hull_cleaning
 - plan_id: P-BT01-025
@@ -256,6 +304,8 @@ registry_plans:
   window:
     start_tick: 1260
     end_tick: 3756
+    earliest_start_tick: 180
+    latest_start_tick: 2340
   contact: sim-phone-survey-09
   job_type: survey
 - plan_id: P-BT01-026
@@ -266,6 +316,8 @@ registry_plans:
   window:
     start_tick: 1356
     end_tick: 4548
+    earliest_start_tick: 816
+    latest_start_tick: 1896
   contact: sim-phone-dredge-06
   job_type: dredge
 - plan_id: P-BT01-027
@@ -276,6 +328,8 @@ registry_plans:
   window:
     start_tick: 456
     end_tick: 1884
+    earliest_start_tick: 0
+    latest_start_tick: 1896
   contact: sim-phone-hull_cleaning-05
   job_type: hull_cleaning
 - plan_id: P-BT01-028
@@ -286,6 +340,8 @@ registry_plans:
   window:
     start_tick: 1140
     end_tick: 2304
+    earliest_start_tick: 0
+    latest_start_tick: 2580
   contact: sim-phone-hull_cleaning-06
   job_type: hull_cleaning
 - plan_id: P-BT01-029
@@ -296,6 +352,8 @@ registry_plans:
   window:
     start_tick: 600
     end_tick: 4200
+    earliest_start_tick: 60
+    latest_start_tick: 1140
   contact: sim-phone-dredge-07
   job_type: dredge
 - plan_id: P-BT01-030
@@ -306,6 +364,8 @@ registry_plans:
   window:
     start_tick: 1596
     end_tick: 2820
+    earliest_start_tick: 156
+    latest_start_tick: 3036
   contact: sim-phone-hull_cleaning-07
   job_type: hull_cleaning
 - plan_id: P-BT01-031
@@ -316,6 +376,8 @@ registry_plans:
   window:
     start_tick: 576
     end_tick: 1488
+    earliest_start_tick: 0
+    latest_start_tick: 2736
   contact: sim-phone-pile_inspection-08
   job_type: pile_inspection
 - plan_id: P-BT01-032
@@ -326,6 +388,8 @@ registry_plans:
   window:
     start_tick: 1128
     end_tick: 3804
+    earliest_start_tick: 48
+    latest_start_tick: 2208
   contact: sim-phone-survey-10
   job_type: survey
 - plan_id: P-BT01-033
@@ -336,6 +400,8 @@ registry_plans:
   window:
     start_tick: 1008
     end_tick: 4128
+    earliest_start_tick: 468
+    latest_start_tick: 1548
   contact: sim-phone-dredge-08
   job_type: dredge
 - plan_id: P-BT01-034
@@ -346,6 +412,8 @@ registry_plans:
   window:
     start_tick: 192
     end_tick: 1572
+    earliest_start_tick: 0
+    latest_start_tick: 1632
   contact: sim-phone-hull_cleaning-08
   job_type: hull_cleaning
 - plan_id: P-BT01-035
@@ -356,6 +424,8 @@ registry_plans:
   window:
     start_tick: 1200
     end_tick: 2592
+    earliest_start_tick: 0
+    latest_start_tick: 2640
   contact: sim-phone-hull_cleaning-09
   job_type: hull_cleaning
 - plan_id: P-BT01-036
@@ -366,6 +436,8 @@ registry_plans:
   window:
     start_tick: 1632
     end_tick: 3516
+    earliest_start_tick: 0
+    latest_start_tick: 3792
   contact: sim-phone-pile_inspection-09
   job_type: pile_inspection
 - plan_id: P-BT01-037
@@ -376,6 +448,8 @@ registry_plans:
   window:
     start_tick: 300
     end_tick: 4416
+    earliest_start_tick: 0
+    latest_start_tick: 840
   contact: sim-phone-dredge-09
   job_type: dredge
 - plan_id: P-BT01-038
@@ -386,6 +460,8 @@ registry_plans:
   window:
     start_tick: 312
     end_tick: 1452
+    earliest_start_tick: 0
+    latest_start_tick: 2472
   contact: sim-phone-pile_inspection-10
   job_type: pile_inspection
 - plan_id: P-BT01-039
@@ -396,6 +472,8 @@ registry_plans:
   window:
     start_tick: 264
     end_tick: 1332
+    earliest_start_tick: 0
+    latest_start_tick: 1704
   contact: sim-phone-hull_cleaning-10
   job_type: hull_cleaning
 - plan_id: P-BT01-040
@@ -406,6 +484,8 @@ registry_plans:
   window:
     start_tick: 0
     end_tick: 4188
+    earliest_start_tick: 0
+    latest_start_tick: 540
   contact: sim-phone-dredge-10
   job_type: dredge
 contacts:
