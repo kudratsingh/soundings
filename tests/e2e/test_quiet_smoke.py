@@ -18,11 +18,13 @@ With ``SOUNDINGS_SHOT=<path>`` the screen at the hold is saved there (README / o
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 from typing import Any
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from tests.e2e.test_design_pass import PERF_OBSERVER
 
@@ -143,6 +145,29 @@ def test_presenter_mode_hides_show_all(live_server: str, browser: Any) -> None:
     page.route("**/*", _offline)
     page.goto(f"{live_server}/?presenter=1&tiles=off")
     page.wait_for_selector("[data-testid=cases]", timeout=30_000)
-    page.wait_for_timeout(500)
+    # presenter mode starts step 1's run: wait until it streams, then check and stop it
+    page.wait_for_function(
+        "() => (document.querySelector('[data-testid=scenario-label]')?.textContent ?? 'no run')"
+        " !== 'no run'",
+        timeout=60_000,
+    )
     assert page.locator("[data-testid=show-all]").count() == 0
     page.close()
+    _stop_runs(live_server)  # presenter mode starts step 1's run; leave the shared engine idle
+
+
+def _stop_runs(base: str) -> None:
+    """Cancel every unfinished run on the shared server and wait until none is left."""
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        with urlopen(f"{base}/api/runs", timeout=30) as resp:
+            runs = json.loads(resp.read())
+        live = [r for r in runs if not r.get("finished")]
+        if not live:
+            return
+        for r in live:
+            try:
+                urlopen(Request(f"{base}/api/runs/{r['run_id']}", method="DELETE"), timeout=30)
+            except OSError:
+                pass
+        time.sleep(0.5)
