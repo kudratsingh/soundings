@@ -30,7 +30,87 @@ export interface PresenterStep {
   // --- WO-088 begin ---
   subcaption?: string
   // --- WO-088 end ---
+  // --- WO-062C begin ---
+  auto_file?: AutoFile
+  // --- WO-062C end ---
 }
+
+// --- WO-062C begin: the demo's scripted plan filing and the evidence card's eval table ---
+/** A POST /api/plans body, resolved by the server for today + day_offset. */
+export type PlanBody = Record<string, string | number | null>
+
+export interface AutoFile {
+  at_s: number
+  accept_after_s: number
+  accept_at_s: number
+  in_force: PlanBody[]
+  plan: PlanBody
+}
+
+/** The fixed notes of an `auto` presenter-log entry (soundings/demo/presenter.py AutoNote). */
+export const AUTO_NOTES = {
+  jobsFiled: 'auto: in-force jobs filed (scripted)',
+  planFiled: 'auto: plan filed (stands in for the phone)',
+  proposalAccepted: 'auto: proposal accepted',
+} as const
+export type AutoNoteText = (typeof AUTO_NOTES)[keyof typeof AUTO_NOTES]
+
+/** `&auto=0` leaves the filing to a judge's phone on stage. */
+export function autoFileEnabled(search: string = window.location.search): boolean {
+  return new URLSearchParams(search).get('auto') !== '0'
+}
+
+/** File one plan through the registry endpoint the /registry form uses. True when it is
+ * in the store afterwards (201, or 422 duplicate_plan_id: filed on an earlier pass). */
+export async function filePlan(body: PlanBody): Promise<boolean> {
+  const res = await fetch('/api/plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 201) return true
+  const data = (await res.json().catch(() => ({}))) as { reason?: string }
+  if (res.status === 422 && data.reason === 'duplicate_plan_id') return true
+  console.info(`presenter: auto filing ${String(body.plan_id)}: HTTP ${res.status} ${JSON.stringify(data)}`)
+  return false
+}
+
+export function logAuto(index: number, note: AutoNoteText): void {
+  fetch('/api/presenter-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index, kind: 'auto', note }),
+  }).catch(() => undefined)
+}
+
+export type EvalMetric =
+  | 'at_or_below_ask_pct'
+  | 'missed_threats'
+  | 'false_shutdowns'
+  | 'median_s_seen_to_handled'
+  | 'interruptions_per_hour'
+  | 'shutdown_minutes'
+
+export interface EvalRow extends Record<EvalMetric, number | null> {
+  policy: string
+  label: string
+}
+
+export interface EvalSummary {
+  label: string
+  suite: string | null
+  seeds: number[] | null
+  rows: EvalRow[]
+}
+
+/** GET /api/eval/summary; null when no report exists (404: run make eval). */
+export async function fetchEvalSummary(): Promise<EvalSummary | null> {
+  const res = await fetch('/api/eval/summary')
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`/api/eval/summary: HTTP ${res.status}`)
+  return (await res.json()) as EvalSummary
+}
+// --- WO-062C end ---
 
 export interface PresenterScript {
   end: string | null
