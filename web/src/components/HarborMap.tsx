@@ -6,6 +6,9 @@
 // trail of its last 60 fixes, a 60 s velocity leader, and its case colour (benign teal,
 // unknown white, threat amber); the selected case gets a halo and a label. The map never
 // pans by itself unless 'follow selected' is on.
+// WO-060D: with a focused case, 'follow selected' starts on (it pans only when the focused
+// contact leaves the middle of the view) and every other contact is drawn at reduced opacity
+// in its state colour; the responder overlay is untouched.
 
 import L from 'leaflet'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -20,6 +23,8 @@ import { ellipseLatLngs, leaderEnd as projectedLeaderEnd } from '../radar'
 // --- WO-086 end ---
 
 const CENTER: [number, number] = [33.736, -118.262]
+/** WO-060D: opacity factor for contacts outside the focused case. */
+export const DIM = 0.35
 export const TRAIL_FIXES = 60
 const LEADER_S = 60
 
@@ -45,6 +50,8 @@ interface Props {
   caseLabel?: Record<string, string>
   mapStyle?: MapStyle
   tickS?: number
+  /** WO-060D: draw contacts outside the focused case at reduced opacity. */
+  dimOthers?: boolean
 }
 
 const TONE_COLOR: Record<Tone, string> = {
@@ -142,6 +149,7 @@ const ContactLayer = memo(function ContactLayer({
   tickS,
   onSelect,
   projected = false, // WO-086
+  dim = false, // WO-060D
 }: {
   c: ContactView
   selected: boolean
@@ -151,6 +159,8 @@ const ContactLayer = memo(function ContactLayer({
   onSelect(id: string): void
   /** WO-086: draw WO-084's 60 s projection ellipse for this contact. */
   projected?: boolean
+  /** WO-060D: not the focused case: reduced opacity, still in its state colour. */
+  dim?: boolean
 }) {
   const ref = useRef<LCircleMarker | null>(null)
   useEffect(() => {
@@ -158,9 +168,11 @@ const ContactLayer = memo(function ContactLayer({
     if (el) {
       el.setAttribute('data-testid', 'contact-marker')
       el.setAttribute('data-contact', c.contact_id)
+      el.setAttribute('data-dim', dim ? '1' : '0') // WO-060D
     }
   })
   const color = TONE_COLOR[tone]
+  const k = dim ? DIM : 1 // WO-060D
   const trail = c.track.slice(-TRAIL_FIXES)
   const third = Math.max(1, Math.floor(trail.length / 3))
   const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
@@ -189,17 +201,17 @@ const ContactLayer = memo(function ContactLayer({
             positions={s}
             interactive={false}
             className="contact-trail"
-            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] }}
+            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] * k }}
           />
         ) : null,
       )}
-      {lead && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9, dashArray: '2 4' }} />}
+      {lead && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9 * k, dashArray: '2 4' }} />}
       {selected && <CircleMarker center={pos} radius={15} interactive={false} className="halo" pathOptions={{ color, weight: 1.5, opacity: 0.9, fillOpacity: 0.08 }} />}
       <CircleMarker
         ref={ref}
         center={pos}
         radius={selected ? 7 : 5}
-        pathOptions={{ color: '#06121c', weight: 1.5, fillColor: color, fillOpacity: 1 }}
+        pathOptions={{ color: '#06121c', weight: 1.5, opacity: k, fillColor: color, fillOpacity: k }}
         eventHandlers={{ click: () => onSelect(c.contact_id) }}
       >
         <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
@@ -266,9 +278,10 @@ export default function HarborMap({
   caseLabel = {},
   mapStyle = 'radar',
   tickS = 2,
+  dimOthers = false, // WO-060D
 }: Props) {
   const [legend, setLegend] = useState(false)
-  const [follow, setFollow] = useState(false)
+  const [follow, setFollow] = useState(true) // WO-060D: the focused contact is followed by default
   const features = harbor?.features ?? []
   const zones = useMemo(() => features.filter((f) => f.properties.kind === 'zone'), [features])
   const assets = useMemo(() => features.filter((f) => f.properties.kind === 'asset'), [features])
@@ -374,6 +387,7 @@ export default function HarborMap({
             tickS={tickS}
             onSelect={onSelect}
             projected={c.contact_id === projectedId} // WO-086
+            dim={dimOthers && !isSel(c.contact_id)} // WO-060D
           />
         ))}
         {overlay}

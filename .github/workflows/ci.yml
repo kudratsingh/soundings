@@ -69,6 +69,10 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+      # WO-060D: tests/test_focus_policy.py runs the web focus reducer through Node 22's type stripping.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Python deps
         run: uv sync --all-extras
       - name: Tests (replay only), everything but the heavy integration modules

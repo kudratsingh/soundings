@@ -6,11 +6,11 @@
 // selected case and the last five KEY MOMENTS across cases; the map fills the left; the right
 // rail holds the CASES list, the CASE VIEW (one column of steps) and the ladder.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { AboutInfo, BoundaryInfo, HarborGeoJson, ModelModeInfo, ScenarioInfo } from './api'
 import { fetchAbout, fetchBoundary, fetchHarbor, fetchModelMode, fetchScenarios, modelBadge, startRun } from './api'
 import type { CaseSummary, Tone } from './cases'
-import { caseItems, caseOf, mostSevere, nowLine, summarize } from './cases'
+import { caseItems, caseOf, nowLine, summarize } from './cases'
 import AboutPanel from './components/AboutPanel'
 import ApprovalButton from './components/ApprovalButton'
 import CaseList from './components/CaseList'
@@ -37,6 +37,10 @@ import ResponderLayer from './components/ResponderLayer'
 // --- WO-086 begin ---
 import RungLedger from './components/RungLedger'
 // --- WO-086 end ---
+// --- WO-060D begin: focus one case ---
+import type { FocusPolicy } from './focus'
+import { enteredBy, focusMoments, focusReducer, focusedCase, initialFocus, nextModeAction, othersLine, parsePolicy, traceParts } from './focus'
+// --- WO-060D end ---
 // --- WO-061 begin: judge panel, approval path, plans from the registry ---
 import type { HarborFeature, QrInfo } from './api'
 import { fetchQrInfo, postInject, startRunOn } from './api'
@@ -123,7 +127,12 @@ function App() {
   const [harbor, setHarbor] = useState<HarborGeoJson | null>(null)
   const [model, setModel] = useState<ModelModeInfo | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
-  const [picked, setPicked] = useState<string | null>(null)
+  // --- WO-060D begin: the focus policy (sticky by default; a click pins; auto is the old behaviour) ---
+  const [focus, dispatchFocus] = useReducer(focusReducer, undefined, () => initialFocus())
+  /** The policy the next run starts with (the presenter may name one per step). */
+  const nextPolicy = useRef<FocusPolicy>('first_escalation')
+  const setPicked = (id: string | null) => dispatchFocus(id === null ? { type: 'sticky' } : { type: 'pin', id })
+  // --- WO-060D end ---
   const [highlight, setHighlight] = useState<string | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [sitrepOpen, setSitrepOpen] = useState(false)
@@ -155,7 +164,8 @@ function App() {
     if (inFlight.current) return // WO-060C: a click while a start is in flight is ignored
     inFlight.current = true
     setStarting({ scenario, seed, runId: null })
-    setPicked(null)
+    nextPolicy.current = 'first_escalation' // WO-060D
+    dispatchFocus({ type: 'reset' }) // WO-060D
     setHighlight(null)
     const replaces = runIdRef.current // WO-060C
     // WO-060B: toggles from the URL; WO-061: ?source= picks the run source (stepped: a person approves)
@@ -207,7 +217,7 @@ function App() {
 
   const tickS = run.started?.tick_s ?? 2
   const cases = useMemo(() => summarize(run.cases, run.rungOf), [run.cases, run.rungOf])
-  const selectedCase = picked !== null ? caseOf(run.cases, picked) : mostSevere(cases)
+  const selectedCase = focusedCase(run.cases, cases, focus) // WO-060D: the focused case
   const summary: CaseSummary | undefined = cases.find((c) => c.id === selectedCase)
   const memberKey = summary?.members.join(',') ?? ''
   const memberTracks = summary ? summary.members.map((m) => run.cases.tracks[m]) : []
@@ -225,6 +235,29 @@ function App() {
   }, [memberKey, caseRows, run.posteriorOf, summary?.state])
   // WO-060C: between the click and the first event the NOW line says what is starting
   const now = starting ? startingLine(starting) : nowLine(summary, items, tickS)
+  // --- WO-060D begin: the trace line, the transition that entered each step, focused moments ---
+  const trace = useMemo(() => (summary ? traceParts(run.cases, summary.members, tickS) : []), [run.cases, memberKey, tickS])
+  const entered = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const it of items) if (it.kind !== 'reacquired') out[it.key] = enteredBy(run.cases, it.contact_id, it.kind)
+    return out
+  }, [items, run.cases])
+  const moments = useMemo(() => focusMoments(run.cases, selectedCase), [run.cases, selectedCase])
+  const others = useMemo(() => othersLine(cases, selectedCase), [cases, selectedCase])
+  useEffect(() => {
+    // A new run: back to sticky with the policy the run was started under.
+    dispatchFocus({ type: 'reset', policy: nextPolicy.current })
+  }, [runId])
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const policy = parsePolicy((e as CustomEvent<{ focus?: string }>).detail?.focus)
+      nextPolicy.current = policy
+      dispatchFocus({ type: 'reset', policy })
+    }
+    window.addEventListener('soundings:presenter-focus', onFocus)
+    return () => window.removeEventListener('soundings:presenter-focus', onFocus)
+  }, [])
+  // --- WO-060D end ---
 
   // Map: case colour per contact id, the selected lineage, and labels.
   const { toneOf, caseLabel } = useMemo(() => {
@@ -265,7 +298,8 @@ function App() {
       .catch(() => setQr(null))
   }, [])
   const followRun = (id: string, personApproves: boolean) => {
-    setPicked(null)
+    nextPolicy.current = 'first_escalation' // WO-060D
+    dispatchFocus({ type: 'reset' }) // WO-060D
     setHighlight(null)
     if (personApproves) setPersonRuns((s) => new Set([...s, id]))
     setRunId(id)
@@ -324,7 +358,8 @@ function App() {
       </header>
       <div className="strip">
         <NowLine text={now} tone={summary?.tone ?? 'unknown'} />
-        <KeyMoments moments={run.cases.moments} caseOf={(cid) => caseOf(run.cases, cid)} tickS={tickS} onSelect={setPicked} />
+        {/* WO-060D: the focused case's moments in order; every other case in one trailing chip */}
+        <KeyMoments moments={moments} caseOf={(cid) => caseOf(run.cases, cid)} tickS={tickS} onSelect={setPicked} others={others} />
         <span className="rows-total label num" data-testid="rows-total" data-rows={run.cases.totalRows}>
           {run.cases.totalRows.toLocaleString('en-US')} evidence rows · {cases.length} case{cases.length === 1 ? '' : 's'}
         </span>
@@ -344,6 +379,7 @@ function App() {
           caseLabel={caseLabel}
           mapStyle={params.mapStyle}
           tickS={tickS}
+          dimOthers={summary !== undefined} // WO-060D: other cases drawn at reduced opacity
           // --- WO-088 begin ---
           // --- WO-061: plans and the judge pin share the overlay with the WO-088 responder ---
           overlay={
@@ -366,7 +402,16 @@ function App() {
           // --- WO-061 end ---
         />
         <aside className="rail">
-          <CaseList cases={cases} selected={selectedCase} auto={picked === null} tick={run.tick} tickS={tickS} flashOf={flashOf} onSelect={setPicked} />
+          <CaseList
+            cases={cases}
+            selected={selectedCase}
+            mode={focus.mode} // WO-060D
+            onMode={() => dispatchFocus(nextModeAction(focus.mode))} // WO-060D
+            tick={run.tick}
+            tickS={tickS}
+            flashOf={flashOf}
+            onSelect={setPicked}
+          />
           <CaseView
             summary={summary}
             items={items}
@@ -376,6 +421,8 @@ function App() {
             highlight={highlight}
             flash={summary ? flashOf[summary.id] : undefined}
             onOpenSitrep={() => setSitrepOpen(true)}
+            trace={trace} // WO-060D
+            entered={entered} // WO-060D
           />
           <section className="ladder-rail" aria-label="ladder">
             {/* --- WO-086 begin: rung ledger and the blunt-policy counter (display only) --- */}
@@ -399,6 +446,7 @@ function App() {
       <SitrepDrawer
         open={sitrepOpen}
         sitreps={run.sitreps}
+        focusIds={selectedIds} // WO-060D: the focused case's SITREPs first
         onClose={() => setSitrepOpen(false)}
         onCite={(cid, rowId) => {
           setPicked(cid)
