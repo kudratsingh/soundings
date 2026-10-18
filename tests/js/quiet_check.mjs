@@ -1,4 +1,4 @@
-// WO-060E: drives the pure functions in web/src/quiet.ts (and the cue mapping in sfx.ts) over a
+// WO-060E: drives the pure functions in web/src/quiet.ts (the gate sfx.ts applies) over a
 // synthetic stream and prints one JSON object of observations for tests/test_quiet_others.py.
 // Run with: node --experimental-strip-types tests/js/quiet_check.mjs (Node >= 22.6).
 import { register } from 'node:module'
@@ -18,7 +18,6 @@ export async function resolve(spec, ctx, next) {
 const web = new URL('../../web/src/', import.meta.url)
 const cases = await import(new URL('cases.ts', web).href)
 const quiet = await import(new URL('quiet.ts', web).href)
-const sfx = await import(new URL('sfx.ts', web).href)
 
 let seq = 0
 const tick = (t, ids) => ({ type: 'tick', seq: ++seq, tick: t, payload: { contacts: ids.map((contact_id) => ({ contact_id })) } })
@@ -77,14 +76,13 @@ out.total = summaries.length
 // Sounds: the paged case's cues only; show all lets every case through.
 const focusIds = new Set(summaries.find((c) => c.id === focus).members)
 const timeline = [...early, ...['c-0006', 'c-0002'].map((c) => tr(30, c, 'HOLDING', 'HANDED_OFF'))].map((e) => ({ ...e.payload, tick: e.tick, seq: e.seq }))
-out.cues_focused = sfx.soundsForTransitions(quiet.cueEntries(timeline, focusIds, false))
+out.cues_focused_states = quiet.cueEntries(timeline, focusIds, false).map((e) => e.to_state)
 out.cues_focused_contacts = quiet.cueEntries(timeline, focusIds, false).map((e) => e.contact_id)
 out.cues_show_all_contacts = quiet.cueEntries(timeline, focusIds, true).map((e) => e.contact_id)
 out.cues_no_focus_n = quiet.cueEntries(timeline, null, false).length
 out.responder_other = quiet.cueAllowed('c-0006', focusIds, false)
 out.responder_mine = quiet.cueAllowed('c-0002', focusIds, false)
 out.responder_none = quiet.cueAllowed(null, focusIds, false)
-out.twist_sound = sfx.TWIST_SOUND
 
 // Key moments: the focused case's only (show all: every case).
 out.moments_cases = [...new Set(quiet.quietMoments(ix, focus, false).map((m) => cases.caseOf(ix, m.contact_id)))]

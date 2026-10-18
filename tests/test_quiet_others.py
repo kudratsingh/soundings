@@ -1,7 +1,7 @@
 """WO-060E: quiet the other cases. One focused case on screen; `others · n` opens the rest;
 `show all` reveals every event (debugging, hidden in presenter mode).
 
-The pure functions in ``web/src/quiet.ts`` (and the cue mapping in ``web/src/sfx.ts``) run
+The pure functions in ``web/src/quiet.ts`` (the cue gate ``web/src/sfx.ts`` applies) run
 through ``tests/js/quiet_check.mjs`` on Node >= 22.6 (type stripping; no build, no browser,
 no model call); the test skips when node is missing or too old. The static checks pin the
 defaults the screen starts with: the others row folded on every run start, the cue gate in
@@ -92,7 +92,7 @@ def test_others_row_starts_folded_on_every_run() -> None:
 
 def test_only_the_focused_case_sounds(obs: dict[str, Any]) -> None:
     assert obs["cues_focused_contacts"] == ["c-0002", "c-0002"]
-    assert obs["cues_focused"] == ["hail_ping", "handoff_chime"]
+    assert obs["cues_focused_states"] == ["ASKING", "HANDED_OFF"]  # hail ping, handoff chime
     assert set(obs["cues_show_all_contacts"]) == {"c-0001", "c-0002", "c-0003", "c-0006"}
     assert obs["cues_no_focus_n"] == 5
     assert obs["responder_other"] is False
