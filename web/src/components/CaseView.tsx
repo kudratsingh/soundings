@@ -6,13 +6,17 @@
 // grouped by tick, filter chips) and every transition of every case (for debugging).
 // Display only: nothing here can set a rung.
 
-import { memo, useMemo, useState } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CaseItem, CaseStep, CaseSummary, ReacquiredMark } from '../cases'
 import { fmtValue } from '../cases'
 import type { EvidenceKind, EvidenceRow, LadderState } from '../events'
 import { RUNG_LABEL } from '../events'
 import type { TimelineEntry } from '../useRun'
 import VirtualList from './VirtualList'
+// --- WO-060D begin ---
+import type { TracePart } from '../focus'
+import { traceText } from '../focus'
+// --- WO-060D end ---
 
 const KIND_LABEL: Record<EvidenceKind, string> = { fact: 'fact', assumption: 'assumption', derived: 'derived' }
 
@@ -59,9 +63,11 @@ interface StepProps {
   highlight: string | null
   onToggle(key: string): void
   onOpenSitrep(): void
+  /** WO-060D: the transition that entered this step ('WATCHING → ASKING · reason'). */
+  entered?: string
 }
 
-const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle, onOpenSitrep }: StepProps) {
+const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle, onOpenSitrep, entered = '' }: StepProps) {
   const reached = step.status === 'done' || step.status === 'current'
   return (
     <article
@@ -77,6 +83,11 @@ const StepCard = memo(function StepCard({ step, tickS, open, highlight, onToggle
         {step.status === 'current' && <span className="now-tag">now</span>}
         <span className="when num">{reached ? when(step.tick, tickS) : step.status === 'skipped' ? 'skipped' : 'next'}</span>
       </header>
+      {/* --- WO-060D begin: one reserved line: the transition that entered the step and its row count --- */}
+      <p className="entered label num" data-testid="step-entered" data-rows={reached ? step.rowCount : ''}>
+        {reached ? `${entered ? `${entered} · ` : ''}${step.rowCount} evidence row${step.rowCount === 1 ? '' : 's'}` : '\u00a0'}
+      </p>
+      {/* --- WO-060D end --- */}
       <p className="sentence">{step.sentence}</p>
       {reached && step.kind === 'ask' && step.hail && (
         <p className={`hail-result ${step.hail.startsWith('hail answered') ? 'benign' : 'unknown'}`} data-testid="hail-result">
@@ -258,7 +269,44 @@ interface Props {
   highlight: string | null
   flash: number | undefined
   onOpenSitrep(): void
+  // --- WO-060D begin ---
+  /** The state sequence of the case with times (built from the streamed transitions). */
+  trace?: TracePart[]
+  /** Step key -> the transition that entered it. */
+  entered?: Record<string, string>
+  // --- WO-060D end ---
 }
+
+// --- WO-060D begin: the trace line (one line; scrolls to its newest end, never wraps) ---
+function TraceLine({ parts }: { parts: TracePart[] }) {
+  const ref = useRef<HTMLParagraphElement | null>(null)
+  const text = traceText(parts)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) el.scrollLeft = el.scrollWidth
+  }, [text])
+  return (
+    <p
+      ref={ref}
+      className="trace num"
+      data-testid="case-trace"
+      data-last-state={parts.length ? parts[parts.length - 1].state : ''}
+      title={text}
+      aria-label={`trace: ${text || 'no transitions yet'}`}
+    >
+      <span className="trace-label">trace</span>
+      {parts.length === 0 && <span className="label">no transitions yet</span>}
+      {parts.map((p, i) => (
+        <span key={i} className={`trace-part${i === parts.length - 1 ? ' cur' : ''}`}>
+          {i > 0 && <span className="trace-sep">{p.reacquired ? ` ⟲ ${p.reacquired} ` : ' → '}</span>}
+          {p.state}
+          {p.showTime && <span className="trace-t"> t {p.t_s} s</span>}
+        </span>
+      ))}
+    </p>
+  )
+}
+// --- WO-060D end ---
 
 /** The state path of the case's current id, for the stepper (kept as data-testid=state-timeline). */
 function statePath(timeline: TimelineEntry[], cid: string): { state: LadderState; tick: number }[] {
@@ -271,7 +319,7 @@ function statePath(timeline: TimelineEntry[], cid: string): { state: LadderState
   return out
 }
 
-export default function CaseView({ summary, items, rows, timeline, tickS, highlight, flash, onOpenSitrep }: Props) {
+export default function CaseView({ summary, items, rows, timeline, tickS, highlight, flash, onOpenSitrep, trace = [], entered = {} }: Props) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [evOpen, setEvOpen] = useState(false)
   const [trOpen, setTrOpen] = useState(false)
@@ -302,6 +350,7 @@ export default function CaseView({ summary, items, rows, timeline, tickS, highli
             </li>
           ))}
         </ol>
+        <TraceLine parts={trace} /* WO-060D */ />
       </header>
       <div className="case-scroll" data-testid="case-view" data-case={summary?.id ?? ''}>
         {!summary && <p className="label empty">Steps appear here once a sensor hears a contact.</p>}
@@ -319,6 +368,7 @@ export default function CaseView({ summary, items, rows, timeline, tickS, highli
                   highlight={highlight}
                   onToggle={toggle}
                   onOpenSitrep={onOpenSitrep}
+                  entered={entered[it.key]} // WO-060D
                 />
               ),
             )}

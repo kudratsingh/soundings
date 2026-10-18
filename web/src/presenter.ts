@@ -29,6 +29,9 @@ export interface PresenterStep {
   // --- WO-088 begin ---
   subcaption?: string
   // --- WO-088 end ---
+  // --- WO-060D begin: which case the screen follows when the step's run starts ---
+  focus?: string
+  // --- WO-060D end ---
 }
 
 export interface PresenterScript {
@@ -102,3 +105,11 @@ export const END_CARD = {
   line: 'VTS for the harbor floor',
   repo: 'github.com/kudratsingh/soundings',
 }
+
+// --- WO-060D begin: tell the screen which case to follow for the run a step starts ---
+export const FOCUS_EVENT = 'soundings:presenter-focus'
+
+export function announceFocus(step: Pick<PresenterStep, 'focus'>): void {
+  window.dispatchEvent(new CustomEvent(FOCUS_EVENT, { detail: { focus: step.focus ?? 'first_escalation' } }))
+}
+// --- WO-060D end ---

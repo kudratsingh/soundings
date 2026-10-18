@@ -100,6 +100,12 @@ def _check_catalog_id(ref: str) -> str:
     return ref
 
 
+# --- WO-060D begin: the presenter's focus per step ---
+FOCUS_POLICIES = frozenset({"first_escalation", "first_detected"})
+_CONTACT_ID = re.compile(r"^c-\d{4,}$")
+# --- WO-060D end ---
+
+
 class DemoStep(StrictModel):
     """One step of the pitch sequence."""
 
@@ -125,6 +131,20 @@ class DemoStep(StrictModel):
     subcaption: FreeText | None = None
     """A second, smaller caption line under ``caption`` (presenter mode only)."""
     # --- WO-088 end ---
+    # --- WO-060D begin ---
+    focus: StrictStr | None = None
+    """Which case the screen follows when this step's run starts (presenter mode only):
+    ``first_escalation`` (the default), ``first_detected`` or a contact id (``c-0001``)."""
+    # --- WO-060D end ---
+
+    @field_validator("focus")
+    @classmethod
+    def _focus(cls, value: str | None) -> str | None:
+        if value is not None and value not in FOCUS_POLICIES and not _CONTACT_ID.match(value):
+            raise ValueError(
+                f"focus {value!r} is not first_escalation, first_detected or a contact id"
+            )
+        return value
 
     @field_validator("t")
     @classmethod
