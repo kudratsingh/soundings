@@ -24,12 +24,12 @@ Display only: no stream schema change, no ladder/guard/threshold/sim change, no 
 
 ## Files
 
-`web/src/quiet.ts` (new, pure), `web/src/components/{CaseList,CaseView,GlobalStrip,HarborMap,PresenterMode}.tsx`, `web/src/sfx.ts`, `web/src/App.tsx`, `web/src/index.css` (one marked block); `tests/test_quiet_others.py` + `tests/js/quiet_check.mjs`; `tests/e2e/test_quiet_others.py` + `tests/e2e/_quiet.py`; existing smokes and `scripts/readme_shots.py` open `others` before picking a non-focused row.
+`web/src/quiet.ts` (new, pure), `web/src/components/{CaseList,CaseView,GlobalStrip,HarborMap,PresenterMode}.tsx`, `web/src/sfx.ts`, `web/src/App.tsx`, `web/src/index.css` (one marked block); `tests/test_quiet_others.py` + `tests/js/quiet_check.mjs`; `tests/e2e/test_quiet_smoke.py` + `tests/e2e/_quiet.py`; existing smokes and `scripts/readme_shots.py` open `others` before picking a non-focused row.
 
 ## Exit tests (`MODEL_MODE=replay`, no network)
 
 - `tests/test_quiet_others.py` (node ≥ 22.6 runs `tests/js/quiet_check.mjs`; skips without it): the default view draws only the focused row and folds the other five; `others · 5` and `1 handed to a person · 4 cleared at ask`; opening keeps the focus on top; `show all` is the old list; the others row starts folded on every run (`useState(false)`, reset on `runId`); only the focused case's transitions and dispatches sound, the twist stays run-wide; key moments are the focused case's; the every-case drawer only with `show all`; other contacts quiet on the map; `show all` hidden in presenter mode; the unfold keyframes touch `opacity` only.
-- `tests/e2e/test_quiet_others.py` (opt-in `SOUNDINGS_E2E=1`): S05 seed 11 at 20x, sampled every 250 ms until the focused case holds: exactly one case row while ≥ 3 cases exist, `others · n` = cases − 1, the NOW line names the focused case at every sample, the focus ends on `c-0002` and moves at most once, no transitions drawer, CLS < 0.05 while streaming; then `others` opens every row with the focus on top, a click pins another case, `show all` draws the transitions drawer. A second test: `?presenter=1` draws no `show all`.
+- `tests/e2e/test_quiet_smoke.py` (opt-in `SOUNDINGS_E2E=1`): S05 seed 11 at 20x, sampled every 250 ms until the focused case holds: exactly one case row while ≥ 3 cases exist, `others · n` = cases − 1, the NOW line names the focused case at every sample, the focus ends on `c-0002` and moves at most once, no transitions drawer, CLS < 0.05 while streaming; then `others` opens every row with the focus on top, a click pins another case, `show all` draws the transitions drawer. A second test: `?presenter=1` draws no `show all`.
 - Existing: `tests/e2e/test_design_pass.py`, `tests/e2e/test_v3_case_view.py`, the other smokes, `tests/test_ui_tokens.py`, `scripts/readme_shots.py` (three screenshots) stay green.
 
 ## Rungs touched
