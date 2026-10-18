@@ -76,11 +76,15 @@ the drift box" notice in this build (see Left for the owner).
 
 ## 4. Presenter (`/?presenter=1&tiles=off`)
 
-Space advances (7 steps), ArrowLeft goes back, **reset to step 0** restores step 0 in ~1.4 s.
-Each step starts its run within ~6–8 s. Known while PR #78 and WO-062C are in flight: the
-presenter starts runs on the v1 batch source (no hold; the twist step answers 400 and keeps
-the previous run), and the caption bar covers the bottom of the right rail (ledger, ladder,
-approval card) from step 3 on. Re-rehearse after both merge.
+Re-rehearsed on main after #78 (presenter on runner v3) and #80 (WO-062C) merged. Space
+advances (7 steps), ArrowLeft goes back, **reset to step 0** restores step 0 in ~1.3 s. Each
+step lands within ~6–7 s; the twist step (5/7) starts its own S05 run with the toggles (no
+400 any more); the caption bar no longer covers the approval card, the ladder or the ledger
+at 1920×1080; no console errors. The scenario picker follows each step's run, so the top-bar
+**Reset** restarts what is on screen.
+
+The Busy Tuesday step (3/7) opens the judge panel over the bottom-left of the map and it stays
+open into Harbor Night: click its **Close** when step 4/7 lands (the recorder does the same).
 
 ## 5. Controls
 
@@ -102,3 +106,9 @@ approval card) from step 3 on. Re-rehearse after both merge.
 - `awaiting_approval_speed: 1.0` makes the simulated approver's 60 s wait a minute of
   stillness on the default source.
 - `max_live_runs: 4`: a second tab or a rehearsal script can evict the run on screen.
+- A judge **Go** writes `scenarios/live/L-<stamp>.yaml` (gitignored) with `expected: {}`;
+  while that file exists, `make check` fails three scenario-parsing tests
+  (`test_every_scenario_parses`, `test_every_scenario_file_validates_via_resolver`,
+  `test_roundtrip_all_loaded_schemas`). Before `make check` after a judge rehearsal:
+  `rm scenarios/live/L-*.yaml`. The fix (skip `scenarios/live/` in `scenario_paths` /
+  `load_scenarios`) is in sim code, so it is left for the owner.
