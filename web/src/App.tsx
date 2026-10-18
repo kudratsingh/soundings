@@ -218,6 +218,9 @@ function App() {
     // --- WO-060B end ---
     // WO-060C: exactly once per page load (StrictMode runs this effect twice in dev)
     if (params.scenario) {
+      // Owner directive 2026-10-17 20:28: a deep link starts its run once, then the query is
+      // cleared from the address bar, so a restored or reloaded tab waits for Start.
+      window.history.replaceState(null, '', window.location.pathname)
       if (!autoStarted.current) {
         autoStarted.current = true
         begin(params.scenario, params.seed === '' ? null : Number(params.seed), params.speed === '' ? null : Number(params.speed))
