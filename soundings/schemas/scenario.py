@@ -345,15 +345,28 @@ def load_scenario(path: str | Path, harbor: Harbor | None = None) -> Scenario:
     return scenario
 
 
-def scenario_paths(root: str | Path = DEFAULT_SCENARIO_ROOT) -> list[Path]:
-    """``root/*.yaml`` and ``root/live/*.yaml``, sorted by path."""
+def scenario_paths(
+    root: str | Path = DEFAULT_SCENARIO_ROOT, *, include_live: bool = False
+) -> list[Path]:
+    """``root/*.yaml``, sorted by path; ``root/live/*.yaml`` only when ``include_live``.
+
+    Live files are what a judge's Go leaves behind (``expected: {}``); they are
+    gitignored and never part of the catalog, so the catalog tests do not see them
+    (rehearsal audit, 2026-10-17).
+    """
     base = Path(root)
-    return sorted([*base.glob("*.yaml"), *(base / "live").glob("*.yaml")])
+    paths = list(base.glob("*.yaml"))
+    if include_live:
+        paths.extend((base / "live").glob("*.yaml"))
+    return sorted(paths)
 
 
 def load_scenarios(
-    root: str | Path = DEFAULT_SCENARIO_ROOT, harbor: Harbor | None = None
+    root: str | Path = DEFAULT_SCENARIO_ROOT,
+    harbor: Harbor | None = None,
+    *,
+    include_live: bool = False,
 ) -> list[Scenario]:
-    """Every scenario under ``root`` (and ``root/live``), sorted by path."""
+    """Every scenario under ``root`` (plus ``root/live`` when ``include_live``), sorted by path."""
     h = harbor if harbor is not None else load_harbor()
-    return [load_scenario(p, h) for p in scenario_paths(root)]
+    return [load_scenario(p, h) for p in scenario_paths(root, include_live=include_live)]
