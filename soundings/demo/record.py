@@ -189,6 +189,11 @@ def record_demo(out_dir: Path = v.ARTIFACTS, executable_path: str | None = None)
     from soundings.demo.script import DemoScript
 
     steps = DemoScript.load(v.SCRIPT_PATH).steps
+    # WO-062C: the scripted plan filing (auto_file) goes into a throwaway registry, so a
+    # take never touches soundings.db and two takes start from the same empty registry.
+    db_dir = tempfile.TemporaryDirectory(prefix="wo062c-registry-")
+    previous_db = os.environ.get("SOUNDINGS_DB")
+    os.environ["SOUNDINGS_DB"] = str(Path(db_dir.name) / "registry.db")
     base, server, thread = _start_server()
     # Warm the API before the page opens: the first calls build the harbor, physics and
     # scenario tables, and a cold first load must not eat into step 0.
@@ -290,6 +295,20 @@ def record_demo(out_dir: Path = v.ARTIFACTS, executable_path: str | None = None)
         browser.close()
     server.should_exit = True
     thread.join(timeout=10)
+    if previous_db is None:
+        os.environ.pop("SOUNDINGS_DB", None)
+    else:
+        os.environ["SOUNDINGS_DB"] = previous_db
+    db_dir.cleanup()
+    autos = [  # WO-062C: the scripted filing's presenter-log entries
+        {
+            "index": int(e["index"]),
+            "note": e.get("note", ""),
+            "logged_s": round(_wall(e["wall"]) - t0, 3),
+        }
+        for e in log
+        if e["kind"] == "auto"
+    ]
 
     timeline = {
         "total_s": total,
@@ -299,6 +318,7 @@ def record_demo(out_dir: Path = v.ARTIFACTS, executable_path: str | None = None)
         "webm_s": round(webm_probe.duration_s, 3),
         "steps": steps_out,
         "resumes": resumes,
+        "auto": autos,  # WO-062C
         "presses": presses,
         "run_source_patched": patched,
         "sfx": cues,

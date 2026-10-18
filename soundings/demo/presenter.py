@@ -18,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,15 @@ class PresenterEventKind(StrEnum):
     STEP = "step"
     RESUME = "resume"
     RESET = "reset"
+    AUTO = "auto"  # WO-062C: the demo's scripted filing (``note`` says which)
+
+
+class AutoNote(StrEnum):
+    """WO-062C: the fixed notes an ``auto`` entry may carry (never request free text)."""
+
+    JOBS_FILED = "auto: in-force jobs filed (scripted)"
+    PLAN_FILED = "auto: plan filed (stands in for the phone)"
+    PROPOSAL_ACCEPTED = "auto: proposal accepted"
 
 
 @dataclass(frozen=True)
@@ -44,6 +53,7 @@ class PresenterEntry:
     index: int
     caption: str
     pending: tuple[str, ...]
+    note: str = ""  # WO-062C: an AutoNote value on ``auto`` entries, else ""
 
     def as_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -66,7 +76,15 @@ class PresenterLog:
         self._entries: list[PresenterEntry] = []
         self._t0: float | None = None
 
-    def record(self, kind: PresenterEventKind, index: int, step: DemoStep) -> PresenterEntry:
+    def record(
+        self,
+        kind: PresenterEventKind,
+        index: int,
+        step: DemoStep,
+        note: AutoNote | None = None,
+    ) -> PresenterEntry:
+        if (kind is PresenterEventKind.AUTO) != (note is not None):
+            raise ValueError("an auto entry carries a note, and only an auto entry does")
         with self._lock:
             now = self._monotonic()
             if self._t0 is None:
@@ -79,6 +97,7 @@ class PresenterLog:
                 index=index,
                 caption=step.caption or "",
                 pending=step.pending,
+                note="" if note is None else note.value,
             )
             self._entries.append(entry)
             return entry
@@ -101,9 +120,21 @@ def get_presenter_log() -> PresenterLog:
     return _LOG
 
 
-def step_payload(index: int, step: DemoStep) -> dict[str, Any]:
+def _today() -> date:
+    return datetime.now().astimezone().date()
+
+
+def step_payload(index: int, step: DemoStep, today: date | None = None) -> dict[str, Any]:
     """One step as the presenter overlay reads it (yaml fields plus derived ones)."""
     data = step.model_dump(mode="json", exclude_none=True)
+    # --- WO-062C begin: `in_force` and `plan` become the POST /api/plans bodies for
+    # today + day_offset (the yaml holds local HH:MM times) ---
+    if step.auto_file is not None:
+        data["auto_file"].update(
+            step.auto_file.bodies(today if today is not None else _today()),
+            accept_at_s=step.auto_file.accept_at_s,
+        )
+    # --- WO-062C end ---
     data.update(
         index=index,
         mark_s=step.mark_s,
@@ -132,6 +163,7 @@ def load_script(path: Path = DEFAULT_SCRIPT) -> DemoScript:
 
 __all__ = [
     "DEFAULT_SCRIPT",
+    "AutoNote",
     "PresenterEntry",
     "PresenterEventKind",
     "PresenterLog",
