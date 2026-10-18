@@ -69,6 +69,8 @@ def test_approval_leads_and_drawer_spares_it(live_server: str, browser: Any) -> 
 def test_responder_moment_and_steady_now_line(live_server: str, browser: Any) -> None:
     page = _page(browser, live_server, "scenario=S02&seed=3&speed=50&tiles=off")
     page.wait_for_selector("[data-testid=contact-marker]", timeout=60_000)
+    # WO-060D: key moments show the focused case; pin the glider's case (c-0001).
+    page.locator("[data-testid=case-row]", has_text="c-0001").first.click()
     seen: list[str] = []
     for _ in range(240):
         line = page.locator("[data-testid=now-line]").inner_text().split("—")[0].strip()
@@ -80,10 +82,10 @@ def test_responder_moment_and_steady_now_line(live_server: str, browser: Any) ->
         page.wait_for_timeout(250)
     else:
         raise AssertionError(f"no responder key moment; NOW history {seen}")
-    # Each handed-off case enters the NOW line once; watch updates do not flip it back.
-    handed = [s for s in seen if "watching after handoff" in s]
-    ids = [s.split("·")[0].strip() for s in handed]
-    assert len(ids) == len(set(ids)), seen
+    # Each case enters the NOW line once; watch updates do not flip it back.
+    ids = [s.split("·")[0].strip() for s in seen if "·" in s]
+    collapsed = [i for k, i in enumerate(ids) if k == 0 or ids[k - 1] != i]
+    assert len(collapsed) == len(set(collapsed)), seen
     assert not page.errors  # type: ignore[attr-defined]
     page.close()
 

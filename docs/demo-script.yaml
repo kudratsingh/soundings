@@ -8,8 +8,9 @@
 # WO that ships each one; until then presenter mode shows caption + spotlight and logs
 # "action pending WO-0xx"), optional beats (pending actions inside a scenario step),
 # optional spotlight (element to highlight), optional pause_for_click, optional subcaption
-# (WO-088: a second, smaller caption line), and say (a short line for the headless
-# transcript). `end` is when the last shot ends.
+# (WO-088: a second, smaller caption line), optional focus (WO-060D: first_escalation, the
+# default, first_detected or a contact id: the case the screen follows when the step's run
+# starts), and say (a short line for the headless transcript). `end` is when the last shot ends.
 end: "3:00"
 steps:
   # TODO(WO-080): use BT-01 for the cold open and Busy Tuesday once scenarios/BT-01.yaml is on main.
@@ -87,6 +88,8 @@ steps:
         depth_max_m: 30
   - t: "1:00"
     scenario: S05
+    # WO-060D: the screen follows the first case past ask from detection to handoff.
+    focus: first_escalation
     # WO-062B: 20x, not 1x. At 1x the run is still INVESTIGATING at +60 s, so the hold,
     # the SITREP and HANDED_OFF never reach the 50 s shot; at 20x HOLDING lands at ~+21 s
     # and HANDED_OFF at ~+42 s (DECISIONS 2026-10-17, WO-062B).
