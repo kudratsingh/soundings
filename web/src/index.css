@@ -1486,3 +1486,77 @@ button.link:hover {
   pointer-events: none;
 }
 /* --- WO-086 end --- */
+
+/* --- WO-060E begin: quiet the other cases (opacity-only motion; fixed row heights) --- */
+.show-all-btn {
+  margin-left: 0;
+}
+
+.others-row {
+  display: grid;
+  grid-template-columns: 10px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  text-align: left;
+  cursor: pointer;
+  contain: content;
+  white-space: nowrap;
+}
+
+.others-row:hover,
+.others-row.open {
+  background: var(--hover);
+}
+
+.others-n {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.others-sum {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.case-row.unfolded {
+  animation: quiet-unfold var(--fade-ms) ease-out both;
+}
+
+@keyframes quiet-unfold {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .case-row.unfolded {
+    animation: none;
+  }
+}
+/* Key moments with a focus: five slots for the focused case, a fixed sixth for the others
+   (the same rules as WO-060D's; one copy is dropped when the two merge). */
+.key-moments.focused ol {
+  grid-template-columns: repeat(5, minmax(0, 190px)) minmax(0, 300px);
+}
+
+.key-moments .others-slot {
+  grid-column: 6;
+  min-width: 0;
+}
+
+.moment.others {
+  color: var(--text-muted);
+  border: 1px dashed var(--line-strong);
+}
+/* --- WO-060E end --- */

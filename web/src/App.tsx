@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AboutInfo, BoundaryInfo, HarborGeoJson, ModelModeInfo, ScenarioInfo } from './api'
 import { fetchAbout, fetchBoundary, fetchHarbor, fetchModelMode, fetchScenarios, modelBadge, startRun } from './api'
 import type { CaseSummary, Tone } from './cases'
-import { caseItems, caseOf, mostSevere, nowLine, summarize } from './cases'
+import { caseItems, caseOf, nowLine, summarize } from './cases'
 import AboutPanel from './components/AboutPanel'
 import ApprovalButton from './components/ApprovalButton'
 import CaseList from './components/CaseList'
@@ -37,6 +37,10 @@ import ResponderLayer from './components/ResponderLayer'
 // --- WO-086 begin ---
 import RungLedger from './components/RungLedger'
 // --- WO-086 end ---
+// --- WO-060E begin: quiet the other cases (one focused case; `show all` for debugging) ---
+import { isPresenter } from './presenter'
+import { othersLabel, othersSummary, quietFocus, quietMoments } from './quiet'
+// --- WO-060E end ---
 // --- WO-061 begin: judge panel, approval path, plans from the registry ---
 import type { HarborFeature, QrInfo } from './api'
 import { fetchQrInfo, postInject, startRunOn } from './api'
@@ -117,6 +121,13 @@ function App() {
   const [sitrepOpen, setSitrepOpen] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const run = useRun(runId)
+  // --- WO-060E begin: the others row starts folded on every run; show all is debugging only ---
+  const [othersOpen, setOthersOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const [presenting] = useState(() => isPresenter())
+  const quietAll = showAll && !presenting // presenter mode and the recorder: focused only
+  useEffect(() => setOthersOpen(false), [runId])
+  // --- WO-060E end ---
   // --- WO-089 begin: physics cards; rings fall back to base-noise ranges before a run ---
   const [physics, setPhysics] = useState<PhysicsInfo | null>(null)
   useEffect(() => {
@@ -166,7 +177,7 @@ function App() {
 
   const tickS = run.started?.tick_s ?? 2
   const cases = useMemo(() => summarize(run.cases, run.rungOf), [run.cases, run.rungOf])
-  const selectedCase = picked !== null ? caseOf(run.cases, picked) : mostSevere(cases)
+  const selectedCase = quietFocus(run.cases, picked) // WO-060E: pinned on click, else sticky (first past ask)
   const summary: CaseSummary | undefined = cases.find((c) => c.id === selectedCase)
   const memberKey = summary?.members.join(',') ?? ''
   const memberTracks = summary ? summary.members.map((m) => run.cases.tracks[m]) : []
@@ -183,6 +194,14 @@ function App() {
     return caseItems(run.cases, summary.members, run.posteriorOf, index)
   }, [memberKey, caseRows, run.posteriorOf, summary?.state])
   const now = nowLine(summary, items, tickS)
+  // --- WO-060E begin: the focused case's moments; the others in one trailing chip ---
+  const moments = useMemo(() => quietMoments(run.cases, selectedCase, quietAll), [run.cases, selectedCase, quietAll])
+  const othersChip = useMemo(() => {
+    if (quietAll || !summary) return undefined
+    const others = cases.filter((c) => c.id !== summary.id)
+    return others.length ? `${othersLabel(others)} · ${othersSummary(others)}` : ''
+  }, [cases, summary?.id, quietAll])
+  // --- WO-060E end ---
 
   // Map: case colour per contact id, the selected lineage, and labels.
   const { toneOf, caseLabel } = useMemo(() => {
@@ -282,7 +301,7 @@ function App() {
       </header>
       <div className="strip">
         <NowLine text={now} tone={summary?.tone ?? 'unknown'} />
-        <KeyMoments moments={run.cases.moments} caseOf={(cid) => caseOf(run.cases, cid)} tickS={tickS} onSelect={setPicked} />
+        <KeyMoments moments={moments} caseOf={(cid) => caseOf(run.cases, cid)} tickS={tickS} onSelect={setPicked} others={othersChip} /* WO-060E */ />
         <span className="rows-total label num" data-testid="rows-total" data-rows={run.cases.totalRows}>
           {run.cases.totalRows.toLocaleString('en-US')} evidence rows · {cases.length} case{cases.length === 1 ? '' : 's'}
         </span>
@@ -302,6 +321,7 @@ function App() {
           caseLabel={caseLabel}
           mapStyle={params.mapStyle}
           tickS={tickS}
+          quietOthers={!quietAll && summary !== undefined} // WO-060E: others dimmed, unlabelled
           // --- WO-088 begin ---
           // --- WO-061: plans and the judge pin share the overlay with the WO-088 responder ---
           overlay={
@@ -324,7 +344,21 @@ function App() {
           // --- WO-061 end ---
         />
         <aside className="rail">
-          <CaseList cases={cases} selected={selectedCase} auto={picked === null} tick={run.tick} tickS={tickS} flashOf={flashOf} onSelect={setPicked} />
+          <CaseList
+            cases={cases}
+            selected={selectedCase}
+            auto={picked === null}
+            tick={run.tick}
+            tickS={tickS}
+            flashOf={flashOf}
+            onSelect={setPicked}
+            // --- WO-060E begin ---
+            othersOpen={othersOpen}
+            onOthersToggle={() => setOthersOpen((o) => !o)}
+            showAll={presenting ? null : showAll}
+            onShowAll={() => setShowAll((v) => !v)}
+            // --- WO-060E end ---
+          />
           <CaseView
             summary={summary}
             items={items}
@@ -334,6 +368,7 @@ function App() {
             highlight={highlight}
             flash={summary ? flashOf[summary.id] : undefined}
             onOpenSitrep={() => setSitrepOpen(true)}
+            showAll={quietAll} // WO-060E
           />
           <section className="ladder-rail" aria-label="ladder">
             {/* --- WO-086 begin: rung ledger and the blunt-policy counter (display only) --- */}
@@ -386,7 +421,7 @@ function App() {
       {/* --- WO-062 block (demo runner) --- */}
       {/* --- end WO-062 block --- */}
       {/* --- WO-062P begin --- */}
-      <PresenterMode run={run} onRun={setRunId} />
+      <PresenterMode run={run} onRun={setRunId} cueGate={{ focusIds: summary ? selectedIds : null, showAll: quietAll }} /* WO-060E */ />
       {/* --- WO-062P end --- */}
     </div>
   )

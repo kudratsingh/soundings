@@ -4,6 +4,7 @@
 // sentence rests on, and a collapsed evidence section. Steps not reached yet are dim
 // placeholders. At the bottom, two collapsed drawers: every row of this case (virtualized,
 // grouped by tick, filter chips) and every transition of every case (for debugging).
+// WO-060E: the every-case drawer is drawn only with `show all` on; both start collapsed.
 // Display only: nothing here can set a rung.
 
 import { memo, useMemo, useState } from 'react'
@@ -258,6 +259,10 @@ interface Props {
   highlight: string | null
   flash: number | undefined
   onOpenSitrep(): void
+  // --- WO-060E begin ---
+  /** Debugging: draw the 'All transitions (every case)' drawer (hidden otherwise). */
+  showAll?: boolean
+  // --- WO-060E end ---
 }
 
 /** The state path of the case's current id, for the stepper (kept as data-testid=state-timeline). */
@@ -271,7 +276,7 @@ function statePath(timeline: TimelineEntry[], cid: string): { state: LadderState
   return out
 }
 
-export default function CaseView({ summary, items, rows, timeline, tickS, highlight, flash, onOpenSitrep }: Props) {
+export default function CaseView({ summary, items, rows, timeline, tickS, highlight, flash, onOpenSitrep, showAll = false /* WO-060E */ }: Props) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [evOpen, setEvOpen] = useState(false)
   const [trOpen, setTrOpen] = useState(false)
@@ -330,12 +335,16 @@ export default function CaseView({ summary, items, rows, timeline, tickS, highli
           </button>
           {evOpen && <EvidenceDrawer rows={rows} highlight={highlight} />}
         </div>
-        <div className="drawer-block">
-          <button type="button" className="drawer-toggle" aria-expanded={trOpen} data-testid="transitions-drawer" onClick={() => setTrOpen((o) => !o)}>
-            {trOpen ? '▾' : '▸'} All transitions (every case) <span className="label num">{timeline.length}</span>
-          </button>
-          {trOpen && <TransitionsDrawer entries={timeline} caseIds={members} />}
-        </div>
+        {/* --- WO-060E begin: every case's transitions only with show all --- */}
+        {showAll && (
+          <div className="drawer-block">
+            <button type="button" className="drawer-toggle" aria-expanded={trOpen} data-testid="transitions-drawer" onClick={() => setTrOpen((o) => !o)}>
+              {trOpen ? '▾' : '▸'} All transitions (every case) <span className="label num">{timeline.length}</span>
+            </button>
+            {trOpen && <TransitionsDrawer entries={timeline} caseIds={members} />}
+          </div>
+        )}
+        {/* --- WO-060E end --- */}
       </div>
     </section>
   )

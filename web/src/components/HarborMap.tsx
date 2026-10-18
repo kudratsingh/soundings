@@ -6,6 +6,9 @@
 // trail of its last 60 fixes, a 60 s velocity leader, and its case colour (benign teal,
 // unknown white, threat amber); the selected case gets a halo and a label. The map never
 // pans by itself unless 'follow selected' is on.
+// WO-060E: with `quietOthers`, every contact outside the focused case is drawn dimmed, with no
+// label and no leader; the focused one keeps its label, trail, leader and ellipse. The
+// responder overlay and the legend are untouched.
 
 import L from 'leaflet'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -18,6 +21,7 @@ import type { SensorRangeRow } from '../events' // WO-089
 // --- WO-086 begin ---
 import { ellipseLatLngs, leaderEnd as projectedLeaderEnd } from '../radar'
 // --- WO-086 end ---
+import { QUIET_DIM } from '../quiet' // WO-060E
 
 const CENTER: [number, number] = [33.736, -118.262]
 export const TRAIL_FIXES = 60
@@ -45,6 +49,10 @@ interface Props {
   caseLabel?: Record<string, string>
   mapStyle?: MapStyle
   tickS?: number
+  // --- WO-060E begin ---
+  /** Draw contacts outside the focused case dimmed and unlabelled. */
+  quietOthers?: boolean
+  // --- WO-060E end ---
 }
 
 const TONE_COLOR: Record<Tone, string> = {
@@ -142,6 +150,7 @@ const ContactLayer = memo(function ContactLayer({
   tickS,
   onSelect,
   projected = false, // WO-086
+  quiet = false, // WO-060E
 }: {
   c: ContactView
   selected: boolean
@@ -151,6 +160,8 @@ const ContactLayer = memo(function ContactLayer({
   onSelect(id: string): void
   /** WO-086: draw WO-084's 60 s projection ellipse for this contact. */
   projected?: boolean
+  /** WO-060E: outside the focused case: dimmed, no label, no leader. */
+  quiet?: boolean
 }) {
   const ref = useRef<LCircleMarker | null>(null)
   useEffect(() => {
@@ -158,9 +169,11 @@ const ContactLayer = memo(function ContactLayer({
     if (el) {
       el.setAttribute('data-testid', 'contact-marker')
       el.setAttribute('data-contact', c.contact_id)
+      el.setAttribute('data-quiet', quiet ? '1' : '0') // WO-060E
     }
   })
   const color = TONE_COLOR[tone]
+  const q = quiet ? QUIET_DIM : 1 // WO-060E
   const trail = c.track.slice(-TRAIL_FIXES)
   const third = Math.max(1, Math.floor(trail.length / 3))
   const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
@@ -189,22 +202,24 @@ const ContactLayer = memo(function ContactLayer({
             positions={s}
             interactive={false}
             className="contact-trail"
-            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] }}
+            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] * q }}
           />
         ) : null,
       )}
-      {lead && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9, dashArray: '2 4' }} />}
+      {lead && !quiet /* WO-060E */ && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9, dashArray: '2 4' }} />}
       {selected && <CircleMarker center={pos} radius={15} interactive={false} className="halo" pathOptions={{ color, weight: 1.5, opacity: 0.9, fillOpacity: 0.08 }} />}
       <CircleMarker
         ref={ref}
         center={pos}
         radius={selected ? 7 : 5}
-        pathOptions={{ color: '#06121c', weight: 1.5, fillColor: color, fillOpacity: 1 }}
+        pathOptions={{ color: '#06121c', weight: 1.5, opacity: q, fillColor: color, fillOpacity: q }}
         eventHandlers={{ click: () => onSelect(c.contact_id) }}
       >
-        <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
-          {label}
-        </Tooltip>
+        {!quiet /* WO-060E: no label outside the focused case */ && (
+          <Tooltip permanent={selected} direction="right" offset={[10, 0]} className={`contact-label${selected ? ' sel' : ''}`}>
+            {label}
+          </Tooltip>
+        )}
       </CircleMarker>
     </>
   )
@@ -266,6 +281,7 @@ export default function HarborMap({
   caseLabel = {},
   mapStyle = 'radar',
   tickS = 2,
+  quietOthers = false, // WO-060E
 }: Props) {
   const [legend, setLegend] = useState(false)
   const [follow, setFollow] = useState(false)
@@ -374,6 +390,7 @@ export default function HarborMap({
             tickS={tickS}
             onSelect={onSelect}
             projected={c.contact_id === projectedId} // WO-086
+            quiet={quietOthers && !isSel(c.contact_id)} // WO-060E
           />
         ))}
         {overlay}

@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+from tests.e2e._quiet import reveal
+
 LOOPBACK = {"127.0.0.1", "localhost"}
 
 
@@ -34,8 +36,8 @@ def _page(browser: Any, live_server: str, query: str) -> Any:
 
 def test_s05_awaiting_approval_hold_and_posterior(live_server: str, browser: Any) -> None:
     page = _page(browser, live_server, "scenario=S05&seed=11&speed=20")
-    row = page.locator("[data-testid=case-row][data-state=AWAITING_APPROVAL]")
-    row.first.wait_for(timeout=180_000)
+    # WO-060E: the row may be folded behind `others · n`
+    row = reveal(page, "[data-testid=case-row][data-state=AWAITING_APPROVAL]")
     row.first.click()
     page.wait_for_selector("[data-testid=approval-card]", timeout=30_000)
     ladder = page.locator("[data-testid=step][data-step=ladder][data-status=current]")
@@ -60,8 +62,8 @@ def test_s05_awaiting_approval_hold_and_posterior(live_server: str, browser: Any
 
 def test_s02_lost_vehicle_search_box(live_server: str, browser: Any) -> None:
     page = _page(browser, live_server, "scenario=S02&seed=3&speed=50")
-    row = page.locator("[data-testid=case-row][data-state=LOST_VEHICLE]")
-    row.first.wait_for(timeout=180_000)
+    # WO-060E: the row may be folded behind `others · n`
+    row = reveal(page, "[data-testid=case-row][data-state=LOST_VEHICLE]")
     row.first.click()
     card = page.locator("[data-testid=step][data-step=handoff]")
     card.first.wait_for(timeout=30_000)
@@ -75,8 +77,8 @@ def test_s02_lost_vehicle_search_box(live_server: str, browser: Any) -> None:
 
 def test_s04_resolved_benign(live_server: str, browser: Any) -> None:
     page = _page(browser, live_server, "scenario=S04&speed=50")
-    row = page.locator("[data-testid=case-row][data-state=RESOLVED_BENIGN]")
-    row.first.wait_for(timeout=180_000)
+    # WO-060E: the row may be folded behind `others · n`
+    row = reveal(page, "[data-testid=case-row][data-state=RESOLVED_BENIGN]")
     row.first.click()
     rec = page.locator("[data-testid=step][data-step=recommendation][data-status=done]")
     rec.first.wait_for(timeout=30_000)

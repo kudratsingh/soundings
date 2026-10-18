@@ -4,12 +4,19 @@
 // evidence rows and rungs make no sound. The files (five, plus WO-088's one) are made
 // by scripts/gen_sfx.py (numpy, -18 dBFS peak, each < 1 s) and served from /sfx/.
 //
+// WO-060E: a transition sounds only when it belongs to the focused case (the twist stays
+// run-wide); `show all` lets every case's cues through again.
+//
 // Mute: presenter mode defaults to UNMUTED, the normal screen to muted; each mode keeps its
 // own choice in localStorage (wrapped: storage can be missing or throw).
 
 import { useEffect, useRef } from 'react'
 import type { LadderState } from './events'
 import type { RunState, TimelineEntry } from './useRun'
+// --- WO-060E begin ---
+import type { CueGate } from './quiet'
+import { cueAllowed, cueEntries } from './quiet'
+// --- WO-060E end ---
 
 export type SoundName =
   | 'hail_ping'
@@ -127,13 +134,18 @@ export function playSound(name: SoundName, muted: boolean): void {
   })
 }
 
-/** Follow a run and sound its audit events. Muted events still advance, never replay. */
-export function useSfx(run: RunState, muted: boolean): void {
+/** Follow a run and sound its audit events. Muted events still advance, never replay.
+ * WO-060E: with a `gate`, only the focused case's transitions and dispatches sound. */
+export function useSfx(run: RunState, muted: boolean, gate?: CueGate): void {
   const seen = useRef<{ runId: string | null; n: number; twist: boolean }>({ runId: null, n: 0, twist: false })
   const mutedRef = useRef(muted)
   useEffect(() => {
     mutedRef.current = muted
   }, [muted])
+  // --- WO-060E begin: read at the moment new events arrive ---
+  const gateRef = useRef<CueGate>(gate ?? { focusIds: null, showAll: true })
+  gateRef.current = gate ?? { focusIds: null, showAll: true }
+  // --- WO-060E end ---
 
   useEffect(() => {
     const s = seen.current
@@ -148,7 +160,8 @@ export function useSfx(run: RunState, muted: boolean): void {
     if (run.timeline.length > cur.n) {
       const fresh = run.timeline.slice(cur.n)
       cur.n = run.timeline.length
-      for (const sound of soundsForTransitions(fresh)) playSound(sound, mutedRef.current)
+      const g = gateRef.current // WO-060E: other cases' cues are suppressed
+      for (const sound of soundsForTransitions(cueEntries(fresh, g.focusIds, g.showAll))) playSound(sound, mutedRef.current)
     }
   }, [run.runId, run.started, run.timeline])
 
@@ -159,7 +172,8 @@ export function useSfx(run: RunState, muted: boolean): void {
     const cur = dispatchSeen.current
     if (newDispatches(cur.n, run.responderDispatches) > 0) {
       cur.n = run.responderDispatches
-      playSound(RESPONDER_DISPATCH_SOUND, mutedRef.current)
+      const g = gateRef.current // WO-060E: a look at another case's contact is quiet
+      if (cueAllowed(run.responder?.target_contact_id, g.focusIds, g.showAll)) playSound(RESPONDER_DISPATCH_SOUND, mutedRef.current)
     }
   }, [run.runId, run.responderDispatches])
   // --- WO-088 end ---

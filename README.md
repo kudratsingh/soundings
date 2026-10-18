@@ -13,7 +13,7 @@ Soundings sits with the harbor watch officer between "seen" and "handled" when a
 |---|---|---|
 | ![S02 case view mid-run with the NOW line and key moments](docs/screenshots/01-case-view-s02.png) | ![S05 case view with the INVESTIGATE step](docs/screenshots/02-investigate-s05.png) | ![the About panel](docs/screenshots/03-about.png) |
 
-Everything is grouped by case (one contact lineage): each step card says what happened in one sentence, with its evidence rows one click away (fact blue, assumption orange, derived grey). Re-capture with `uv run python scripts/readme_shots.py` (needs `make web`).
+Everything is grouped by case (one contact lineage): each step card says what happened in one sentence, with its evidence rows one click away (fact blue, assumption orange, derived grey). During a run the screen shows one case; `others · n` opens the rest; `show all` reveals every event. Re-capture with `uv run python scripts/readme_shots.py` (needs `make web`).
 
 ## Quickstart
 
