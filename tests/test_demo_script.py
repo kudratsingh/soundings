@@ -251,11 +251,11 @@ def test_actions_and_pending_notes() -> None:
     assert set(ACTIONS) == set(ActionName)
     assert pending_note(ActionName.END_CARD) is None
     assert pending_note(ActionName.LADDER_CHIPS) is None
-    assert pending_note(ActionName.PROPOSE_SLOT) == "action propose_slot pending WO-082"
+    assert pending_note(ActionName.PROPOSE_SLOT) is None  # WO-082 merged
     script = DemoScript.load(SCRIPT)
     assert script.steps[0].pending == ()
-    assert script.steps[5].pending == ("action rung_ledger_eval pending WO-086",)
-    assert len(script.steps[2].pending) == 2  # file_plan_qr shipped with WO-061
+    assert script.steps[5].pending == ()  # WO-086 merged
+    assert script.steps[2].pending == ()  # WO-061, WO-082 and WO-083 all merged
     assert pending_note(ActionName.FILE_PLAN_QR) is None
     assert pending_note(ActionName.JUDGE_DROPS_ROGUE) is None
 

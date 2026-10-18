@@ -61,11 +61,11 @@ ACTIONS: dict[ActionName, str | None] = {
     # None: the presenter overlay renders it today. A WO id: pending until that WO lands.
     ActionName.LADDER_CHIPS: None,
     ActionName.FILE_PLAN_QR: None,  # WO-061: opens the judge panel on its QR code
-    ActionName.PROPOSE_SLOT: "WO-082",
-    ActionName.VESSEL_ADVISORY: "WO-083",
+    ActionName.PROPOSE_SLOT: None,  # merged 2026-10-17; rendered live
+    ActionName.VESSEL_ADVISORY: None,  # merged 2026-10-17; rendered live
     ActionName.JUDGE_DROPS_ROGUE: None,  # WO-061: POST /api/inject (closing on fuel_berth_2)
-    ActionName.TWIST_TOGGLES: "WO-060",
-    ActionName.RUNG_LEDGER_EVAL: "WO-086",
+    ActionName.TWIST_TOGGLES: None,  # WO-060B merged 2026-10-17; rendered live
+    ActionName.RUNG_LEDGER_EVAL: None,  # merged 2026-10-17; rendered live
     ActionName.END_CARD: None,
 }
 
