@@ -4,8 +4,9 @@
 ``POST /api/presenter-log`` records that presenter mode landed on a step (``step``),
 resumed after a ``pause_for_click`` (``resume``) or went back to step 0 (``reset``); the
 server stamps it and copies the caption from the script. ``GET`` returns the entries,
-``DELETE`` clears them. CLAUDE.md 2.2: nothing here names a rung, a state, a threshold or
-a scope; presenting a step never steers a run.
+``DELETE`` clears them. WO-062C adds ``auto`` entries: the demo's scripted plan filing
+and its accept, each with one fixed ``note`` (``AutoNote``). CLAUDE.md 2.2: nothing here
+names a rung, a state, a threshold or a scope; presenting a step never steers a run.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from soundings.demo import presenter
-from soundings.demo.presenter import PresenterEventKind, get_presenter_log, script_payload
+from soundings.demo.presenter import AutoNote, PresenterEventKind, get_presenter_log, script_payload
 from soundings.demo.script import DemoScript
 
 router = APIRouter(tags=["presenter"])
@@ -27,6 +28,7 @@ class PresenterLogBody(BaseModel):
 
     index: Annotated[int, Field(ge=0)]
     kind: PresenterEventKind = PresenterEventKind.STEP
+    note: AutoNote | None = None  # WO-062C: required on (and only on) an `auto` entry
 
 
 def _script() -> DemoScript:
@@ -51,7 +53,12 @@ def presenter_log_append(body: PresenterLogBody) -> dict[str, Any]:
     script = _script()
     if body.index >= len(script.steps):
         raise HTTPException(status_code=404, detail=f"no step {body.index}")
-    entry = get_presenter_log().record(body.kind, body.index, script.steps[body.index])
+    try:
+        entry = get_presenter_log().record(
+            body.kind, body.index, script.steps[body.index], body.note
+        )
+    except ValueError as exc:  # WO-062C: a note without `auto`, or `auto` without a note
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return entry.as_json()
 
 
