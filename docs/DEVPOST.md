@@ -21,7 +21,7 @@ Soundings climbs the gentlest rung that resolves an unknown underwater contact â
 **The evidence.** We ran the scenario catalog over five seeds against two blunt policies: close the berth on every contact, and send every contact to a person.
 
 <!-- eval:begin -->
-Evidence: [eval pending â€” run `make eval && make deck` to fill this sentence from artifacts/eval/report.json].
+Evidence (simulated detection, stress-test estimate, 45 ground-truth contacts): Soundings resolved 68.9% at or below ask with 0 missed threats and 15 shutdown-minutes; closing the berth on every contact cost 1,293; sending everything to a person cost 30.7 interruptions per hour against 10.9.
 <!-- eval:end -->
 
 ## Twists
