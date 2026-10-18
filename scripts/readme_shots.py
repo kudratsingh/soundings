@@ -93,6 +93,32 @@ def _save(page: Any, path: Path) -> None:
     print(f"wrote {path} ({size // 1024} KB)")
 
 
+# --- WO-060E begin: every case but the focus is folded behind one `others · n` row ---
+def _reveal(page: Any, selector: str, timeout_ms: int = 120_000) -> Any:
+    """Wait for a case row, opening the folded `others` row while it is not shown."""
+    loc = page.locator(selector)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if loc.count():
+            return loc
+        folded = page.locator("[data-testid=others-row][aria-expanded=false]")
+        if folded.count():
+            folded.first.click()
+        page.wait_for_timeout(250)
+    loc.first.wait_for(timeout=1)
+    return loc
+
+
+def _fold_others(page: Any) -> None:
+    opened = page.locator("[data-testid=others-row][aria-expanded=true]")
+    if opened.count():
+        opened.first.click()
+        page.wait_for_timeout(300)
+
+
+# --- WO-060E end ---
+
+
 def capture(base: str, out: Path, executable_path: str | None) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -106,7 +132,7 @@ def capture(base: str, out: Path, executable_path: str | None) -> None:
             "Number(document.querySelector('[data-testid=rows-total]')?.dataset.rows ?? 0) > 3000",
             timeout=120_000,
         )
-        page.click("[data-testid=case-row][data-case='c-0001']")
+        _reveal(page, "[data-testid=case-row][data-case='c-0001']").first.click()
         page.wait_for_timeout(600)
         _save(page, out / "01-case-view-s02.png")
         page.close()
@@ -116,13 +142,26 @@ def capture(base: str, out: Path, executable_path: str | None) -> None:
         # Over runner v3 (WO-060 part B) the auto-selected case is the re-acquired lineage
         # on the ladder, so pin the case that is investigating (c-0006 at about t 1,150 s).
         row = "[data-testid=case-row]:has-text('INVESTIGATING')"
-        page.wait_for_selector(row, timeout=120_000)
-        page.locator(row).first.click()  # pin the case so it holds still
         step = "[data-testid=case-view] [data-step=investigate][data-status=current]"
-        page.wait_for_selector(step, timeout=15_000)
-        page.wait_for_timeout(400)
-        page.locator(step).first.evaluate("el => el.scrollIntoView({block: 'start'})")
-        page.wait_for_timeout(400)
+        # WO-060E: when the investigating case is not the focus it sits behind `others · n`.
+        # An early investigation can close before the pin lands (c-0001 clears in ~1 s at
+        # 20x); pin again until the case view holds a current INVESTIGATE step.
+        deadline = time.monotonic() + 120
+        while True:
+            _reveal(page, row).first.click()  # pin the case so it holds still
+            try:
+                page.wait_for_selector(step, timeout=3_000)
+                _fold_others(page)  # the shot shows one case: fold the others again
+                page.locator(step).first.evaluate(
+                    "el => el.scrollIntoView({block: 'start'})", timeout=2_000
+                )
+                page.wait_for_timeout(300)
+                if page.locator(step).count():
+                    break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+            page.wait_for_timeout(500)
         _save(page, out / "02-investigate-s05.png")
         page.close()
 

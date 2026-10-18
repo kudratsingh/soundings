@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.e2e._judge import offline
+from tests.e2e._quiet import open_others
 
 REPO = Path(__file__).resolve().parents[2]
 ART = REPO / "artifacts"
@@ -94,6 +95,7 @@ def test_s05_focus_stays_on_the_first_case_past_ask(live_server: str, browser: A
     # climbs or is handed off, and nothing moves it from then on.
     climbed = ",".join(f"[data-testid=case-row][data-state={s}]" for s in CLIMBED)
     page.wait_for_selector(climbed, timeout=180_000)
+    page.wait_for_timeout(300)  # let the 50 ms focus sampler log the switch (loaded machines)
     hero = _focused(page)
     hero_row = page.locator(f"[data-testid=case-row][data-case='{hero}']")
     assert hero_row.get_attribute("data-focused") == "1"
@@ -114,9 +116,8 @@ def test_s05_focus_stays_on_the_first_case_past_ask(live_server: str, browser: A
         f" [data-testid=case-row][data-case='{hero}'][data-state=AWAITING_APPROVAL]",
         timeout=180_000,
     )
-    page.wait_for_function(
-        "() => document.querySelectorAll('[data-testid=case-row]').length >= 2", timeout=60_000
-    )
+    # WO-060E: the other cases are folded behind `others · n` (opened before the pin below)
+    page.wait_for_selector("[data-testid=others-row]", timeout=60_000)
     assert _focused(page) == hero
     dims = page.locator("[data-testid=contact-marker]").evaluate_all(
         "els => els.map(e => [e.getAttribute('data-contact'), e.getAttribute('data-dim')])"
@@ -138,6 +139,10 @@ def test_s05_focus_stays_on_the_first_case_past_ask(live_server: str, browser: A
     page.screenshot(path=str(ART / "focus-sticky.png"))
 
     page.evaluate("() => { window.__sampling = false }")
+    open_others(page)  # WO-060E
+    page.wait_for_function(
+        "() => document.querySelectorAll('[data-testid=case-row]').length >= 2", timeout=10_000
+    )
     rows = page.locator("[data-testid=case-row]")
     other = ""
     for i in range(rows.count()):

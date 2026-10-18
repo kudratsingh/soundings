@@ -19,11 +19,15 @@ import type { AutoFile } from '../presenter'
 import { AUTO_NOTES, autoFileEnabled, filePlan, logAuto } from '../presenter'
 import EvidenceCard from './EvidenceCard'
 // --- WO-062C end ---
+import type { CueGate } from '../quiet' // WO-060E
 import '../presenter.css'
 
 interface Props {
   run: RunState
   onRun: (runId: string) => void
+  // --- WO-060E begin: only the focused case sounds (App passes the focus and show all) ---
+  cueGate?: CueGate
+  // --- WO-060E end ---
 }
 
 interface Nav {
@@ -341,10 +345,10 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
   )
 }
 
-export default function PresenterMode({ run, onRun }: Props) {
+export default function PresenterMode({ run, onRun, cueGate }: Props) {
   const [presenter] = useState(() => isPresenter())
   const [muted, setMuted] = useState(() => loadMuted(presenter))
-  useSfx(run, muted)
+  useSfx(run, muted, cueGate) // WO-060E: gated to the focused case
   const toggle = () =>
     setMuted((m) => {
       saveMuted(presenter, !m)
