@@ -142,14 +142,26 @@ def capture(base: str, out: Path, executable_path: str | None) -> None:
         # Over runner v3 (WO-060 part B) the auto-selected case is the re-acquired lineage
         # on the ladder, so pin the case that is investigating (c-0006 at about t 1,150 s).
         row = "[data-testid=case-row]:has-text('INVESTIGATING')"
-        # WO-060E: when the investigating case is not the focus it sits behind `others · n`
-        _reveal(page, row).first.click()  # pin the case so it holds still
-        _fold_others(page)  # the shot shows one case: fold the others again
         step = "[data-testid=case-view] [data-step=investigate][data-status=current]"
-        page.wait_for_selector(step, timeout=15_000)
-        page.wait_for_timeout(400)
-        page.locator(step).first.evaluate("el => el.scrollIntoView({block: 'start'})")
-        page.wait_for_timeout(400)
+        # WO-060E: when the investigating case is not the focus it sits behind `others · n`.
+        # An early investigation can close before the pin lands (c-0001 clears in ~1 s at
+        # 20x); pin again until the case view holds a current INVESTIGATE step.
+        deadline = time.monotonic() + 120
+        while True:
+            _reveal(page, row).first.click()  # pin the case so it holds still
+            try:
+                page.wait_for_selector(step, timeout=3_000)
+                _fold_others(page)  # the shot shows one case: fold the others again
+                page.locator(step).first.evaluate(
+                    "el => el.scrollIntoView({block: 'start'})", timeout=2_000
+                )
+                page.wait_for_timeout(300)
+                if page.locator(step).count():
+                    break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+            page.wait_for_timeout(500)
         _save(page, out / "02-investigate-s05.png")
         page.close()
 
