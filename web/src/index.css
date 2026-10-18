@@ -1494,6 +1494,16 @@ button.link:hover {
 }
 /* --- WO-086 end --- */
 
+/* --- REH begin: the SITREP drawer sits over the map, never over the right rail, so the
+   approval card, the ladder and the ledger stay visible while a SITREP is open --- */
+@media (min-width: 1101px) {
+  .drawer {
+    right: clamp(560px, 42vw, 760px);
+    border-right: 1px solid var(--line);
+  }
+}
+/* --- REH end --- */
+
 /* --- WO-060D begin: focus one case --------------------------------------------------- */
 /* The mode badge is fixed width: sticky / auto / pinned never moves the header. */
 .focus-btn {
