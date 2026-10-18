@@ -64,5 +64,25 @@ deck:
 	uv run python scripts/build_deck.py
 	uv run python scripts/export_deck.py
 
+# --- WO-062B begin: the demo video. `demo-video` records presenter mode (headless Chromium,
+# loopback only, MODEL_MODE=replay), converts to artifacts/demo-fallback.mp4 and renders
+# artifacts/thumbnail.png; with macOS `say` it also drafts the VO (artifacts/vo-draft.m4a)
+# and merges it into artifacts/demo-youtube.mp4. `video-merge VO=take.m4a [MUSIC=bed.m4a]`
+# mixes the owner's take: VO -16 LUFS, SFX -22 dBFS at the recorded event times, music -28.
+.PHONY: demo-video video-merge
+demo-video:
+	uv run python -m soundings.demo.video record --out artifacts
+	@if command -v say >/dev/null 2>&1; then \
+		uv run python -m soundings.demo.video vo-draft --out artifacts && \
+		uv run python -m soundings.demo.video merge --vo artifacts/vo-draft.m4a --out artifacts; \
+	else \
+		echo "no macOS say: VO draft skipped (make video-merge VO=take.m4a after recording a take)"; \
+	fi
+
+video-merge:
+	@test -n "$(VO)" || { echo "usage: make video-merge VO=path.m4a [MUSIC=path]"; exit 2; }
+	uv run python -m soundings.demo.video merge --vo "$(VO)" $(if $(MUSIC),--music "$(MUSIC)",) --out artifacts
+# --- WO-062B end ---
+
 clean:
 	rm -rf artifacts/*.png artifacts/eval web/dist

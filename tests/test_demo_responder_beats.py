@@ -10,8 +10,15 @@ from soundings.schemas.denylist import find_denylisted
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "docs" / "demo-script.yaml"
-LOOK_CAPTION = (
+# The owner's WO-088 line, as the addendum records it for the vo-script.
+OWNER_LOOK_LINE = (
     "The platform goes to look. It never goes closer than 25 m. The call is still a person's."
+)
+# WO-062B: in S05 no look is dispatched before the call (DECISIONS 2026-10-17 11:06), so the
+# on-screen subcaption says the platform can go to look rather than that it goes.
+LOOK_CAPTION = (
+    "The platform can go to look, never closer than 25 m. Tonight the call came first, "
+    "and it is a person's."
 )
 VO_NOTE = REPO / "docs" / "work-orders" / "WO-062-ADDENDUM-video-sound.md"
 
@@ -48,6 +55,6 @@ def test_subcaption_fits_and_is_clean() -> None:
 
 def test_vo_note_carries_the_line() -> None:
     text = VO_NOTE.read_text(encoding="utf-8")
-    assert LOOK_CAPTION in text
+    assert OWNER_LOOK_LINE in text
     assert "found in the drift box" in text
     assert not find_denylisted(text)
