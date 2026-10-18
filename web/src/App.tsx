@@ -205,6 +205,18 @@ function App() {
     return out
   }, [run.cases, run.tick])
 
+  // --- REH begin: Escape closes the About panel and the SITREP drawer (no keyboard trap) ---
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setAboutOpen(false)
+      setSitrepOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // --- REH end ---
+
   const activeRung: Rung = summary?.rung ?? 'watch'
   const speed = run.started ? run.started.speed : null
 
@@ -272,7 +284,14 @@ function App() {
         </span>
         {run.finished && <span className="badge">run finished</span>}
         <span className="spacer" />
-        <ScenarioPicker scenarios={scenarios} initial={params} onStart={begin} running={run.started !== null} />
+        <ScenarioPicker
+          scenarios={scenarios}
+          initial={params}
+          onStart={begin}
+          running={run.started !== null}
+          // REH: the picker follows the run on screen (presenter and judge runs too), so Reset restarts what is shown
+          current={run.started && /^S\d{2}$/.test(run.started.scenario_id) ? { key: run.runId ?? '', scenario: run.started.scenario_id, seed: String(run.started.seed), speed: String(run.started.speed) } : null}
+        />
         <button type="button" data-testid="sitrep-open" onClick={() => setSitrepOpen((o) => !o)}>
           SITREP{run.sitreps.length ? ` (${run.sitreps.length})` : ''}
         </button>
