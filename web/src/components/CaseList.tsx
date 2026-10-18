@@ -1,6 +1,9 @@
 // CASES (WO-060 design pass): one row per case (a contact lineage), sorted by severity:
-// threat first, then needs-approval, then investigating, then cleared/resolved. 'auto'
-// follows the most severe case. Up/down keys move the selection. Replaces the contact chips.
+// threat first, then needs-approval, then investigating, then cleared/resolved. Up/down keys
+// move the selection. Replaces the contact chips.
+// WO-060D: the badge shows the focus mode (sticky: the first case past ask holds the screen;
+// auto: the most severe case; pinned: the row the user clicked). Clicking it returns a pinned
+// focus to sticky, and toggles sticky/auto. Every concurrent case keeps its row.
 // WO-060E: during a run the focused case is the one row shown; every other case folds into one
 // `others · n` row with a severity summary. Clicking it opens the rest (a click there pins the
 // focus); `show all` (hidden in presenter mode) draws the whole list for debugging.
@@ -9,6 +12,7 @@ import type { KeyboardEvent } from 'react'
 import { Fragment } from 'react' // WO-060E
 import type { CaseSummary, StepStatus } from '../cases'
 import { RUNG_LABEL } from '../events'
+import type { FocusMode } from '../focus' // WO-060D
 // --- WO-060E begin ---
 import { casesView, othersLabel, othersSummary } from '../quiet'
 // --- WO-060E end ---
@@ -16,7 +20,10 @@ import { casesView, othersLabel, othersSummary } from '../quiet'
 interface Props {
   cases: CaseSummary[]
   selected: string | null
-  auto: boolean
+  // --- WO-060D begin ---
+  mode: FocusMode
+  onMode(): void
+  // --- WO-060D end ---
   tick: number
   tickS: number
   flashOf: Record<string, number>
@@ -49,7 +56,8 @@ export function ago(ticks: number, tickS: number): string {
 export default function CaseList({
   cases,
   selected,
-  auto,
+  mode, // WO-060D
+  onMode, // WO-060D
   tick,
   tickS,
   flashOf,
@@ -75,9 +83,24 @@ export default function CaseList({
       <header className="panel-head">
         <h2>Cases</h2>
         <span className="label">{cases.length} · by severity</span>
-        <button type="button" className={`auto-btn${auto ? ' on' : ''}`} aria-pressed={auto} data-testid="case-auto" onClick={() => onSelect(null)}>
-          auto
+        {/* --- WO-060D begin: the focus mode (fixed width: switching never moves the row) --- */}
+        <button
+          type="button"
+          className={`auto-btn focus-btn mode-${mode}`}
+          data-testid="focus-mode"
+          data-mode={mode}
+          title={
+            mode === 'pinned'
+              ? 'focus pinned to the case you clicked; click to return to sticky'
+              : mode === 'sticky'
+                ? 'focus stays on the first case past ask; click for auto (most severe)'
+                : 'focus follows the most severe case; click for sticky'
+          }
+          onClick={onMode}
+        >
+          focus: {mode}
         </button>
+        {/* --- WO-060D end --- */}
         {/* --- WO-060E begin: debugging only; never shown in presenter mode --- */}
         {showAll !== null && (
           <button
@@ -100,13 +123,14 @@ export default function CaseList({
             <div
               role="option"
               aria-selected={c.id === selected}
+              aria-current={c.id === selected ? 'true' : undefined} // WO-060D: the focused row
               className={`case-row tone-${c.tone}${c.id === selected ? ' sel' : ''}${i > 0 && view.othersRow ? ' unfolded' : ''}`}
               data-testid="case-row"
               data-case={c.id}
               data-state={c.state}
               data-members={c.members.join(',')}
               data-members-n={c.members.length}
-              data-focused={c.id === selected ? '1' : '0'} // WO-060E
+              data-focused={c.id === selected ? '1' : '0'} // WO-060D/E
               onClick={() => onSelect(c.id)}
             >
               {flashOf[c.id] !== undefined && <span key={flashOf[c.id]} className="flash" />}

@@ -10,6 +10,7 @@ import type { RefObject } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PresenterLogKind, PresenterScript, PresenterStep } from '../presenter'
 import { END_CARD, LADDER_CHIPS, fetchDemoScript, findSpotlight, isPresenter, logPresenter, startStepRun } from '../presenter'
+import { announceFocus } from '../presenter' // WO-060D
 import { TWIST_SOUND, loadMuted, playSound, saveMuted, useSfx } from '../sfx'
 import type { RunState } from '../useRun'
 import SfxToggle from './SfxToggle'
@@ -185,6 +186,7 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
         if (runId) {
           runRef.current = step.run_ref
           setStepRunId(runId)
+          announceFocus(step) // WO-060D: before the run is followed, so the focus resets with it
           onRun(runId)
         } else if (step.action === 'twist_toggles') {
           playSound(TWIST_SOUND, mutedRef.current)

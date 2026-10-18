@@ -1487,6 +1487,112 @@ button.link:hover {
 }
 /* --- WO-086 end --- */
 
+/* --- WO-060D begin: focus one case --------------------------------------------------- */
+/* The mode badge is fixed width: sticky / auto / pinned never moves the header. */
+.focus-btn {
+  width: 104px;
+  text-align: center;
+  white-space: nowrap;
+  border-color: var(--evidence);
+  color: var(--evidence);
+}
+
+.focus-btn.mode-auto {
+  border-color: var(--line-strong);
+  color: var(--text-muted);
+}
+
+.focus-btn.mode-pinned {
+  border-color: var(--assumption);
+  color: var(--assumption);
+}
+
+/* The focus switch (a click) animates opacity only. */
+.case-row {
+  transition: opacity var(--fade-ms) ease;
+}
+
+.case-row.sel::after {
+  content: 'focus';
+  position: absolute;
+  right: 4px;
+  top: 0;
+  font-size: 9px;
+  line-height: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--evidence);
+  pointer-events: none;
+}
+
+/* Key moments: five slots for the focused case and a fixed sixth for everyone else. */
+.key-moments.focused ol {
+  grid-template-columns: repeat(5, minmax(0, 190px)) minmax(0, 300px);
+}
+
+.key-moments .others-slot {
+  grid-column: 6;
+  min-width: 0;
+}
+
+.moment.others {
+  color: var(--text-muted);
+  border: 1px dashed var(--line-strong);
+}
+
+/* The trace line: one line, never wraps (no layout shift); it scrolls to its newest end. */
+.trace {
+  margin: 0;
+  height: 18px;
+  line-height: 18px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  color: var(--text-muted);
+}
+
+.trace::-webkit-scrollbar {
+  display: none;
+}
+
+.trace-label {
+  position: sticky;
+  left: 0;
+  padding-right: 6px;
+  background: var(--surface);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+.trace-part.cur {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.trace-t {
+  color: var(--evidence);
+}
+
+/* One reserved line per step card: the transition that entered it and its row count. */
+.step .entered {
+  margin: 2px 0 0;
+  height: 16px;
+  line-height: 16px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
+.sitrep.focused {
+  box-shadow: inset 3px 0 0 var(--evidence);
+}
+/* --- WO-060D end --- */
+
 /* --- WO-060E begin: quiet the other cases (opacity-only motion; fixed row heights) --- */
 .show-all-btn {
   margin-left: 0;
@@ -1543,20 +1649,5 @@ button.link:hover {
   .case-row.unfolded {
     animation: none;
   }
-}
-/* Key moments with a focus: five slots for the focused case, a fixed sixth for the others
-   (the same rules as WO-060D's; one copy is dropped when the two merge). */
-.key-moments.focused ol {
-  grid-template-columns: repeat(5, minmax(0, 190px)) minmax(0, 300px);
-}
-
-.key-moments .others-slot {
-  grid-column: 6;
-  min-width: 0;
-}
-
-.moment.others {
-  color: var(--text-muted);
-  border: 1px dashed var(--line-strong);
 }
 /* --- WO-060E end --- */

@@ -6,6 +6,9 @@
 // trail of its last 60 fixes, a 60 s velocity leader, and its case colour (benign teal,
 // unknown white, threat amber); the selected case gets a halo and a label. The map never
 // pans by itself unless 'follow selected' is on.
+// WO-060D: with a focused case, 'follow selected' starts on (it pans only when the focused
+// contact leaves the middle of the view) and every other contact is drawn at reduced opacity
+// in its state colour; the responder overlay is untouched.
 // WO-060E: with `quietOthers`, every contact outside the focused case is drawn dimmed, with no
 // label and no leader; the focused one keeps its label, trail, leader and ellipse. The
 // responder overlay and the legend are untouched.
@@ -21,9 +24,10 @@ import type { SensorRangeRow } from '../events' // WO-089
 // --- WO-086 begin ---
 import { ellipseLatLngs, leaderEnd as projectedLeaderEnd } from '../radar'
 // --- WO-086 end ---
-import { QUIET_DIM } from '../quiet' // WO-060E
 
 const CENTER: [number, number] = [33.736, -118.262]
+/** WO-060D: opacity factor for contacts outside the focused case. */
+export const DIM = 0.35
 export const TRAIL_FIXES = 60
 const LEADER_S = 60
 
@@ -49,6 +53,8 @@ interface Props {
   caseLabel?: Record<string, string>
   mapStyle?: MapStyle
   tickS?: number
+  /** WO-060D: draw contacts outside the focused case at reduced opacity. */
+  dimOthers?: boolean
   // --- WO-060E begin ---
   /** Draw contacts outside the focused case dimmed and unlabelled. */
   quietOthers?: boolean
@@ -150,6 +156,7 @@ const ContactLayer = memo(function ContactLayer({
   tickS,
   onSelect,
   projected = false, // WO-086
+  dim = false, // WO-060D
   quiet = false, // WO-060E
 }: {
   c: ContactView
@@ -160,6 +167,8 @@ const ContactLayer = memo(function ContactLayer({
   onSelect(id: string): void
   /** WO-086: draw WO-084's 60 s projection ellipse for this contact. */
   projected?: boolean
+  /** WO-060D: not the focused case: reduced opacity, still in its state colour. */
+  dim?: boolean
   /** WO-060E: outside the focused case: dimmed, no label, no leader. */
   quiet?: boolean
 }) {
@@ -169,11 +178,12 @@ const ContactLayer = memo(function ContactLayer({
     if (el) {
       el.setAttribute('data-testid', 'contact-marker')
       el.setAttribute('data-contact', c.contact_id)
+      el.setAttribute('data-dim', dim ? '1' : '0') // WO-060D
       el.setAttribute('data-quiet', quiet ? '1' : '0') // WO-060E
     }
   })
   const color = TONE_COLOR[tone]
-  const q = quiet ? QUIET_DIM : 1 // WO-060E
+  const k = dim || quiet ? DIM : 1 // WO-060D; WO-060E quiet contacts are dimmed the same
   const trail = c.track.slice(-TRAIL_FIXES)
   const third = Math.max(1, Math.floor(trail.length / 3))
   const segs = [trail.slice(0, third + 1), trail.slice(third, 2 * third + 1), trail.slice(2 * third)]
@@ -202,17 +212,17 @@ const ContactLayer = memo(function ContactLayer({
             positions={s}
             interactive={false}
             className="contact-trail"
-            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] * q }}
+            pathOptions={{ color, weight: selected ? 2.5 : 1.5, opacity: [0.18, 0.4, 0.75][i] * k }}
           />
         ) : null,
       )}
-      {lead && !quiet /* WO-060E */ && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9, dashArray: '2 4' }} />}
+      {lead && !quiet /* WO-060E */ && <Polyline positions={[pos, lead]} interactive={false} className="velocity-leader" pathOptions={{ color, weight: 1.5, opacity: 0.9 * k, dashArray: '2 4' }} />}
       {selected && <CircleMarker center={pos} radius={15} interactive={false} className="halo" pathOptions={{ color, weight: 1.5, opacity: 0.9, fillOpacity: 0.08 }} />}
       <CircleMarker
         ref={ref}
         center={pos}
         radius={selected ? 7 : 5}
-        pathOptions={{ color: '#06121c', weight: 1.5, opacity: q, fillColor: color, fillOpacity: q }}
+        pathOptions={{ color: '#06121c', weight: 1.5, opacity: k, fillColor: color, fillOpacity: k }}
         eventHandlers={{ click: () => onSelect(c.contact_id) }}
       >
         {!quiet /* WO-060E: no label outside the focused case */ && (
@@ -281,10 +291,11 @@ export default function HarborMap({
   caseLabel = {},
   mapStyle = 'radar',
   tickS = 2,
+  dimOthers = false, // WO-060D
   quietOthers = false, // WO-060E
 }: Props) {
   const [legend, setLegend] = useState(false)
-  const [follow, setFollow] = useState(false)
+  const [follow, setFollow] = useState(true) // WO-060D: the focused contact is followed by default
   const features = harbor?.features ?? []
   const zones = useMemo(() => features.filter((f) => f.properties.kind === 'zone'), [features])
   const assets = useMemo(() => features.filter((f) => f.properties.kind === 'asset'), [features])
@@ -390,6 +401,7 @@ export default function HarborMap({
             tickS={tickS}
             onSelect={onSelect}
             projected={c.contact_id === projectedId} // WO-086
+            dim={dimOthers && !isSel(c.contact_id)} // WO-060D
             quiet={quietOthers && !isSel(c.contact_id)} // WO-060E
           />
         ))}

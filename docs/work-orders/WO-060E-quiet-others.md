@@ -18,7 +18,7 @@ The screen shows one case; `others · n` opens the rest; `show all` reveals ever
 6. **Presenter mode and the recorder** (`?presenter=1`) default to the same focused-only screen; the `show all` control is not drawn there.
 7. **No layout shift.** The cases panel keeps its fixed 196 px height; the `others` row has the case row's 32 px height; unfolding animates opacity only.
 
-Focus: until WO-060D's focus policy merges, `web/src/quiet.ts` carries a minimal one in a marked block — pinned on click, else sticky: the first case that reaches a rung or a handoff (the paged case); before that the first case past ASK that is still open; else the first detected. WO-060D's `focusedCase` supersedes it on merge; everything above keys off whichever case is focused.
+Focus: the screen uses WO-060D's focus policy (`web/src/focus.ts` `focusedCase`: sticky by default, pinned on click, auto on request); this branch merges `wo/060d-focus-one-case`. `web/src/quiet.ts` keeps a minimal fallback (`quietFocus`, a marked block: the first case that reaches a rung or a handoff, else the first open case past ASK, else the first detected), exercised by the unit test only. Everything above keys off whichever case is focused. WO-060D's `focus: <mode>` badge stays in the cases header next to `show all`.
 
 Display only: no stream schema change, no ladder/guard/threshold/sim change, no caption wording change, no model call.
 
