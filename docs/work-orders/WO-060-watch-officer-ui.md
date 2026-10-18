@@ -175,3 +175,62 @@ Tokens: `web/src/theme.css` is the only file with colours, type sizes and motion
 Files: `web/src/cases.ts` (case model), `web/src/theme.css`, `web/src/components/{CaseList,CaseView,GlobalStrip,VirtualList}.tsx`; `HarborMap`, `RungIndicator`, `ApprovalButton`, `ScenarioPicker`, `App.tsx`, `useRun.ts`, `index.css` reworked (the `WO-062P`, `WO-088`, `WO-089` blocks intact and mounted); `ContactCard`, `ContactList`, `EvidenceLedger`, `StateTimeline` removed (replaced by the case view). `presenter.ts` spotlight `evidence-ledger` now points at the case view. `scripts/readme_shots.py` writes the three new screenshots. Tests: `tests/e2e/test_design_pass.py`, `tests/test_ui_tokens.py`.
 
 Event model note: the batch source streams a re-acquired id's inherited row copies at their original tick under the new id, before that id is observed; the case fold skips rows of not-yet-seen ids (and rows older than an id's first fix), so a lineage holds each row once.
+
+## WO-060D: focus one case (owner directive 2026-10-17 18:03 PDT)
+
+> "When I run a scenario I want multiple agents to be out there but only 1 should be working
+> and going through the scenario so everything is clear and we can trace it from start to
+> finish." Every case keeps running concurrently; the fix is organisation, not serialisation.
+
+**Focus policy** (`web/src/focus.ts`, pure, display only). Three modes on the cases badge
+(`[data-testid=focus-mode]`, fixed width):
+
+- `sticky` (default): the first case that passes ASK (enters INVESTIGATING or a ladder state)
+  becomes the focus and stays until the run ends or the user clicks another case; before any
+  case passes ASK the focus is the first detected case. It never switches on its own when a
+  more severe case appears. Refinement found on S05: an investigation that ends benign without a
+  rung (RESOLVED_BENIGN, CLEARED_AT_ASK, LOST_VEHICLE) is a side story and stops counting (S05
+  opens and clears c-0001 in one tick before the hero is asked). A case that reached a rung or a
+  handoff is locked; a re-acquired id escalates later than anything chosen, so it never steals.
+- `auto`: the pre-WO-060D behaviour (the most severe case, re-chosen on every update).
+- `pinned`: the user clicked a case row (or a moment chip, a map marker, a SITREP citation).
+  The badge returns a pinned focus to sticky; from sticky it toggles to auto.
+
+**Everything narrative follows the focus**: the NOW line; KEY MOMENTS (the focused case's
+moments oldest first in five fixed slots, every other case in one fixed trailing chip,
+'others · 1 holding · 2 resolved benign'); the case view; the SITREP drawer (the focused
+case's SITREPs first); the map (the focused lineage at full emphasis, `follow selected` on by
+default, every other contact at 0.35 opacity in its state colour; the responder overlay
+untouched). The cases list keeps every concurrent case, sorted by severity, the focused row
+marked (`data-focused=1`, a 'focus' tag).
+
+**Trace from start to finish**: a one-line `trace` at the top of the case view
+(`[data-testid=case-trace]`, `data-last-state`): every state of every id of the case in
+stream order with sim times, a re-acquired id marked `⟲ c-0004`, repeated after-handoff
+states shown once; it never wraps and scrolls to its newest end. Each step card has one
+reserved line (`[data-testid=step-entered]`): the transition that entered it
+(`WATCHING → ASKING · probe_result`) and its evidence row count. Built from the transitions
+already streamed; no stream schema change.
+
+**Presenter**: a step may set `focus: first_escalation | first_detected | <contact id>` in
+`docs/demo-script.yaml` (validated in `soundings/demo/script.py`; default first_escalation;
+Harbor Night sets it explicitly). PresenterMode dispatches `soundings:presenter-focus` before
+following the step's run; App resets the focus to sticky under that policy. Captions unchanged.
+
+### Exit tests (WO-060D)
+
+1. `tests/test_focus_policy.py` (node strips the TypeScript types of `web/src/focus.ts`;
+   `tests/js/focus_check.mjs`): sticky holds through a more severe later case; pinned holds;
+   auto picks the most severe as before; first_escalation picks the first case past ASK; a
+   benign side story does not hold the focus; key moments are the focused case's in order with
+   one 'others' chip; the trace runs DETECTED → … → HANDED_OFF with times; presenter policies;
+   `DemoStep.focus` validation.
+2. `tests/e2e/test_focus_one_case.py` (opt-in, `SOUNDINGS_E2E=1`), S05 seed 11 at 20x: the
+   badge starts `sticky`; the case past ASK that climbs is the focus and the in-page 50 ms
+   sampler never sees it move through HOLDING and the handoff while other cases fill the list;
+   other contacts are dimmed; every done step card shows its entering transition and row count;
+   pin another case and return; the trace ends with HANDED_OFF (→ WATCH_AFTER_HANDOFF when the
+   watch starts in the same tick); CLS while rows stream < 0.05. Screenshots
+   `artifacts/focus-sticky.png`, `artifacts/focus-pinned.png`.
+3. The existing e2e smokes, `tests/test_ui_tokens.py` and `scripts/readme_shots.py` (it clicks
+   a row, so pinned mode) stay green; `make check` green.

@@ -101,6 +101,10 @@ def _check_catalog_id(ref: str) -> str:
     return ref
 
 
+# --- WO-060D begin: the presenter's focus per step ---
+FOCUS_POLICIES = frozenset({"first_escalation", "first_detected"})
+_CONTACT_ID = re.compile(r"^c-\d{4,}$")
+# --- WO-060D end ---
 # --- WO-062C begin: the demo's own scripted plan filing (stands in for a judge's phone) ---
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _UTC_OFFSET = re.compile(r"^[+-](0\d|1[0-4]):[0-5]\d$")
@@ -231,6 +235,20 @@ class DemoStep(StrictModel):
     auto_file: AutoFile | None = None
     """The demo's scripted plan filing (presenter mode only; stands in for the phone)."""
     # --- WO-062C end ---
+    # --- WO-060D begin ---
+    focus: StrictStr | None = None
+    """Which case the screen follows when this step's run starts (presenter mode only):
+    ``first_escalation`` (the default), ``first_detected`` or a contact id (``c-0001``)."""
+    # --- WO-060D end ---
+
+    @field_validator("focus")
+    @classmethod
+    def _focus(cls, value: str | None) -> str | None:
+        if value is not None and value not in FOCUS_POLICIES and not _CONTACT_ID.match(value):
+            raise ValueError(
+                f"focus {value!r} is not first_escalation, first_detected or a contact id"
+            )
+        return value
 
     @field_validator("t")
     @classmethod

@@ -5,9 +5,11 @@ interface Props {
   sitreps: (SitrepPayload & { tick: number })[]
   onClose(): void
   onCite(contactId: string, rowId: string): void
+  /** WO-060D: the focused case's contact ids; its SITREPs are listed first. */
+  focusIds?: Set<string>
 }
 
-export default function SitrepDrawer({ open, sitreps, onClose, onCite }: Props) {
+export default function SitrepDrawer({ open, sitreps, onClose, onCite, focusIds }: Props) {
   if (!open) return null
   return (
     <aside className="drawer" data-testid="sitrep-drawer" aria-label="SITREP">
@@ -23,8 +25,16 @@ export default function SitrepDrawer({ open, sitreps, onClose, onCite }: Props) 
         sitreps
           .slice()
           .reverse()
+          // --- WO-060D: the focused case first (stable within each group) ---
+          .sort((a, b) => Number(Boolean(focusIds?.has(b.contact_id))) - Number(Boolean(focusIds?.has(a.contact_id))))
           .map((s) => (
-            <article key={`${s.contact_id}-${s.version}`} className="sitrep" data-testid="sitrep-entry" data-kind={s.kind}>
+            <article
+              key={`${s.contact_id}-${s.version}`}
+              className={`sitrep${focusIds?.has(s.contact_id) ? ' focused' : ''}`}
+              data-testid="sitrep-entry"
+              data-kind={s.kind}
+              data-focused={focusIds?.has(s.contact_id) ? '1' : '0'}
+            >
               <h4>
                 {s.kind === 'lost_vehicle' ? 'LOST_VEHICLE notice' : 'SITREP'} · {s.contact_id} · v{s.version} · tick {s.tick}{' '}
                 <span className="muted small">writer: {s.writer}</span>

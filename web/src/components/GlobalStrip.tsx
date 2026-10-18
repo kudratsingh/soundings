@@ -23,14 +23,18 @@ interface MomentsProps {
   caseOf(contactId: string): string
   tickS: number
   onSelect(caseId: string): void
+  /** WO-060D: one trailing chip for every other case ('others · 3 cleared at ask'). When set,
+   * `moments` are the focused case's, shown oldest first so the story reads left to right. */
+  others?: string
 }
 
 export const KEY_MOMENTS_SHOWN = 5
 
-export function KeyMoments({ moments, caseOf, tickS, onSelect }: MomentsProps) {
-  const last = moments.slice(-KEY_MOMENTS_SHOWN).reverse()
+export function KeyMoments({ moments, caseOf, tickS, onSelect, others }: MomentsProps) {
+  const focused = others !== undefined // WO-060D
+  const last = focused ? moments.slice(-KEY_MOMENTS_SHOWN) : moments.slice(-KEY_MOMENTS_SHOWN).reverse()
   return (
-    <div className="key-moments" data-testid="key-moments" aria-label="key moments">
+    <div className={`key-moments${focused ? ' focused' : ''}`} data-testid="key-moments" aria-label="key moments">
       <span className="now-label">Key moments</span>
       <ol>
         {last.length === 0 && <li className="label">none yet</li>}
@@ -45,6 +49,17 @@ export function KeyMoments({ moments, caseOf, tickS, onSelect }: MomentsProps) {
             </li>
           )
         })}
+        {/* --- WO-060D begin: a fixed sixth slot; its text changes in place --- */}
+        {focused && (
+          <li className="others-slot">
+            {others ? (
+              <span className="moment others num" data-testid="moments-others" title={others}>
+                {others}
+              </span>
+            ) : null}
+          </li>
+        )}
+        {/* --- WO-060D end --- */}
       </ol>
     </div>
   )
