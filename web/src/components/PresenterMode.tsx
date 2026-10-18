@@ -6,12 +6,18 @@
 // pause_for_click is set. Without the parameter it only follows the run for sound (muted
 // by default) and shows a small mute toggle. Presenting never sets a rung.
 
+import type { RefObject } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PresenterLogKind, PresenterScript, PresenterStep } from '../presenter'
 import { END_CARD, LADDER_CHIPS, fetchDemoScript, findSpotlight, isPresenter, logPresenter, startStepRun } from '../presenter'
 import { TWIST_SOUND, loadMuted, playSound, saveMuted, useSfx } from '../sfx'
 import type { RunState } from '../useRun'
 import SfxToggle from './SfxToggle'
+// --- WO-062C begin ---
+import type { AutoFile } from '../presenter'
+import { AUTO_NOTES, autoFileEnabled, filePlan, logAuto } from '../presenter'
+import EvidenceCard from './EvidenceCard'
+// --- WO-062C end ---
 import '../presenter.css'
 
 interface Props {
@@ -63,6 +69,79 @@ async function applyStep(step: PresenterStep, previousRunRef: string | null): Pr
   return null
 }
 
+// --- WO-062C begin: the demo's scripted plan filing (stands in for a judge's phone) ---
+const ACCEPT_RETRY_MS = 250
+const ACCEPT_GIVE_UP_MS = 4000
+
+/** File the in-force jobs now, the plan at `at_s`, and click Accept on its proposal card at
+ * `accept_at_s` (seconds after the step landed). Returns a cancel function. Every filing
+ * goes through POST /api/plans like the /registry form; the accept is the card's own
+ * button, so the operator-accepts path is the one a person uses. */
+function runAutoFile(index: number, auto: AutoFile): () => void {
+  const timers: number[] = []
+  let alive = true
+  const later = (ms: number, fn: () => void) => timers.push(window.setTimeout(() => alive && fn(), ms))
+  if (auto.in_force.length) {
+    ;(async () => {
+      let ok = true
+      for (const body of auto.in_force) ok = (await filePlan(body)) && ok
+      if (alive && ok) logAuto(index, AUTO_NOTES.jobsFiled)
+    })().catch(() => undefined)
+  }
+  later(auto.at_s * 1000, () => {
+    filePlan(auto.plan)
+      .then((ok) => {
+        if (alive && ok) logAuto(index, AUTO_NOTES.planFiled)
+      })
+      .catch(() => undefined)
+  })
+  const planId = String(auto.plan.plan_id)
+  const tryAccept = (waited: number) => {
+    const card = document.querySelector<HTMLElement>('[data-testid=proposal-card]')
+    const accept = card?.querySelector<HTMLButtonElement>('[data-testid=proposal-accept]')
+    if (card && accept && card.innerText.includes(planId)) {
+      accept.click()
+      logAuto(index, AUTO_NOTES.proposalAccepted)
+      return
+    }
+    if (waited < ACCEPT_GIVE_UP_MS) later(ACCEPT_RETRY_MS, () => tryAccept(waited + ACCEPT_RETRY_MS))
+    else console.info(`presenter: step ${index + 1}: no proposal card for ${planId} to accept`)
+  }
+  later(auto.accept_at_s * 1000, () => tryAccept(0))
+  return () => {
+    alive = false
+    for (const t of timers) window.clearTimeout(t)
+  }
+}
+
+/** Keep `--presenter-bar-h` on <html> at the caption bar's tallest measured height, so the
+ * rail ends above the bar (the ledger strip and the approval card stay in frame). */
+function useBarHeight(bar: RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    const el = bar.current
+    if (!el) return
+    const root = document.documentElement
+    root.classList.add('presenter-on')
+    let max = 0
+    const measure = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height)
+      if (h > max) {
+        max = h
+        root.style.setProperty('--presenter-bar-h', `${h}px`)
+      }
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      root.classList.remove('presenter-on')
+      root.style.removeProperty('--presenter-bar-h')
+    }
+  }, [bar])
+}
+// --- WO-062C end ---
+
 function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: boolean; onToggleMute: () => void }) {
   const [script, setScript] = useState<PresenterScript | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
@@ -76,6 +155,10 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
   useEffect(() => {
     mutedRef.current = muted
   }, [muted])
+  // --- WO-062C begin ---
+  const barRef = useRef<HTMLDivElement | null>(null)
+  useBarHeight(barRef)
+  // --- WO-062C end ---
 
   useEffect(() => {
     fetchDemoScript().then(setScript).catch((e: unknown) => setProblem(String(e)))
@@ -108,6 +191,14 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
         if (gen === generation.current) setProblem(String(e))
       })
   }, [script, nav.nonce])
+
+  // --- WO-062C begin: a step's scripted filing runs from its landing; leaving cancels it ---
+  useEffect(() => {
+    const auto = step?.auto_file
+    if (!step || !auto || !autoFileEnabled()) return
+    return runAutoFile(step.index, auto)
+  }, [script, nav.nonce])
+  // --- WO-062C end ---
 
   // Highlight the spotlight element (it may render a moment after the step lands).
   useEffect(() => {
@@ -196,7 +287,11 @@ function PresenterOverlay({ run, onRun, muted, onToggleMute }: Props & { muted: 
           <span className="presenter-endcard-repo">{END_CARD.repo}</span>
         </div>
       )}
+      {/* --- WO-062C begin --- */}
+      {step?.action === 'rung_ledger_eval' && <EvidenceCard ledger={run.ledger} />}
+      {/* --- WO-062C end --- */}
       <div
+        ref={barRef /* WO-062C */}
         className="presenter-bar"
         data-testid="presenter-bar"
         data-step={nav.index}

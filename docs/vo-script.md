@@ -29,4 +29,11 @@ so the pacing can be checked before the real take. Merge a take with
 - Busy Tuesday's glider line is the WO-088 S02 beat. The Busy Tuesday shot runs S01 until the
   shot list switches to BT-01 (WO-080 TODO in the yaml), so the glider search is not on screen
   yet: keep the line only if that shot shows it, otherwise drop its two sentences.
+- WO-062C: in the recording nobody holds a phone, so the demo files the Busy Tuesday plan
+  itself 8 s into the shot (`auto_file` in `docs/demo-script.yaml`; the presenter log reads
+  "auto: plan filed (stands in for the phone)") and accepts the proposed slot at +20 s ("auto:
+  proposal accepted"). The line's "files its plan from a phone" describes the stage version,
+  where a judge scans the QR code; for the recorded take, "a crew files its plan" is enough.
+  At 2:15 the evidence card above the caption shows this run's ledger, the red blunt-policy
+  counter and the three-policy eval table, every number a stress-test estimate.
 - Speak the marks, not the clock: each line starts on its cut and ends before the next one.

@@ -37,3 +37,31 @@ None. The recording presses Space and clicks the caption or the judge panel's Cl
 
 ## Done
 PR: · Merged commit: · Test summary: · STATE.md updated:
+
+---
+
+# WO-062C — video fixes (evidence card, caption bar clearance, scripted plan filing)
+
+Phase: 6/8 · Branch: `wo/062c-video-fixes` (from `origin/wo/062b-recording`; PR #77 was not on `main` yet) · Worktree: `../soundings-worktrees/wo-062c-video-fixes` · Owner: demo seat (agent); coordinator Kudrat
+Why: the coordinator's frame sample of the WO-062B take found (1) shot 6 (2:15, `rung_ledger_eval`) still showed the Harbor Night run with the ledger strip and the red blunt counter under the caption bar and no eval table, and (2) shot 3 (0:30, Busy Tuesday) never showed a plan filed, a proposal or an accept, because nobody holds a phone in a recording.
+
+## Scope (as built)
+- **A. Evidence card.** On a step whose action is `rung_ledger_eval`, presenter mode shows `EvidenceCard` above the caption bar, over the map: left, the current run's rung ledger (the same `ledger` events the rail uses) and the red "berth closures under the blunt policy" counter; right, the three-policy table from `GET /api/eval/summary` (new, read-only: `soundings/api_routes/eval_summary.py`, rows soundings / bang / human_queue × at_or_below_ask_pct, missed_threats, false_shutdowns, median_s_seen_to_handled, interruptions_per_hour, shutdown_minutes from `artifacts/eval/report.json`; 404 "run make eval" when absent, and the card then says "run make eval"). Every number is labelled "stress-test estimate"; colours are `theme.css` tokens; nothing else on the screen moves.
+- **B. Caption bar clearance.** Presenter mode measures the caption bar (ResizeObserver) and sets `--presenter-bar-h` (the tallest height seen, so it never jitters back) plus `presenter-on` on `<html>`; `.presenter-on .rail` pads its bottom by it, so the ledger strip, the rungs and the approval card end above the bar in 1920×1080 frames.
+- **C. Scripted plan filing.** A catalog step may declare `auto_file: {at_s, accept_after_s=12, day_offset=1, utc_offset, in_force: [...], plan: {...}}` (additive; `DemoStep.auto_file`, validated: strict types, HH:MM times, end after start, both depth ends or neither, distinct plan ids, only on a catalog step, accept inside the shot). `GET /api/demo-script` resolves the local times to `POST /api/plans` bodies for today + `day_offset`. On landing, presenter mode files the `in_force` jobs (S01's P-2026-1017-001 and a second job in another depth band, so they do not conflict with each other), files `plan` at `at_s` (P-PHONE-1, spanning both bands: three concurrent plans in a zone of capacity 2, so WO-082 returns an OPTIMAL proposal that moves only P-PHONE-1), and clicks the proposal card's own Accept at `at_s + accept_after_s`. The presenter log gets `auto` entries with fixed notes ("auto: in-force jobs filed (scripted)", "auto: plan filed (stands in for the phone)", "auto: proposal accepted"). `&auto=0` turns it off on stage so a judge files from the phone. The recording files into a throwaway registry (`SOUNDINGS_DB` in a temp dir). Caption wording unchanged; `docs/vo-script.md` notes that the recording's filing stands in for the phone.
+- **D. Re-record** with `SOUNDINGS_E2E=1 make demo-video`; frames at 0:45, 0:52, 2:20, 2:30 checked by pixel regions (tesseract absent).
+- **E. Tests:** `tests/test_eval_summary.py`, `tests/test_demo_auto_file.py` (both light, `tests-core`; no HEAVY list change).
+
+## Exit tests
+- [x] `/api/eval/summary` present / absent / unreadable / read-only (`tests/test_eval_summary.py`).
+- [x] `auto_file` additive and rejected when malformed (15 cases), bodies resolved for today + offset, filing them conflicts the plan and the proposal is OPTIMAL moving only P-PHONE-1, presenter log keeps the two auto entries at +8 s and +20 s (`tests/test_demo_auto_file.py`).
+- [x] Re-recorded video: proposal card at 0:45, gone after the accept at 0:52; evidence card with numbers and the rail strip visible at 2:20 and 2:30.
+
+## Model calls
+None. Paid run needed? No.
+
+## Rungs touched
+None. The card displays the ledger and the eval report; the scripted filing goes through the registry endpoint and the proposal card's Accept (an operator action on a plan, never a rung, a run or a contact).
+
+## Hard rules exercised
+§2.2 (no model output; the filing is the demo's own scripted data, labelled in the log), §2.3 (no paid runs; replay only), §2.4 (throwaway registry per take), §2.6 (every card number labelled stress-test estimate; the blunt counter labelled counterfactual).
