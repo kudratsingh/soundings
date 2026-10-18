@@ -9,11 +9,13 @@ interface Props {
   running?: boolean
   /** REH: the catalog run on screen; the fields follow it when a new run starts. */
   current?: { key: string; scenario: string; seed: string; speed: string } | null
+  /** WO-060C: a start is in flight; the button is inert (aria-busy) until its first event. */
+  starting?: boolean
 }
 
 const SPEEDS = ['1', '5', '20', '50', '100', '0']
 
-export default function ScenarioPicker({ scenarios, initial, onStart, running = false, current = null }: Props) {
+export default function ScenarioPicker({ scenarios, initial, onStart, running = false, current = null, starting = false }: Props) {
   const [scenario, setScenario] = useState(initial.scenario || 'S02')
   const [seed, setSeed] = useState(initial.seed)
   const [speed, setSpeed] = useState(initial.speed || '20')
@@ -30,6 +32,7 @@ export default function ScenarioPicker({ scenarios, initial, onStart, running = 
       className="picker"
       onSubmit={(e) => {
         e.preventDefault()
+        if (starting) return // WO-060C: one start at a time
         onStart(scenario, seed === '' ? null : Number(seed), Number(speed))
       }}
     >
@@ -48,8 +51,8 @@ export default function ScenarioPicker({ scenarios, initial, onStart, running = 
           </option>
         ))}
       </select>
-      <button type="submit" data-testid="start-run">
-        {running ? 'Reset' : 'Start'}
+      <button type="submit" data-testid="start-run" aria-busy={starting} data-starting={starting ? '1' : '0'}>
+        {starting ? 'starting…' : running ? 'Reset' : 'Start'}
       </button>
     </form>
   )

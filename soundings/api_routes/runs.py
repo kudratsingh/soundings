@@ -32,6 +32,9 @@ class StartRunBody(BaseModel):
     toggles: list[ToggleName] = Field(default_factory=list)
     use_llm: bool = False
     source: str = "batch"
+    # --- WO-060C begin: the run this one replaces is stopped first (one run on stage) ---
+    replaces: str | None = None
+    # --- WO-060C end ---
 
 
 @router.post("/api/runs")
@@ -47,6 +50,7 @@ def start_run(body: StartRunBody) -> dict[str, Any]:
             use_llm=body.use_llm,
             source=body.source,
             responder=True,  # WO-088D: UI runs have the harbor's real responder
+            replaces=body.replaces,  # WO-060C: unknown or finished ids change nothing
         )
     except UnknownScenarioError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -58,6 +62,21 @@ def start_run(body: StartRunBody) -> dict[str, Any]:
 @router.get("/api/runs")
 def list_runs() -> list[dict[str, object]]:
     return [h.summary() for h in get_engine().list()]
+
+
+# --- WO-060C begin: stop a run (Reset) ---
+@router.delete("/api/runs/{run_id}")
+def cancel_run(run_id: str) -> dict[str, object]:
+    """Stop an unfinished run: its stream ends with ``run_finished`` (``reason:
+    cancelled``). A run that already finished is returned as it is (idempotent)."""
+    try:
+        handle = get_engine().cancel(run_id)
+    except UnknownRun as exc:
+        raise HTTPException(status_code=404, detail=f"unknown run {run_id!r}") from exc
+    return handle.summary()
+
+
+# --- WO-060C end ---
 
 
 @router.websocket("/ws/runs/{run_id}")
