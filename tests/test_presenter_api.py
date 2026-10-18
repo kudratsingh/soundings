@@ -44,7 +44,7 @@ def test_demo_script_json_matches_yaml(client: TestClient) -> None:
     assert twist["action"] == "twist_toggles" and twist["run_ref"] == "S05"
     assert twist["toggles"] == ["network_down", "approver_unreachable"]
     assert body["actions"]["end_card"] is None
-    assert body["actions"]["propose_slot"] == "WO-082"
+    assert body["actions"]["propose_slot"] is None  # WO-082 merged 2026-10-17
     assert body["steps"][3]["pause_for_click"] is True
 
 
@@ -63,10 +63,7 @@ def test_presenter_log_round_trip(client: TestClient) -> None:
     assert a["t_s"] == 0.0 and a["t_s"] <= b["t_s"] <= c["t_s"]
     assert datetime.fromisoformat(a["wall"]).tzinfo is not None
     assert a["pending"] == []
-    assert b["pending"] == [  # file_plan_qr shipped with WO-061
-        "action propose_slot pending WO-082",
-        "action vessel_advisory pending WO-083",
-    ]
+    assert b["pending"] == []  # WO-061, WO-082 and WO-083 all merged
     assert client.delete("/api/presenter-log").json() == {"ok": True}
     assert client.get("/api/presenter-log").json() == []
 
